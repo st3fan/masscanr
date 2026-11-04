@@ -1,0 +1,2 @@
+# masscanr
+Distributed Mass Scan
