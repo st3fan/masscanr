@@ -155,7 +155,9 @@ func (s *SSH) Scan(ctx context.Context, w cloud.Worker, args []string, out io.Wr
 		}
 		parsed <- err
 	}()
-	err := s.command(ctx, w, "exec masscan "+QuoteArgs(args), output, writer)
+	// Debian's coreutils stdbuf makes list output arrive line by line over
+	// SSH instead of waiting for libc's redirected-stdout buffer to fill.
+	err := s.command(ctx, w, "exec stdbuf -oL masscan "+QuoteArgs(args), output, writer)
 	writer.Close()
 	parseErr := <-parsed
 	if output.err != nil {

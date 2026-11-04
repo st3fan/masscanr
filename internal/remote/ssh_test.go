@@ -108,7 +108,7 @@ func TestRootPasswordPrepareAndSeparateStreams(t *testing.T) {
 			fmt.Fprint(ch, "0\n")
 		case strings.Contains(command, "apt-get"):
 			fmt.Fprint(ch, "Masscan version 1.3.2 (fixture)\n")
-		case strings.HasPrefix(command, "exec masscan "):
+		case strings.HasPrefix(command, "exec stdbuf -oL masscan "):
 			if !strings.Contains(command, "'1/2'") {
 				t.Error(command)
 			}
