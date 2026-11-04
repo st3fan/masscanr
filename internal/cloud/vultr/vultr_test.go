@@ -33,6 +33,8 @@ func fixture(t *testing.T, handler http.HandlerFunc) *Client {
 func TestValidateAndCreate(t *testing.T) {
 	c := fixture(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/account":
+			fmt.Fprint(w, `{}`)
 		case "/regions/atl/availability":
 			fmt.Fprint(w, `{"available_plans":["vc2-1c-1gb"]}`)
 		case "/os":
@@ -69,6 +71,19 @@ func TestValidateAndCreate(t *testing.T) {
 	data, _ := json.Marshal(worker)
 	if strings.Contains(string(data), "never-log-me") {
 		t.Fatal("password serialized")
+	}
+}
+
+func TestInvalidCredentialsStopBeforeProvisioning(t *testing.T) {
+	c := fixture(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/account" || r.Method != "GET" {
+			t.Error("proceeded past credential validation", r.Method, r.URL.Path)
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+	})
+	err := c.Validate(context.Background(), cloud.Spec{RunID: testRun})
+	if err == nil || !strings.Contains(err.Error(), "authentication") {
+		t.Fatal(err)
 	}
 }
 
