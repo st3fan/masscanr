@@ -33,13 +33,15 @@ func fixture(t *testing.T, handler http.HandlerFunc) *Client {
 func TestValidateAndCreate(t *testing.T) {
 	c := fixture(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/account":
-			fmt.Fprint(w, `{}`)
 		case "/regions/atl/availability":
 			fmt.Fprint(w, `{"available_plans":["vc2-1c-1gb"]}`)
 		case "/os":
 			fmt.Fprint(w, `{"os":[{"id":999,"name":"Debian 13 x64 (trixie)","arch":"x64","family":"debian"}]}`)
 		case "/instances":
+			if r.Method == "GET" {
+				fmt.Fprint(w, `{"instances":[]}`)
+				return
+			}
 			if r.Method != "POST" {
 				t.Fatal(r.Method)
 			}
@@ -76,7 +78,7 @@ func TestValidateAndCreate(t *testing.T) {
 
 func TestInvalidCredentialsStopBeforeProvisioning(t *testing.T) {
 	c := fixture(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/account" || r.Method != "GET" {
+		if r.URL.Path != "/instances" || r.Method != "GET" {
 			t.Error("proceeded past credential validation", r.Method, r.URL.Path)
 		}
 		w.WriteHeader(http.StatusUnauthorized)

@@ -69,8 +69,9 @@ func (c *Client) Validate(ctx context.Context, spec cloud.Spec) error {
 		return err
 	}
 	// OS and region endpoints are public: they do not validate the API key.
-	// Check an authenticated read before attempting any paid provisioning.
-	if err := c.request(ctx, "GET", "/account", nil, nil); err != nil {
+	// Use the same authenticated listing permission required by cleanup;
+	// no additional account/billing permission is necessary.
+	if _, err := c.List(ctx, spec.RunID); err != nil {
 		return fmt.Errorf("Vultr authentication: %w", err)
 	}
 	var availability struct {
