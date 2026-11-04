@@ -178,7 +178,7 @@ func (c Config) Args(shard int, seed uint64) ([]string, error) {
 	if shard < 1 || shard > c.Shards {
 		return nil, fmt.Errorf("shard %d is outside 1..%d", shard, c.Shards)
 	}
-	args := []string{"--conf", "/dev/null", "--ports", c.PortSpec(), "--rate", strconv.FormatUint(c.Rate, 10), "--seed", strconv.FormatUint(seed, 10), "--shards", fmt.Sprintf("%d/%d", shard, c.Shards), "--wait", "10", "--output-format", "list", "--output-filename", "-", "--open-only"}
+	args := []string{"--conf", "/dev/null", "--ports", c.PortSpec(), "--rate", strconv.FormatUint(c.Rate, 10), "--seed", strconv.FormatUint(seed, 10), "--shards", fmt.Sprintf("%d/%d", shard, c.Shards), "--wait", "10", "--output-format", "list", "--output-filename", "-", "--open-only", "--interactive=false"}
 	for _, p := range c.Targets {
 		args = append(args, p.String())
 	}
