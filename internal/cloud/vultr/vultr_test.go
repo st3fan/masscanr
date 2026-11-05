@@ -35,6 +35,8 @@ func TestValidateAndCreate(t *testing.T) {
 		switch r.URL.Path {
 		case "/regions/atl/availability":
 			fmt.Fprint(w, `{"available_plans":["vc2-1c-1gb"]}`)
+		case "/plans":
+			fmt.Fprint(w, `{"plans":[{"id":"vc2-1c-1gb","type":"vc2","disk":25}]}`)
 		case "/os":
 			fmt.Fprint(w, `{"os":[{"id":999,"name":"Debian 13 x64 (trixie)","arch":"x64","family":"debian"}]}`)
 		case "/instances":

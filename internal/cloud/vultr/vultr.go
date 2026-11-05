@@ -74,14 +74,16 @@ func (c *Client) Validate(ctx context.Context, spec cloud.Spec) error {
 	if _, err := c.List(ctx, spec.RunID); err != nil {
 		return fmt.Errorf("Vultr authentication: %w", err)
 	}
-	var availability struct {
-		Plans []string `json:"available_plans"`
-	}
-	if err := c.request(ctx, "GET", "/regions/"+url.PathEscape(spec.Region)+"/availability?type=vc2", nil, &availability); err != nil {
+	plans, err := c.InstanceTypes(ctx, spec.Region)
+	if err != nil {
 		return err
 	}
-	if !slices.Contains(availability.Plans, spec.InstanceType) {
+	selected := slices.IndexFunc(plans, func(p cloud.InstanceType) bool { return p.ID == spec.InstanceType })
+	if selected < 0 {
 		return fmt.Errorf("instance type %s is unavailable in region %s", spec.InstanceType, spec.Region)
+	}
+	if plans[selected].DiskGB < 1 {
+		return fmt.Errorf("instance type %s has no local boot disk; block-storage boot is not supported", spec.InstanceType)
 	}
 	var systems struct {
 		OS []struct {
@@ -242,7 +244,9 @@ func (c *Client) request(ctx context.Context, method, path string, payload, dest
 		if err != nil {
 			return err
 		}
-		req.Header.Set("Authorization", "Bearer "+c.key)
+		if c.key != "" {
+			req.Header.Set("Authorization", "Bearer "+c.key)
+		}
 		req.Header.Set("Content-Type", "application/json")
 		res, err := c.HTTP.Do(req)
 		if err != nil {
