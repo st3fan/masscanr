@@ -38,6 +38,7 @@ addresses; replace them with your authorized target ranges:
 ./masscanr scan --shards=4 --rate=500000 --region=atl \
   --instance-type=vc2-1c-1gb --output=inventory.list 192.0.2.0/24
 ./masscanr scan --ports=22,80,443,8000-8100 192.0.2.0/24
+./masscanr scan --slug=epag 192.0.2.0/24
 ```
 
 Scan options work before or after CIDRs, following `scan`. Use
@@ -52,11 +53,18 @@ Scanning requires the `scan` subcommand; a bare CIDR is an unknown command.
 | `--instance-type` | `vc2-1c-1gb` | Vultr plan |
 | `--ports`, `-p` | Nmap 7.95 top 100 TCP ports | Comma-separated ports, inclusive ranges, or mixed forms |
 | `--output` | Timestamped `masscanr-*.list` | New local file; `-` sends list output to stdout |
+| `--slug` | Empty | Text inserted before the timestamp in generated output filenames |
 | `--env-file` | `.env` | Local credentials file |
 | `--timeout` | `24h` | Maximum scanning time; cleanup follows |
 | `--cleanup-timeout` | `5m` | Separate deadline for worker deletion |
 | `--no-tui` | `false` | Lifecycle logs instead of the live table |
 | `--version` | | Print version and exit |
+
+For example, `--slug=epag` generates a name such as
+`masscanr-epag-20261105T042952.086607609Z.list`. Omitting the slug preserves
+`masscanr-<timestamp>.list`. Slug text is preserved; path separators and control
+characters are rejected. An explicit `--output` path or `--output=-` takes
+precedence over generated naming.
 
 Port syntax accepts TCP numbers 0–65535, deduplicates overlaps and compacts
 ranges. For example, `--ports=22,80,443,8000-8100` or `-p=1-65535`. IPv6, UDP,
