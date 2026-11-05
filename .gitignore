@@ -27,6 +27,12 @@ go.work.sum
 
 # env file
 .env
+.env.*
+!.env.example
+/masscanr
+*.list
+*.csv
+*.jsonl
 
 # Editor/IDE
 # .idea/
