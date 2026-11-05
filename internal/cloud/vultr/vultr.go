@@ -153,11 +153,7 @@ func (c *Client) List(ctx context.Context, runID string) ([]cloud.Worker, error)
 	for pages := 0; pages < 1000; pages++ {
 		var result struct {
 			Instances []instance `json:"instances"`
-			Meta      struct {
-				Links struct {
-					Next string `json:"next"`
-				} `json:"links"`
-			} `json:"meta"`
+			Meta      pageMeta   `json:"meta"`
 		}
 		if err := c.request(ctx, "GET", path, nil, &result); err != nil {
 			return nil, err
@@ -168,16 +164,13 @@ func (c *Client) List(ctx context.Context, runID string) ([]cloud.Worker, error)
 				workers = append(workers, w)
 			}
 		}
-		if result.Meta.Links.Next == "" {
+		path, err = nextPage(path, result.Meta.Links.Next)
+		if err != nil {
+			return nil, err
+		}
+		if path == "" {
 			return workers, nil
 		}
-		// Vultr next links contain a cursor. Never send credentials to a URL
-		// supplied by the response; retain our endpoint and tag filter.
-		next, err := url.Parse(result.Meta.Links.Next)
-		if err != nil || next.Query().Get("cursor") == "" {
-			return nil, fmt.Errorf("invalid Vultr pagination cursor")
-		}
-		path = "/instances?per_page=100&tag=" + url.QueryEscape(tag) + "&cursor=" + url.QueryEscape(next.Query().Get("cursor"))
 	}
 	return nil, fmt.Errorf("Vultr pagination limit exceeded")
 }

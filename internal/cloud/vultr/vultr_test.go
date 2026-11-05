@@ -133,8 +133,11 @@ func TestListFiltersAndKeepsPaginationOnTrustedEndpoint(t *testing.T) {
 			t.Error(r.URL)
 		}
 		if calls == 1 {
-			fmt.Fprintf(w, `{"instances":[{"id":"owned","label":"masscanr","tags":["masscanr-run-%s"]},{"id":"unrelated","label":"production","tags":["masscanr-run-%s"]}],"meta":{"links":{"next":"https://untrusted.invalid/instances?cursor=next"}}}`, testRun, testRun)
+			fmt.Fprintf(w, `{"instances":[{"id":"owned","label":"masscanr","tags":["masscanr-run-%s"]},{"id":"unrelated","label":"production","tags":["masscanr-run-%s"]}],"meta":{"links":{"next":"worker-next+/=="}}}`, testRun, testRun)
 		} else {
+			if r.URL.Query().Get("cursor") != "worker-next+/==" || r.URL.Query().Get("per_page") != "100" {
+				t.Error(r.URL)
+			}
 			fmt.Fprint(w, `{"instances":[],"meta":{"links":{"next":""}}}`)
 		}
 	})

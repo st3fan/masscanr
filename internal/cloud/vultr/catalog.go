@@ -11,31 +11,6 @@ import (
 	"github.com/st3fan/masscanr/internal/cloud"
 )
 
-type pageMeta struct {
-	Links struct {
-		Next string `json:"next"`
-	} `json:"links"`
-}
-
-// nextCatalogPage uses only the returned cursor, never its host or path.
-func nextCatalogPage(path, next string) (string, error) {
-	if next == "" {
-		return "", nil
-	}
-	u, err := url.Parse(next)
-	if err != nil || u.Query().Get("cursor") == "" {
-		return "", fmt.Errorf("invalid Vultr catalog pagination cursor")
-	}
-	pinned, err := url.Parse(path)
-	if err != nil {
-		return "", err
-	}
-	query := pinned.Query()
-	query.Set("cursor", u.Query().Get("cursor"))
-	pinned.RawQuery = query.Encode()
-	return pinned.String(), nil
-}
-
 func (c *Client) Regions(ctx context.Context) ([]cloud.Region, error) {
 	path := "/regions?per_page=100"
 	var regions []cloud.Region
@@ -56,7 +31,7 @@ func (c *Client) Regions(ctx context.Context) ([]cloud.Region, error) {
 			regions = append(regions, cloud.Region{ID: r.ID, Name: r.City, Country: r.Country, Continent: r.Continent})
 		}
 		var err error
-		path, err = nextCatalogPage(path, response.Meta.Links.Next)
+		path, err = nextPage(path, response.Meta.Links.Next)
 		if err != nil {
 			return nil, err
 		}
@@ -117,7 +92,7 @@ func (c *Client) InstanceTypes(ctx context.Context, region string) ([]cloud.Inst
 				types = append(types, cloud.InstanceType{ID: p.ID, Family: p.Family, CPUType: p.CPUType, CPUVendor: p.CPUVendor, VCPUs: p.VCPUs, MemoryMB: p.MemoryMB, DiskGB: p.DiskGB, DiskCount: p.DiskCount, DiskType: p.DiskType, StorageType: p.StorageType})
 			}
 		}
-		path, err = nextCatalogPage(path, response.Meta.Links.Next)
+		path, err = nextPage(path, response.Meta.Links.Next)
 		if err != nil {
 			return nil, err
 		}
