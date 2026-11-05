@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/st3fan/masscanr/internal/cloud"
 	"github.com/st3fan/masscanr/internal/cloud/vultr"
 	"github.com/st3fan/masscanr/internal/controller"
 	"github.com/st3fan/masscanr/internal/remote"
@@ -28,12 +29,67 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	return execute(ctx, args, stdout, stderr, func(key string, timeouts controller.Timeouts) runFunc {
 		c := &controller.Controller{Provider: vultr.New(key), Runner: remote.NewSSH(), Timeouts: timeouts}
 		return c.Run
-	})
+	}, vultr.New(""))
 }
 
-func execute(ctx context.Context, args []string, stdout, stderr io.Writer, build factory) (err error) {
+func execute(ctx context.Context, args []string, stdout, stderr io.Writer, build factory, catalog cloud.Catalog) error {
+	if len(args) == 0 {
+		return rootHelp(stdout)
+	}
+	if args[0] == "help" {
+		if len(args) == 1 {
+			return rootHelp(stdout)
+		}
+		if len(args) != 2 {
+			return fmt.Errorf("usage: masscanr help [command]")
+		}
+		switch args[1] {
+		case "scan", "list-regions", "list-instance-types":
+			args = []string{args[1], "--help"}
+		default:
+			return fmt.Errorf("unknown command %q", args[1])
+		}
+	}
+	switch args[0] {
+	case "--help", "-h":
+		if len(args) != 1 {
+			return fmt.Errorf("usage: masscanr --help")
+		}
+		return rootHelp(stdout)
+	case "--version":
+		if len(args) != 1 {
+			return fmt.Errorf("usage: masscanr --version")
+		}
+		_, err := fmt.Fprintln(stdout, "masscanr v1")
+		return err
+	case "scan":
+		return executeScan(ctx, args[1:], stdout, stderr, build)
+	case "list-regions":
+		return listRegions(ctx, args[1:], stdout, stderr, catalog)
+	case "list-instance-types":
+		return listInstanceTypes(ctx, args[1:], stdout, stderr, catalog)
+	default:
+		return fmt.Errorf("unknown command %q; run 'masscanr --help' for usage", args[0])
+	}
+}
+
+func rootHelp(out io.Writer) error {
+	_, err := fmt.Fprint(out, `Usage: masscanr <command> [options]
+
+Commands:
+  scan                  Scan IPv4 CIDRs using temporary Vultr workers
+  list-regions          Show region IDs, names, countries and continents
+  list-instance-types   Show plans available in a region (default: atl)
+
+Use 'masscanr <command> --help' for command options.
+Use 'masscanr --version' to print the version.
+`)
+	return err
+}
+
+func executeScan(ctx context.Context, args []string, stdout, stderr io.Writer, build factory) (err error) {
 	cfg := scan.Defaults()
-	fs := flag.NewFlagSet("masscanr", flag.ContinueOnError)
+	fs := flag.NewFlagSet("masscanr scan", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.IntVar(&cfg.Shards, "shards", cfg.Shards, "number of temporary VPS workers")
 	fs.Uint64Var(&cfg.Rate, "rate", cfg.Rate, "packets/second per worker")
@@ -51,7 +107,7 @@ func execute(ctx context.Context, args []string, stdout, stderr io.Writer, build
 	fs.BoolVar(&noTUI, "no-tui", false, "print lifecycle logs instead of a live table")
 	fs.BoolVar(&version, "version", false, "print version and exit")
 	fs.Usage = func() {
-		fmt.Fprint(stderr, "Usage: masscanr [options] IPv4-CIDR [IPv4-CIDR ...]\n\nTemporary Vultr workers run root masscan. The local controller needs no root.\nDefault ports: Nmap 7.95 top 100 TCP. Rate is per worker.\n\n")
+		fmt.Fprint(stderr, "Usage: masscanr scan [options] IPv4-CIDR [IPv4-CIDR ...]\n\nTemporary Vultr workers run root masscan. The local controller needs no root.\nDefault ports: Nmap 7.95 top 100 TCP. Rate is per worker.\n\n")
 		fs.PrintDefaults()
 	}
 	ordered, orderErr := interspersed(fs, args)

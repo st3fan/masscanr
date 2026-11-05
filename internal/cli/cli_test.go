@@ -36,7 +36,7 @@ func TestCLIFlagsAndResultsWithoutInfrastructure(t *testing.T) {
 			return controller.Summary{RunID: "fixture", Found: 1}, err
 		}
 	}
-	err := execute(t.Context(), []string{"192.0.2.1/24", "--ports=22,80,443,8000-8100", "--output", path}, &stdout, &stderr, factory)
+	err := execute(t.Context(), []string{"scan", "192.0.2.1/24", "--ports=22,80,443,8000-8100", "--output", path}, &stdout, &stderr, factory, nil)
 	if err != nil || !called {
 		t.Fatal(err, called)
 	}
@@ -48,17 +48,17 @@ func TestCLIFlagsAndResultsWithoutInfrastructure(t *testing.T) {
 	if info.Mode().Perm() != 0600 {
 		t.Fatal(info.Mode())
 	}
-	if err := execute(t.Context(), []string{"192.0.2.0/24", "--output", path}, &stdout, &stderr, factory); err == nil {
+	if err := execute(t.Context(), []string{"scan", "192.0.2.0/24", "--output", path}, &stdout, &stderr, factory, nil); err == nil {
 		t.Fatal("overwrote results")
 	}
 }
 
 func TestCLIValidationDoesNotBuildController(t *testing.T) {
-	for _, args := range [][]string{{"--help"}, {"--version"}, {}, {"::/0"}, {"192.0.2.0/24", "--shards=0"}, {"192.0.2.0/24", "--ports=80;reboot"}, {"--ports"}} {
+	for _, args := range [][]string{{"--help"}, {"--version"}, {}, {"scan", "--help"}, {"help", "scan"}, {"scan"}, {"scan", "::/0"}, {"scan", "192.0.2.0/24", "--shards=0"}, {"scan", "192.0.2.0/24", "--ports=80;reboot"}, {"scan", "--ports"}, {"192.0.2.0/24"}, {"scna"}} {
 		var out, errout bytes.Buffer
 		build := func(string, controller.Timeouts) runFunc { t.Fatal("controller built before validation"); return nil }
-		err := execute(t.Context(), args, &out, &errout, build)
-		help := len(args) > 0 && (args[0] == "--help" || args[0] == "--version")
+		err := execute(t.Context(), args, &out, &errout, build, nil)
+		help := len(args) == 0 || args[0] == "--help" || args[0] == "--version" || args[0] == "help" || len(args) > 1 && args[1] == "--help"
 		if (err == nil) != help {
 			t.Fatalf("%v: %v", args, err)
 		}
@@ -75,7 +75,7 @@ func TestPartialOutputPreserved(t *testing.T) {
 			return controller.Summary{}, errors.New("fixture scan failed")
 		}
 	}
-	if err := execute(t.Context(), []string{"192.0.2.0/24", "--output", path}, &stdout, &stderr, build); err == nil {
+	if err := execute(t.Context(), []string{"scan", "192.0.2.0/24", "--output", path}, &stdout, &stderr, build, nil); err == nil {
 		t.Fatal("success on failure")
 	}
 	data, err := os.ReadFile(path)
