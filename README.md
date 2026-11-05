@@ -158,6 +158,38 @@ host loss, network/API outages, or a very late ambiguous create can prevent
 automatic cleanup. V1 has no persistent recovery catalog; use the run tag shown
 in stderr/results to identify that run's resources.
 
+## Provider error details
+
+Failed Vultr requests print the HTTP status/reason, method and endpoint,
+request/trace ID when available, and the provider's response body. JSON is
+indented; plain-text responses retain their line breaks. Creation errors also
+identify the region, plan and OS ID, alongside the shard number.
+
+Example layout:
+
+```text
+masscanr: create shard 5: Vultr API error: HTTP 400 Bad Request
+  request: POST /v2/instances
+  request ID: <provider request ID>
+  response:
+    {
+      "error": "<Vultr's explanation>",
+      "status": 400
+    }
+```
+
+Details are printed by default. The configured API key, password/token fields
+and other credential fields are redacted; request headers and payloads are
+not dumped. Oversized responses have an explicit truncation marker at 64 KiB.
+An earlier failure's discarded response body cannot be recovered afterward.
+
+Preflight distinguishes a plan missing from the global catalog from a plan
+present in the catalog but absent from the current regional availability
+response. The latter error names the region endpoint and suggests
+`masscanr list-instance-types --region REGION`. A website catalog listing does
+not explain why a particular API response omits a plan; the app reports the
+API's result without guessing its capacity or account-policy cause.
+
 ## Development and validation
 
 ```sh
