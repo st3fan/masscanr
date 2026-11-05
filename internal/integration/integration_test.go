@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -12,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -228,5 +230,52 @@ func TestDebianMasscanConfiguration(t *testing.T) {
 				t.Error("missing", field, string(data))
 			}
 		}
+	}
+}
+
+func TestDebianMasscanListOutput(t *testing.T) {
+	program := os.Getenv("MASSCAN_TEST_BINARY")
+	if program == "" {
+		t.Skip("set MASSCAN_TEST_BINARY for a non-network native result round trip")
+	}
+	// masscan 1.3.2 out-binary.c/out-record.h: 99-byte header, type-6
+	// IPv4 open record (13-byte payload), then a 99-byte trailer.
+	// Replaying this saved record exercises real stdout formatting without
+	// transmitting packets or requiring privileges/cloud infrastructure.
+	header := make([]byte, 99)
+	copy(header, "masscan/1.1\ns:1700000000\n")
+	record := make([]byte, 15)
+	record[0] = 6
+	record[1] = 13
+	binary.BigEndian.PutUint32(record[2:6], 1700000000)
+	copy(record[6:10], []byte{192, 0, 2, 1})
+	record[10] = 6
+	binary.BigEndian.PutUint16(record[11:13], 80)
+	record[14] = 64
+	trailer := make([]byte, 99)
+	copy(trailer, "masscan/1.1")
+	path := filepath.Join(t.TempDir(), "fixture.scan")
+	if err := os.WriteFile(path, append(append(header, record...), trailer...), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := scan.Defaults()
+	cfg.Targets, _ = scan.ParseTargets([]string{"192.0.2.0/24"})
+	args, _ := cfg.Args(1, 42)
+	args = append(args, "--readscan", path)
+	var output, diagnostics bytes.Buffer
+	command := exec.CommandContext(t.Context(), program, args...)
+	command.Stdout = &output
+	command.Stderr = &diagnostics
+	if err := command.Run(); err != nil {
+		t.Fatal(err, diagnostics.String())
+	}
+	var records []string
+	for _, line := range strings.Split(output.String(), "\n") {
+		if line != "" && !strings.HasPrefix(line, "#") {
+			records = append(records, line)
+		}
+	}
+	if len(records) != 1 || records[0] != "open tcp 80 192.0.2.1 1700000000" {
+		t.Fatalf("stdout is not pure masscan list output: %q", output.String())
 	}
 }
