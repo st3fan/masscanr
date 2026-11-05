@@ -140,12 +140,19 @@ parsing, combined output, concurrency, cancellation, ownership protection and
 cleanup. A cross-component test runs the real HTTP/SSH clients against local
 fixtures through the controller.
 
+CI also installs masscan and exercises native configuration and saved-result
+replay checks. These checks send no probes and require no cloud credentials.
+
 Optional Debian masscan compatibility checks run only `--echo`, without probes:
 
 ```sh
 MASSCAN_TEST_BINARY=/path/to/masscan go test ./internal/integration \
   -run TestDebianMasscanConfiguration -v
 ```
+
+Use `-run TestDebianMasscanListOutput` with the same variable to replay one
+synthetic saved discovery and verify that stdout contains only native list
+records. This catches interactive-output flag regressions without a live scan.
 
 An explicitly enabled cloud smoke test creates **one temporary VM**, verifies
 Debian installation and root/password SSH, runs masscan `--echo` without scan

@@ -18,6 +18,12 @@ jobs:
           go-version-file: go.mod
           cache: true
       - run: test -z "$(gofmt -l cmd internal)"
+      - name: Install masscan for non-scanning compatibility tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends masscan
       - run: go test -race ./...
+        env:
+          MASSCAN_TEST_BINARY: /usr/bin/masscan
       - run: go vet ./...
       - run: go build ./cmd/masscanr
