@@ -45,8 +45,9 @@ type Controller struct {
 }
 
 type tracked struct {
-	shard  int
-	worker cloud.Worker
+	shard    int
+	worker   cloud.Worker
+	shutdown bool
 }
 
 func (c *Controller) Run(ctx context.Context, cfg scan.Config, out io.Writer, emit func(Event)) (summary Summary, err error) {
@@ -121,7 +122,7 @@ func (c *Controller) Run(ctx context.Context, cfg scan.Config, out io.Writer, em
 		w, createErr := c.Provider.Create(createCtx, spec)
 		cancel()
 		if w.ID != "" {
-			workers = append(workers, tracked{shard, w})
+			workers = append(workers, tracked{shard: shard, worker: w})
 			notify(Event{Shard: shard, ID: w.ID, IP: w.IP, State: "booting"})
 		}
 		if createErr != nil || w.ID == "" {
@@ -143,7 +144,8 @@ func (c *Controller) Run(ctx context.Context, cfg scan.Config, out io.Writer, em
 	var wg sync.WaitGroup
 	var failure error
 	var mu sync.Mutex
-	for _, item := range workers {
+	for index := range workers {
+		item := &workers[index]
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -161,7 +163,7 @@ func (c *Controller) Run(ctx context.Context, cfg scan.Config, out io.Writer, em
 					notify(Event{Shard: item.shard, ID: w.ID, IP: w.IP, State: state, Progress: &p})
 				})
 			}
-			runErr = errors.Join(runErr, output.finish())
+			runErr = errors.Join(runErr, output.finish(), scanCtx.Err())
 			if runErr != nil {
 				mu.Lock()
 				failure = errors.Join(failure, fmt.Errorf("shard %d: %w", item.shard, runErr))
@@ -171,10 +173,18 @@ func (c *Controller) Run(ctx context.Context, cfg scan.Config, out io.Writer, em
 			} else {
 				notify(Event{Shard: item.shard, ID: w.ID, IP: w.IP, State: "completed"})
 			}
+			// Scanner exit includes drained output and the response-wait phase.
+			// Retire this worker now, independently of peers still scanning and
+			// independently of scan cancellation. Final cleanup retries failures.
+			if c.shutdown(context.WithoutCancel(scanCtx), *item, summary.RunID, notify) == nil {
+				item.shutdown = true
+			}
 		}()
 	}
 	wg.Wait()
-	return summary, errors.Join(failure, scanCtx.Err())
+	// Shutdown has its own context. Cancellation after all scanners exited
+	// must not retroactively invalidate an otherwise completed scan.
+	return summary, failure
 }
 
 func (c *Controller) prepare(ctx context.Context, workers []tracked, runID string, notify func(Event)) error {
@@ -246,8 +256,13 @@ func (c *Controller) ready(ctx context.Context, initial cloud.Worker, runID stri
 
 func (c *Controller) cleanup(ctx context.Context, runID string, initial []tracked, ambiguous bool, notify func(Event)) ([]string, error) {
 	known := make(map[string]tracked)
+	shutdown := make(map[string]bool)
 	for _, item := range initial {
-		known[item.worker.ID] = item
+		if item.shutdown {
+			shutdown[item.worker.ID] = true
+		} else {
+			known[item.worker.ID] = item
+		}
 	}
 	var reconciliation error
 	// Multiple reconciliation passes catch instances created despite an
@@ -264,6 +279,10 @@ func (c *Controller) cleanup(ctx context.Context, runID string, initial []tracke
 		} else {
 			reconciliation = nil
 			for _, w := range found {
+				// A stale list response must not resurrect a confirmed shutdown.
+				if shutdown[w.ID] {
+					continue
+				}
 				if _, exists := known[w.ID]; !exists {
 					known[w.ID] = tracked{worker: w}
 				}
@@ -286,17 +305,11 @@ func (c *Controller) cleanup(ctx context.Context, runID string, initial []tracke
 					return
 				}
 				defer func() { <-limit }()
-				notify(Event{Shard: item.shard, ID: id, IP: item.worker.IP, State: "deleting"})
-				deleteCtx, cancel := context.WithTimeout(ctx, c.Timeouts.Delete)
-				err := c.Provider.Delete(deleteCtx, item.worker, runID)
-				cancel()
+				err := c.shutdown(ctx, item, runID, notify)
 				if err != nil {
 					mu.Lock()
 					failures[id] = err
 					mu.Unlock()
-					notify(Event{Shard: item.shard, ID: id, State: "cleanup failed", Detail: err.Error()})
-				} else {
-					notify(Event{Shard: item.shard, ID: id, State: "deleted"})
 				}
 			}()
 		}
@@ -320,6 +333,20 @@ func (c *Controller) cleanup(ctx context.Context, runID string, initial []tracke
 	}
 	slices.Sort(remaining)
 	return remaining, errors.Join(failure, reconciliation)
+}
+
+func (c *Controller) shutdown(ctx context.Context, item tracked, runID string, notify func(Event)) error {
+	w := item.worker
+	notify(Event{Shard: item.shard, ID: w.ID, IP: w.IP, State: "deleting"})
+	deleteCtx, cancel := context.WithTimeout(ctx, c.Timeouts.Delete)
+	defer cancel()
+	if err := c.Provider.Delete(deleteCtx, w, runID); err != nil {
+		notify(Event{Shard: item.shard, ID: w.ID, State: "cleanup failed", Detail: err.Error()})
+		return err
+	}
+	// Provider.Delete confirms deletion, rather than just acknowledging it.
+	notify(Event{Shard: item.shard, ID: w.ID, State: "shutdown"})
+	return nil
 }
 
 func pause(ctx context.Context, d time.Duration) error {
