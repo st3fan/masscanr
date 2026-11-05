@@ -18,6 +18,7 @@ import (
 type row struct {
 	Shard                          int
 	ID, IP, State, Cleanup, Detail string
+	CleanupDetail                  string
 	Progress                       remote.Progress
 }
 
@@ -100,20 +101,25 @@ func (v *View) Update(e controller.Event) {
 	if e.IP != "" {
 		r.IP = e.IP
 	}
-	cleanup := e.State == "deleting" || e.State == "deleted" || e.State == "cleanup failed"
+	cleanup := e.State == "deleting" || e.State == "shutdown" || e.State == "cleanup failed"
 	changed := false
 	if cleanup {
 		changed = r.Cleanup != e.State
 		r.Cleanup = e.State
+		if e.State == "shutdown" {
+			r.CleanupDetail = ""
+		} else if e.Detail != "" {
+			r.CleanupDetail = clean(e.Detail)
+		}
 	} else {
 		changed = r.State != e.State
 		r.State = e.State
+		if e.Detail != "" {
+			r.Detail = clean(e.Detail)
+		}
 	}
 	if e.Progress != nil {
 		r.Progress = *e.Progress
-	}
-	if e.Detail != "" {
-		r.Detail = clean(e.Detail)
 	}
 	v.rows[key] = r
 	if !v.terminal && changed {
@@ -152,7 +158,9 @@ func (v *View) render() string {
 	})
 	for _, r := range rows {
 		state := r.State
-		if r.Cleanup != "" {
+		if r.Cleanup == "shutdown" && r.State != "failed" {
+			state = "shutdown"
+		} else if r.Cleanup != "" {
 			state += " / " + r.Cleanup
 		}
 		filled := min(10, max(0, int(r.Progress.Percent/10)))
@@ -168,6 +176,9 @@ func (v *View) render() string {
 		fmt.Fprintf(&b, "  [%s] %5.1f%%  %7.1fk pps  ETA %-8s  found %d\n", bar, r.Progress.Percent, r.Progress.Rate/1000, r.Progress.ETA.Round(time.Second), r.Progress.Found)
 		if r.Detail != "" {
 			fmt.Fprintf(&b, "       %s\n", r.Detail)
+		}
+		if r.CleanupDetail != "" {
+			fmt.Fprintf(&b, "       %s\n", r.CleanupDetail)
 		}
 	}
 	// Prevent line wrapping from invalidating cursor positioning on narrow
