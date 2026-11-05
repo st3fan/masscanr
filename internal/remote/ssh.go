@@ -3,6 +3,7 @@ package remote
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -112,9 +113,19 @@ func (s *SSH) Prepare(ctx context.Context, w cloud.Worker) (string, error) {
 		}
 	}
 	var out, diagnostics limitedBuffer
-	const bootstrap = "export DEBIAN_FRONTEND=noninteractive; apt-get -o DPkg::Lock::Timeout=120 update >&2 && apt-get -o DPkg::Lock::Timeout=120 install -y --no-install-recommends masscan >&2 && masscan --version"
+	const bootstrap = "export DEBIAN_FRONTEND=noninteractive; apt-get -o DPkg::Lock::Timeout=120 update >&2 && apt-get -o DPkg::Lock::Timeout=120 install -y --no-install-recommends masscan >&2"
 	if err := s.command(ctx, w, bootstrap, &out, &diagnostics); err != nil {
 		return "", fmt.Errorf("masscan installation failed: %w (%s)", err, strings.TrimSpace(diagnostics.String()))
+	}
+	out = limitedBuffer{}
+	diagnostics = limitedBuffer{}
+	err := s.command(ctx, w, "masscan --version", &out, &diagnostics)
+	var exit *ssh.ExitError
+	// Debian masscan 1.3.2 deliberately exits 1 after printing its version.
+	// Accept only that known status and still require recognized version text;
+	// installation failures and other version-command failures remain errors.
+	if err != nil && !(errors.As(err, &exit) && exit.ExitStatus() == 1) {
+		return "", fmt.Errorf("masscan version command failed: %w", err)
 	}
 	m := versionPattern.FindStringSubmatch(out.String())
 	if m == nil {

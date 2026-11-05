@@ -107,7 +107,9 @@ func TestRootPasswordPrepareAndSeparateStreams(t *testing.T) {
 		case command == "id -u":
 			fmt.Fprint(ch, "0\n")
 		case strings.Contains(command, "apt-get"):
+		case command == "masscan --version":
 			fmt.Fprint(ch, "Masscan version 1.3.2 (fixture)\n")
+			return 1
 		case strings.HasPrefix(command, "exec stdbuf -oL masscan "):
 			if !strings.Contains(command, "'1/2'") {
 				t.Error(command)
@@ -135,6 +137,22 @@ func TestRootPasswordPrepareAndSeparateStreams(t *testing.T) {
 	}
 	if out.String() != "open tcp 80 192.0.2.1 1700000000\n" || len(updates) != 2 || !updates[1].Waiting || updates[0].Rate != 500000 {
 		t.Fatal(out.String(), updates)
+	}
+}
+
+func TestPrepareRejectsUnexpectedVersionFailure(t *testing.T) {
+	runner, worker := sshFixture(t, func(command string, ch ssh.Channel) uint32 {
+		if command == "id -u" {
+			fmt.Fprintln(ch, "0")
+		}
+		if command == "masscan --version" {
+			fmt.Fprintln(ch, "Masscan version 1.3.2")
+			return 2
+		}
+		return 0
+	})
+	if _, err := runner.Prepare(t.Context(), worker); err == nil {
+		t.Fatal("accepted unexpected version-command exit status")
 	}
 }
 
