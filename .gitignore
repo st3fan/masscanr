@@ -31,6 +31,8 @@ go.work.sum
 !.env.example
 /masscanr
 *.list
+*.csv
+*.jsonl
 
 # Editor/IDE
 # .idea/

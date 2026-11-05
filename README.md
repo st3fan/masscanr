@@ -1,7 +1,7 @@
 # masscanr
 
 Run masscan shards on temporary Vultr VPS workers, stream discoveries back to a
-local list file, and watch each worker in a terminal UI. The controller is
+local list file with CSV/JSONL exports, and watch each worker in a terminal UI. The controller is
 written in Go and needs no root privileges. Workers use Debian's packaged
 masscan and root/password SSH.
 
@@ -52,7 +52,7 @@ Scanning requires the `scan` subcommand; a bare CIDR is an unknown command.
 | `--region` | `atl` | Vultr region (Atlanta) |
 | `--instance-type` | `vc2-1c-1gb` | Vultr plan |
 | `--ports`, `-p` | Nmap 7.95 top 100 TCP ports | Comma-separated ports, inclusive ranges, or mixed forms |
-| `--output` | Timestamped `masscanr-*.list` | New local file; `-` sends list output to stdout |
+| `--output` | Timestamped `masscanr-*.list` | New list file plus CSV/JSONL exports; `-` streams the list to stdout |
 | `--slug` | Empty | Text inserted before the timestamp in generated output filenames |
 | `--env-file` | `.env` | Local credentials file |
 | `--timeout` | `24h` | Maximum scanning time; cleanup follows |
@@ -63,8 +63,8 @@ Scanning requires the `scan` subcommand; a bare CIDR is an unknown command.
 For example, `--slug=epag` generates a name such as
 `masscanr-epag-20261105T042952.086607609Z.list`. Omitting the slug preserves
 `masscanr-<timestamp>.list`. Slug text is preserved; path separators and control
-characters are rejected. An explicit `--output` path or `--output=-` takes
-precedence over generated naming.
+characters are rejected. An explicit `--output` path takes precedence over the
+slug. With `--output=-`, CSV/JSONL filenames still use the timestamp and slug.
 
 Port syntax accepts TCP numbers 0–65535, deduplicates overlaps and compacts
 ranges. For example, `--ports=22,80,443,8000-8100` or `-p=1-65535`. IPv6, UDP,
@@ -130,6 +130,39 @@ Comment lines record configuration, shard attribution, and completion status.
 Discoveries use native list format: state, protocol, port, address, timestamp.
 Response-wait completion and the remote exit status are checked before a shard
 is complete. Results are checked against the requested addresses and ports.
+
+After a successful scan, the controller parses the saved list and also writes
+CSV and JSONL exports. For example, `masscanr-epag-<timestamp>.list` produces
+`masscanr-epag-<timestamp>.csv` and `masscanr-epag-<timestamp>.jsonl`.
+With `--output=inventory.list`, exports are `inventory.csv` and
+`inventory.jsonl` in the same directory. If the custom path does not end in
+`.list`, the extensions are appended (`inventory.txt.csv`, for example).
+
+Each finding becomes one CSV row or JSONL object, preserving order and
+duplicates. CSV has a header; JSONL has no surrounding array:
+
+```csv
+ip,port,addr,protocol,state,timestamp
+192.0.2.1,80,192.0.2.1:80,tcp,open,1700000000
+192.0.2.2,443,192.0.2.2:443,tcp,open,1700000001
+```
+
+```jsonl
+{"ip":"192.0.2.1","port":80,"addr":"192.0.2.1:80","protocol":"tcp","state":"open","timestamp":1700000000}
+{"ip":"192.0.2.2","port":443,"addr":"192.0.2.2:443","protocol":"tcp","state":"open","timestamp":1700000001}
+```
+
+`port` and Unix-seconds `timestamp` are JSON numbers. Configuration, shard,
+and status comments remain in the native list. An empty successful scan
+produces a CSV header and an empty JSONL file. Conversion streams from disk;
+exports use mode `0600` and never overwrite existing files. Conversion errors
+preserve the list, discard failed partial exports, and exit nonzero with an
+export-specific error. Failed/cancelled scans do not produce exports.
+
+With `--output=-`, the list continues streaming to stdout while a private
+temporary copy supports conversion. CSV/JSONL are saved in the current
+directory using the generated scan name (and `--slug`, when supplied); their
+paths are printed on stderr. The temporary list is removed on normal exit.
 
 A failed/cancelled run preserves collected results, writes `# status incomplete`
 where output is still writable, and exits nonzero. No completion footer means
