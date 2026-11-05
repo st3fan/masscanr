@@ -74,13 +74,20 @@ func (c *Client) Validate(ctx context.Context, spec cloud.Spec) error {
 	if _, err := c.List(ctx, spec.RunID); err != nil {
 		return fmt.Errorf("Vultr authentication: %w", err)
 	}
-	plans, err := c.InstanceTypes(ctx, spec.Region)
+	available, err := c.availability(ctx, spec.Region)
+	if err != nil {
+		return err
+	}
+	plans, err := c.plans(ctx)
 	if err != nil {
 		return err
 	}
 	selected := slices.IndexFunc(plans, func(p cloud.InstanceType) bool { return p.ID == spec.InstanceType })
 	if selected < 0 {
-		return fmt.Errorf("instance type %s is unavailable in region %s", spec.InstanceType, spec.Region)
+		return fmt.Errorf("instance type %q was not found in Vultr's global plan catalog\n  catalog: GET /v2/plans\n  next step: masscanr list-instance-types --region %s", c.redactKey(spec.InstanceType), c.redactKey(spec.Region))
+	}
+	if !slices.Contains(available, spec.InstanceType) {
+		return fmt.Errorf("instance type %q exists in Vultr's catalog but is absent from its current regional availability response\n  region: %s\n  availability: GET /v2/regions/%s/availability (%d plans returned)\n  next step: masscanr list-instance-types --region %s", c.redactKey(spec.InstanceType), c.redactKey(spec.Region), c.redactKey(spec.Region), len(available), c.redactKey(spec.Region))
 	}
 	if plans[selected].DiskGB < 1 {
 		return fmt.Errorf("instance type %s has no local boot disk; block-storage boot is not supported", spec.InstanceType)
@@ -128,6 +135,9 @@ func (c *Client) Create(ctx context.Context, spec cloud.Spec) (cloud.Worker, err
 	}
 	// Never retry a POST: a timeout may mean creation succeeded remotely.
 	err = c.request(ctx, "POST", "/instances", req, &result)
+	if err != nil {
+		err = fmt.Errorf("create instance (region=%s plan=%s os_id=%d): %w", spec.Region, spec.InstanceType, c.osID, err)
+	}
 	w := result.Instance.worker()
 	if err == nil && w.ID == "" {
 		err = fmt.Errorf("Vultr create response has no instance ID; reconcile run %s", spec.RunID)
@@ -243,7 +253,7 @@ func (c *Client) request(ctx context.Context, method, path string, payload, dest
 		req.Header.Set("Content-Type", "application/json")
 		res, err := c.HTTP.Do(req)
 		if err != nil {
-			return fmt.Errorf("Vultr %s request failed: %w", method, err)
+			return fmt.Errorf("Vultr %s %s request failed: %w", method, req.URL.EscapedPath(), err)
 		}
 		if method != "POST" && attempt < 3 && (res.StatusCode == 429 || res.StatusCode >= 500) {
 			res.Body.Close()
@@ -253,15 +263,12 @@ func (c *Client) request(ctx context.Context, method, path string, payload, dest
 			continue
 		}
 		defer res.Body.Close()
-		if res.StatusCode == 404 {
-			return cloud.ErrNotFound
-		}
 		if res.StatusCode < 200 || res.StatusCode >= 300 {
-			return fmt.Errorf("Vultr %s returned HTTP %d", method, res.StatusCode)
+			return c.responseError(req, res)
 		}
 		if dest != nil {
 			if err = json.NewDecoder(io.LimitReader(res.Body, 4<<20)).Decode(dest); err != nil {
-				return fmt.Errorf("decode Vultr response: %w", err)
+				return fmt.Errorf("decode Vultr %s %s response (HTTP %d): %w", method, req.URL.EscapedPath(), res.StatusCode, err)
 			}
 		}
 		return nil

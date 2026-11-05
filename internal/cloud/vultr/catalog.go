@@ -52,7 +52,7 @@ func (c *Client) availability(ctx context.Context, region string) ([]string, err
 	}
 	err := c.request(ctx, "GET", "/regions/"+url.PathEscape(region)+"/availability", nil, &response)
 	if errors.Is(err, cloud.ErrNotFound) {
-		return nil, fmt.Errorf("unknown region %q", region)
+		return nil, fmt.Errorf("unknown region %q: %w", c.redactKey(region), err)
 	}
 	return response.Plans, err
 }
@@ -66,8 +66,23 @@ func (c *Client) InstanceTypes(ctx context.Context, region string) ([]cloud.Inst
 	for _, id := range available {
 		allowed[id] = true
 	}
+	plans, err := c.plans(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var filtered []cloud.InstanceType
+	for _, p := range plans {
+		if allowed[p.ID] {
+			filtered = append(filtered, p)
+		}
+	}
+	return filtered, nil
+}
+
+func (c *Client) plans(ctx context.Context) ([]cloud.InstanceType, error) {
 	path := "/plans?per_page=100"
 	var types []cloud.InstanceType
+	var err error
 	for pages := 0; pages < 1000; pages++ {
 		var response struct {
 			Plans []struct {
@@ -88,9 +103,7 @@ func (c *Client) InstanceTypes(ctx context.Context, region string) ([]cloud.Inst
 			return nil, err
 		}
 		for _, p := range response.Plans {
-			if allowed[p.ID] {
-				types = append(types, cloud.InstanceType{ID: p.ID, Family: p.Family, CPUType: p.CPUType, CPUVendor: p.CPUVendor, VCPUs: p.VCPUs, MemoryMB: p.MemoryMB, DiskGB: p.DiskGB, DiskCount: p.DiskCount, DiskType: p.DiskType, StorageType: p.StorageType})
-			}
+			types = append(types, cloud.InstanceType{ID: p.ID, Family: p.Family, CPUType: p.CPUType, CPUVendor: p.CPUVendor, VCPUs: p.VCPUs, MemoryMB: p.MemoryMB, DiskGB: p.DiskGB, DiskCount: p.DiskCount, DiskType: p.DiskType, StorageType: p.StorageType})
 		}
 		path, err = nextPage(path, response.Meta.Links.Next)
 		if err != nil {
