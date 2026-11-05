@@ -36,7 +36,9 @@ func TestHTTPSSHController(t *testing.T) {
 				case command == "id -u":
 					fmt.Fprintln(ch, "0")
 				case strings.Contains(command, "apt-get"):
+				case command == "masscan --version":
 					fmt.Fprintln(ch, "Masscan version 1.3.2 (fixture)")
+					return 1
 				default:
 					shard := regexp.MustCompile(`'--shards' '([12])/2'`).FindStringSubmatch(command)
 					seed := regexp.MustCompile(`'--seed' '(\d+)'`).FindStringSubmatch(command)
