@@ -33,7 +33,7 @@ func TestCLIFlagsAndResultsWithoutInfrastructure(t *testing.T) {
 				t.Fatal(cfg.Targets)
 			}
 			emit(controller.Event{Shard: 1, State: "completed"})
-			_, err := io.WriteString(out, "open tcp 80 192.0.2.1 1700000000\n")
+			_, err := io.WriteString(out, "open tcp 80 192.0.2.1 1700000000\n# status complete\n")
 			return controller.Summary{RunID: "fixture", Found: 1}, err
 		}
 	}
@@ -48,6 +48,11 @@ func TestCLIFlagsAndResultsWithoutInfrastructure(t *testing.T) {
 	info, _ := os.Stat(path)
 	if info.Mode().Perm() != 0600 {
 		t.Fatal(info.Mode())
+	}
+	for _, export := range exportPaths(path) {
+		if _, err := os.Stat(export); err != nil || !strings.Contains(stderr.String(), export) {
+			t.Fatal(export, err, stderr.String())
+		}
 	}
 	if err := execute(t.Context(), []string{"scan", "192.0.2.0/24", "--output", path}, &stdout, &stderr, factory, nil); err == nil {
 		t.Fatal("overwrote results")
@@ -82,6 +87,11 @@ func TestPartialOutputPreserved(t *testing.T) {
 	data, err := os.ReadFile(path)
 	if err != nil || !strings.Contains(string(data), "incomplete") || !strings.Contains(stderr.String(), "Partial results") {
 		t.Fatal(err, stderr.String())
+	}
+	for _, export := range exportPaths(path) {
+		if _, err := os.Stat(export); !errors.Is(err, os.ErrNotExist) {
+			t.Fatal("exported an incomplete scan", err)
+		}
 	}
 }
 
@@ -126,13 +136,15 @@ func TestSlugOutputSelectionWithFakeController(t *testing.T) {
 	for _, output := range []string{"", "custom.list", "-"} {
 		t.Run("output="+output, func(t *testing.T) {
 			t.Chdir(t.TempDir())
+			tempDir := t.TempDir()
+			t.Setenv("TMPDIR", tempDir)
 			t.Setenv("VULTR_API_KEY", "fixture-key")
 			var stdout, stderr bytes.Buffer
 			called := false
 			build := func(string, controller.Timeouts) runFunc {
 				return func(_ context.Context, _ scan.Config, out io.Writer, _ func(controller.Event)) (controller.Summary, error) {
 					called = true
-					_, err := io.WriteString(out, "fixture results\n")
+					_, err := io.WriteString(out, exportFixture)
 					return controller.Summary{}, err
 				}
 			}
@@ -149,7 +161,7 @@ func TestSlugOutputSelectionWithFakeController(t *testing.T) {
 			}
 			switch output {
 			case "-":
-				if len(files) != 0 || stdout.String() != "fixture results\n" {
+				if len(files) != 0 || stdout.String() != exportFixture {
 					t.Fatal(files, stdout.String())
 				}
 			case "custom.list":
@@ -161,7 +173,51 @@ func TestSlugOutputSelectionWithFakeController(t *testing.T) {
 					t.Fatal(files)
 				}
 			}
+			for _, extension := range []string{"csv", "jsonl"} {
+				exports, err := filepath.Glob("*." + extension)
+				if err != nil || len(exports) != 1 {
+					t.Fatal(exports, err)
+				}
+				if output == "custom.list" {
+					if exports[0] != "custom."+extension {
+						t.Fatal(exports)
+					}
+				} else if !strings.HasPrefix(exports[0], "masscanr-office-north-") {
+					t.Fatal(exports)
+				}
+			}
+			entries, err := os.ReadDir(tempDir)
+			if err != nil || len(entries) != 0 {
+				t.Fatal("temporary list remains", entries, err)
+			}
 		})
+	}
+}
+
+func TestCLIExportFailurePreservesCompletedList(t *testing.T) {
+	t.Setenv("VULTR_API_KEY", "fixture-key")
+	path := filepath.Join(t.TempDir(), "scan.list")
+	paths := exportPaths(path)
+	if err := os.WriteFile(paths[1], []byte("existing"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	build := func(string, controller.Timeouts) runFunc {
+		return func(_ context.Context, _ scan.Config, out io.Writer, _ func(controller.Event)) (controller.Summary, error) {
+			_, err := io.WriteString(out, exportFixture)
+			return controller.Summary{Found: 3}, err
+		}
+	}
+	var stdout, stderr bytes.Buffer
+	err := execute(t.Context(), []string{"scan", "192.0.2.0/24", "--output", path}, &stdout, &stderr, build, nil)
+	if err == nil || !strings.Contains(err.Error(), "scan completed but CSV/JSONL export failed") || !strings.Contains(stderr.String(), "Scan complete") || strings.Contains(stderr.String(), "Incomplete scan") {
+		t.Fatal(err, stderr.String())
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != exportFixture {
+		t.Fatal("completed list changed", err)
+	}
+	if _, err := os.Stat(paths[0]); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("partial export remains", err)
 	}
 }
 

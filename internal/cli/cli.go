@@ -99,8 +99,8 @@ func executeScan(ctx context.Context, args []string, stdout, stderr io.Writer, b
 	var ports, output, envFile, slug string
 	fs.StringVar(&ports, "ports", scan.TopPorts, "TCP ports/ranges, e.g. 22,80,443,8000-8100 (default: Nmap top 100)")
 	fs.StringVar(&ports, "p", scan.TopPorts, "alias for --ports")
-	fs.StringVar(&output, "output", "", "new local list file (default: timestamped masscanr-*.list); - writes stdout")
-	fs.StringVar(&slug, "slug", "", "text to include in generated output filenames (explicit --output takes precedence)")
+	fs.StringVar(&output, "output", "", "new local list file plus CSV/JSONL exports (default: timestamped masscanr-*); - streams list to stdout")
+	fs.StringVar(&slug, "slug", "", "text in generated filenames (with --output=-, names the CSV/JSONL exports)")
 	fs.StringVar(&envFile, "env-file", ".env", "dotenv file; VULTR_API_KEY in the environment takes precedence")
 	timeouts := controller.DefaultTimeouts()
 	fs.DurationVar(&timeouts.Scan, "timeout", timeouts.Scan, "maximum scanning time, followed by cleanup")
@@ -148,8 +148,8 @@ func executeScan(ctx context.Context, args []string, stdout, stderr io.Writer, b
 	if err != nil {
 		return err
 	}
-	var destination io.Writer = stdout
 	var file *os.File
+	exportOutput := output
 	if output != "-" {
 		if output == "" {
 			output = outputFilename(slug, time.Now())
@@ -158,8 +158,25 @@ func executeScan(ctx context.Context, args []string, stdout, stderr io.Writer, b
 		if err != nil {
 			return fmt.Errorf("create output: %w", err)
 		}
-		destination = file
-		defer func() { err = errors.Join(err, file.Sync(), file.Close()) }()
+		exportOutput = output
+	} else {
+		// Keep stdout streaming while retaining a private source for conversion.
+		exportOutput = outputFilename(slug, time.Now())
+		file, err = os.CreateTemp("", "masscanr-results-*.list")
+		if err != nil {
+			return fmt.Errorf("create temporary export source: %w", err)
+		}
+		temporary := file.Name()
+		defer func() { err = errors.Join(err, os.Remove(temporary)) }()
+	}
+	defer func() {
+		if file != nil {
+			err = errors.Join(err, file.Sync(), file.Close())
+		}
+	}()
+	var destination io.Writer = file
+	if output == "-" {
+		destination = io.MultiWriter(stdout, file)
 	}
 	terminal := false
 	if f, ok := stderr.(*os.File); ok {
@@ -171,12 +188,20 @@ func executeScan(ctx context.Context, args []string, stdout, stderr io.Writer, b
 	var summary controller.Summary
 	summary, err = build(key, timeouts)(ctx, cfg, destination, view.Update)
 	view.Stop()
+	source := file.Name()
+	err = errors.Join(err, file.Sync(), file.Close())
+	file = nil
 	if err != nil {
 		fmt.Fprintf(stderr, "Incomplete scan. Partial results: %s | run: %s | found: %d\n", output, summary.RunID, summary.Found)
-	} else {
-		fmt.Fprintf(stderr, "Scan complete. Results: %s | run: %s | found: %d | workers deleted\n", output, summary.RunID, summary.Found)
+		return err
 	}
-	return err
+	fmt.Fprintf(stderr, "Scan complete. Results: %s | run: %s | found: %d | workers deleted\n", output, summary.RunID, summary.Found)
+	if err = exportResults(source, exportOutput); err != nil {
+		return fmt.Errorf("scan completed but CSV/JSONL export failed (native list output: %s): %w", output, err)
+	}
+	paths := exportPaths(exportOutput)
+	fmt.Fprintf(stderr, "Exports: %s | %s\n", paths[0], paths[1])
+	return nil
 }
 
 func outputFilename(slug string, when time.Time) string {
