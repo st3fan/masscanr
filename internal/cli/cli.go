@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/st3fan/masscanr/internal/cloud"
 	"github.com/st3fan/masscanr/internal/cloud/vultr"
@@ -95,10 +96,11 @@ func executeScan(ctx context.Context, args []string, stdout, stderr io.Writer, b
 	fs.Uint64Var(&cfg.Rate, "rate", cfg.Rate, "packets/second per worker")
 	fs.StringVar(&cfg.Region, "region", cfg.Region, "Vultr region identifier (Atlanta: atl)")
 	fs.StringVar(&cfg.InstanceType, "instance-type", cfg.InstanceType, "Vultr instance plan")
-	var ports, output, envFile string
+	var ports, output, envFile, slug string
 	fs.StringVar(&ports, "ports", scan.TopPorts, "TCP ports/ranges, e.g. 22,80,443,8000-8100 (default: Nmap top 100)")
 	fs.StringVar(&ports, "p", scan.TopPorts, "alias for --ports")
 	fs.StringVar(&output, "output", "", "new local list file (default: timestamped masscanr-*.list); - writes stdout")
+	fs.StringVar(&slug, "slug", "", "text to include in generated output filenames (explicit --output takes precedence)")
 	fs.StringVar(&envFile, "env-file", ".env", "dotenv file; VULTR_API_KEY in the environment takes precedence")
 	timeouts := controller.DefaultTimeouts()
 	fs.DurationVar(&timeouts.Scan, "timeout", timeouts.Scan, "maximum scanning time, followed by cleanup")
@@ -124,6 +126,9 @@ func executeScan(ctx context.Context, args []string, stdout, stderr io.Writer, b
 		fmt.Fprintln(stdout, "masscanr v1")
 		return nil
 	}
+	if strings.ContainsAny(slug, "/\\") || strings.IndexFunc(slug, unicode.IsControl) >= 0 {
+		return fmt.Errorf("--slug must not contain path separators or control characters")
+	}
 	if cfg.Targets, err = scan.ParseTargets(fs.Args()); err != nil {
 		return err
 	}
@@ -147,7 +152,7 @@ func executeScan(ctx context.Context, args []string, stdout, stderr io.Writer, b
 	var file *os.File
 	if output != "-" {
 		if output == "" {
-			output = "masscanr-" + time.Now().UTC().Format("20060102T150405.000000000Z") + ".list"
+			output = outputFilename(slug, time.Now())
 		}
 		file, err = os.OpenFile(output, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 		if err != nil {
@@ -172,6 +177,14 @@ func executeScan(ctx context.Context, args []string, stdout, stderr io.Writer, b
 		fmt.Fprintf(stderr, "Scan complete. Results: %s | run: %s | found: %d | workers deleted\n", output, summary.RunID, summary.Found)
 	}
 	return err
+}
+
+func outputFilename(slug string, when time.Time) string {
+	prefix := "masscanr"
+	if slug != "" {
+		prefix += "-" + slug
+	}
+	return prefix + "-" + when.UTC().Format("20060102T150405.000000000Z") + ".list"
 }
 
 // flag normally stops at the first CIDR; keep masscan-style options usable

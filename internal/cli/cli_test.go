@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/st3fan/masscanr/internal/controller"
 	"github.com/st3fan/masscanr/internal/scan"
@@ -105,5 +106,71 @@ func TestDotenvKeyParsing(t *testing.T) {
 	t.Setenv("VULTR_API_KEY", "environment-key")
 	if key, err := apiKey("missing-file"); err != nil || key != "environment-key" {
 		t.Fatal(err)
+	}
+}
+
+func TestOutputFilenameSlugAndUTCTimestamp(t *testing.T) {
+	when := time.Date(2026, 11, 4, 23, 29, 52, 86607609, time.FixedZone("EST", -5*60*60))
+	for _, tc := range []struct{ slug, want string }{
+		{"", "masscanr-20261105T042952.086607609Z.list"},
+		{"epag", "masscanr-epag-20261105T042952.086607609Z.list"},
+		{"North Office", "masscanr-North Office-20261105T042952.086607609Z.list"},
+	} {
+		if got := outputFilename(tc.slug, when); got != tc.want {
+			t.Errorf("got %q, expected %q", got, tc.want)
+		}
+	}
+}
+
+func TestSlugOutputSelectionWithFakeController(t *testing.T) {
+	for _, output := range []string{"", "custom.list", "-"} {
+		t.Run("output="+output, func(t *testing.T) {
+			t.Chdir(t.TempDir())
+			t.Setenv("VULTR_API_KEY", "fixture-key")
+			var stdout, stderr bytes.Buffer
+			called := false
+			build := func(string, controller.Timeouts) runFunc {
+				return func(_ context.Context, _ scan.Config, out io.Writer, _ func(controller.Event)) (controller.Summary, error) {
+					called = true
+					_, err := io.WriteString(out, "fixture results\n")
+					return controller.Summary{}, err
+				}
+			}
+			args := []string{"scan", "--slug=office-north", "192.0.2.0/24"}
+			if output != "" {
+				args = append(args, "--output", output)
+			}
+			if err := execute(t.Context(), args, &stdout, &stderr, build, nil); err != nil || !called {
+				t.Fatal(err)
+			}
+			files, err := filepath.Glob("*.list")
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch output {
+			case "-":
+				if len(files) != 0 || stdout.String() != "fixture results\n" {
+					t.Fatal(files, stdout.String())
+				}
+			case "custom.list":
+				if len(files) != 1 || files[0] != "custom.list" {
+					t.Fatal(files)
+				}
+			default:
+				if len(files) != 1 || !strings.HasPrefix(files[0], "masscanr-office-north-") {
+					t.Fatal(files)
+				}
+			}
+		})
+	}
+}
+
+func TestUnsafeSlugRejectedBeforeControllerConstruction(t *testing.T) {
+	for _, slug := range []string{"../escape", "folder/name", "folder\\name", "line\nbreak", "tab\tname", "nul\x00name"} {
+		var stdout, stderr bytes.Buffer
+		err := execute(t.Context(), []string{"scan", "--slug", slug, "192.0.2.0/24"}, &stdout, &stderr, noScanner(t), nil)
+		if err == nil || !strings.Contains(err.Error(), "--slug") {
+			t.Fatal("accepted unsafe slug", err)
+		}
 	}
 }
