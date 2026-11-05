@@ -75,6 +75,11 @@ scan progress, observed rate, ETA, discoveries and deletion status. Narrow
 terminals use two lines per worker. Redirecting stderr automatically selects
 plain lifecycle logs. Ctrl-C and SIGTERM stop scans and start cleanup.
 
+Each worker is deleted as soon as its scanner finishes and its output is
+collected, including masscan's response-wait phase. Its status becomes
+`shutdown` after deletion is confirmed, while other shards continue scanning.
+The row keeps its scan statistics and any scan failure.
+
 Results stream independently into one local masscan list file. Files are
 created with mode `0600`, and existing files are never overwritten. Example:
 
@@ -117,6 +122,8 @@ Provisioning, readiness and package installation have bounded timeouts. Partial
 provisioning, worker failures, local output failures, Ctrl-C and normal success
 all attempt deletion. Cleanup has its own deadline even after scan cancellation,
 continues across worker failures, and verifies deletion by waiting for API 404.
+Final cleanup retries workers whose immediate deletion failed; workers with a
+confirmed shutdown are not deleted again or shown returning to cleanup.
 Ambiguous creation responses trigger repeated reconciliation by the run tag;
 creation POSTs are never blindly retried.
 
