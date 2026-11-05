@@ -34,13 +34,15 @@ Supply one or more company-owned IPv4 CIDRs. These examples use documentation
 addresses; replace them with your authorized target ranges:
 
 ```sh
-./masscanr 192.0.2.0/24 198.51.100.0/24
-./masscanr --shards=4 --rate=500000 --region=atl \
+./masscanr scan 192.0.2.0/24 198.51.100.0/24
+./masscanr scan --shards=4 --rate=500000 --region=atl \
   --instance-type=vc2-1c-1gb --output=inventory.list 192.0.2.0/24
-./masscanr --ports=22,80,443,8000-8100 192.0.2.0/24
+./masscanr scan --ports=22,80,443,8000-8100 192.0.2.0/24
 ```
 
-Options work before or after CIDRs. Use `--help` for all options.
+Scan options work before or after CIDRs, following `scan`. Use
+`masscanr scan --help` for scan options and `masscanr --help` for commands.
+Scanning requires the `scan` subcommand; a bare CIDR is an unknown command.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
@@ -67,6 +69,29 @@ and masscan version, with distinct native `--shards i/N` assignments.
 
 Two default workers request a combined 1,000,000 packets/second. The UI shows
 observed rates; actual throughput depends on the VPS and network.
+
+## Discover regions and instance types
+
+```sh
+./masscanr list-regions
+./masscanr list-instance-types
+./masscanr list-instance-types --region=ewr
+```
+
+`list-regions` shows each region's ID, name/city, country code and continent.
+`list-instance-types` defaults to Atlanta (`atl`) and lists plans currently
+available in that region, ordered by ID. Columns include family, vCPU count,
+RAM in MB, disk count/capacity, storage type, CPU sharing and CPU vendor where
+Vultr provides them. Missing values are shown as `-`.
+
+These commands read the public catalog without loading `.env`, requiring an
+API key or managing workers. Catalog pages are fetched automatically. Use
+`masscanr help <command>` or `<command> --help` for command-specific usage.
+
+The catalog includes plans that require block-storage boot. `scan` currently
+requires an included local boot disk and rejects unsupported boot storage
+before provisioning. Region availability is checked across plan families,
+including local-disk High Frequency and High Performance plans.
 
 ## Progress and results
 
