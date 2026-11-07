@@ -43,13 +43,16 @@ func (v *View) snapshot() state {
 	return v.state.copy()
 }
 
-func (v *View) Start() {
+func (v *View) Start() { v.start() }
+
+func (v *View) start(options ...tea.ProgramOption) {
 	if !v.terminal {
 		close(v.done)
 		return
 	}
 	m := newModel(v.snapshot(), v.snapshot, v.stop, v.cancel)
-	p := tea.NewProgram(m, tea.WithOutput(v.out), tea.WithoutSignalHandler())
+	options = append([]tea.ProgramOption{tea.WithOutput(v.out), tea.WithoutSignalHandler()}, options...)
+	p := tea.NewProgram(m, options...)
 	go func() {
 		defer close(v.done)
 		_, err := p.Run()
@@ -74,7 +77,15 @@ func (v *View) Stop() error {
 func (v *View) Update(e controller.Event) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	if !v.state.apply(e, time.Now()) || v.terminal {
+	if e.Shard == 0 && e.ID == "" {
+		v.runEvent(e)
+		return
+	}
+	changed := v.state.apply(e, time.Now())
+	if v.Phase != "Cleanup" && v.Phase != "Exporting" {
+		v.Phase = runPhase(v.state)
+	}
+	if !changed || v.terminal {
 		return
 	}
 	key := fmt.Sprint(e.Shard)

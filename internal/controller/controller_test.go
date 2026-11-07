@@ -492,3 +492,49 @@ func TestResultBoundariesAndValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestRunMetadataAndCollectionEvents(t *testing.T) {
+	var events []Event
+	summary, err := testController(newProvider(), fakeRunner{}).Run(t.Context(), testConfig(), io.Discard, func(e Event) { events = append(events, e) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := events[0]
+	if first.State != "validating" || first.Shard != 0 || first.RunID != summary.RunID || first.Seed == nil || *first.Seed != summary.Seed {
+		t.Fatal("missing early run identity", first)
+	}
+	for shard := 1; shard <= 2; shard++ {
+		collect, complete := -1, -1
+		for i, event := range events {
+			if event.Shard != shard {
+				continue
+			}
+			if event.State == "collecting" {
+				collect = i
+			}
+			if event.State == "completed" {
+				complete = i
+			}
+		}
+		if collect < 0 || complete <= collect {
+			t.Fatal("collection must precede completion", events)
+		}
+	}
+}
+
+func TestFailureStatePreservesErrorsJoinedWithCancellation(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		want string
+	}{
+		{context.Canceled, "cancelled"},
+		{fmt.Errorf("wrapped: %w", context.Canceled), "cancelled"},
+		{errors.Join(context.Canceled, context.Canceled), "cancelled"},
+		{context.DeadlineExceeded, "failed"},
+		{errors.Join(io.ErrClosedPipe, context.Canceled), "failed"},
+	} {
+		if got := failureState(tc.err); got != tc.want {
+			t.Fatalf("%v: %s", tc.err, got)
+		}
+	}
+}
