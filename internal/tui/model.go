@@ -127,6 +127,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		selected := min(m.selected, len(rows)-1)
 		m.detailOffset = min(m.detailOffset, max(0, len(canvas.detailLines(rows[selected]))-max(1, detailHeight-1)))
 	}
+	m.configOffset = min(m.configOffset, max(0, len(m.configLines())-max(1, m.height-5)))
 	return m, nil
 }
 
@@ -395,6 +396,3 @@ func rate(value float64) string {
 	}
 	return fmt.Sprintf("%.0f", value)
 }
-
-// The Config layer supplies the full effective configuration view.
-func (m model) configLines() []string { return []string{"Configuration"} }
