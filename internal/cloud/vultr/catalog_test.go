@@ -121,7 +121,7 @@ func TestScanValidationAcceptsAvailableNonVC2Family(t *testing.T) {
 			}
 			fmt.Fprint(w, `{"available_plans":["vhp-1c-1gb-amd"]}`)
 		case "/os":
-			fmt.Fprint(w, `{"os":[{"id":999,"name":"Debian 13 x64 (trixie)","arch":"x64","family":"debian"}]}`)
+			fmt.Fprint(w, `{"os":[{"id":999,"name":"Alpine Linux x64","arch":"x64","family":"alpinelinux"}]}`)
 		case "/plans":
 			fmt.Fprint(w, `{"plans":[{"id":"vhp-1c-1gb-amd","type":"vhp","disk":25}]}`)
 		default:

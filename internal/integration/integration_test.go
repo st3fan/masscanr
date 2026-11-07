@@ -67,7 +67,7 @@ func TestHTTPSSHController(t *testing.T) {
 				case strings.HasPrefix(r.URL.Path, "/regions/"):
 					fmt.Fprint(w, `{"available_plans":["vc2-1c-1gb"]}`)
 				case r.URL.Path == "/os":
-					fmt.Fprint(w, `{"os":[{"id":999,"name":"Debian 13 x64 (trixie)","arch":"x64","family":"debian"}]}`)
+					fmt.Fprint(w, `{"os":[{"id":999,"name":"Alpine Linux x64","arch":"x64","family":"alpinelinux"}]}`)
 				case r.URL.Path == "/plans":
 					fmt.Fprint(w, `{"plans":[{"id":"vc2-1c-1gb","type":"vc2","disk":25}]}`)
 				case r.URL.Path == "/instances" && r.Method == "POST":
