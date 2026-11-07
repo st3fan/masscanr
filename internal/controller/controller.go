@@ -25,15 +25,18 @@ type Event struct {
 	RunID                 string
 	Identity              *scan.Identity
 	Found                 *uint64
+	Prepared              *scan.Prepared
 	Seed                  *uint64 // Present only on run-start metadata events.
 }
 
 type Summary struct {
-	Identity  scan.Identity
-	RunID     string
-	Seed      uint64
-	Found     uint64
-	Undeleted []string
+	Identity                    scan.Identity
+	RunID                       string
+	Seed                        uint64
+	Found                       uint64
+	Undeleted                   []string
+	ScanOutcome, CleanupOutcome string
+	ReconciliationUnresolved    bool
 }
 
 type Timeouts struct {
@@ -63,9 +66,6 @@ func (c *Controller) Run(ctx context.Context, cfg scan.Config, out io.Writer, em
 	if err = cfg.Validate(); err != nil {
 		return summary, err
 	}
-	if ctx.Err() != nil {
-		return summary, ctx.Err()
-	}
 	if c.Backend == nil || c.Provider == nil || c.Runner == nil || out == nil {
 		return summary, fmt.Errorf("backend, provider, runner and output are required")
 	}
@@ -89,18 +89,20 @@ func (c *Controller) Run(ctx context.Context, cfg scan.Config, out io.Writer, em
 	if summary.Seed, err = scan.NewSeedWithin(c.Backend.MaxSeed()); err != nil {
 		return summary, err
 	}
-	var events sync.Mutex
-	notify := func(e Event) {
-		if emit != nil {
-			events.Lock()
-			defer events.Unlock()
-			if e.Identity != nil {
-				identity := *e.Identity
-				e.Identity = &identity
-			}
-			emit(e)
-		}
+	cfg.Backend = c.Backend.Name()
+	ctx, cancelPersistence := context.WithCancel(ctx)
+	defer cancelPersistence()
+	journal, redact, journalErr := startJournal(out, cfg, c.Timeouts, summary.RunID, summary.Seed, cancelPersistence)
+	if journalErr != nil {
+		return summary, journalErr
 	}
+	defer func() {
+		err = errors.Join(err, journal.Close())
+		if err != nil {
+			err = sanitizedError{cause: err, message: redact.clean(err.Error())}
+		}
+	}()
+	notify := journalEvents(journal, redact, emit)
 	plans := make([]backend.Plan, cfg.Shards)
 	for i := range plans {
 		plans[i], err = c.Backend.Build(cfg.Intent(), scan.Shard{Index: i + 1, Total: cfg.Shards}, summary.Seed)
@@ -109,13 +111,15 @@ func (c *Controller) Run(ctx context.Context, cfg scan.Config, out io.Writer, em
 		}
 	}
 	notify(Event{State: "validating", RunID: summary.RunID, Seed: &summary.Seed, Identity: &summary.Identity})
-	result := &results{out: out, cfg: cfg}
-	if err = result.line(fmt.Sprintf("#masscan\n# masscanr backend=%s run=%s seed=%d targets=%v ports=%s rate=%d shards=%d", c.Backend.Name(), summary.RunID, summary.Seed, cfg.Targets, cfg.PortSpec(), cfg.Rate, cfg.Shards)); err != nil {
-		return summary, err
-	}
+	result := &results{journal: journal, cfg: cfg}
 	var workers []tracked
 	attempted, ambiguous := false, false
 	defer func() {
+		err = errors.Join(err, journal.Err())
+		summary.ScanOutcome = "complete"
+		if err != nil {
+			summary.ScanOutcome = failureState(err)
+		}
 		cleanup := Event{State: "cleanup"}
 		if err != nil {
 			cleanup.Detail = err.Error()
@@ -125,16 +129,23 @@ func (c *Controller) Run(ctx context.Context, cfg scan.Config, out io.Writer, em
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), c.Timeouts.Cleanup)
 			defer cancel()
 			var cleanupErr error
-			summary.Undeleted, cleanupErr = c.cleanup(cleanupCtx, summary.RunID, workers, ambiguous, notify)
+			summary.Undeleted, summary.ReconciliationUnresolved, cleanupErr = c.cleanup(cleanupCtx, summary.RunID, workers, ambiguous, notify)
 			err = errors.Join(err, cleanupErr)
 		}
 		summary.Found = result.count
-		status := "complete"
-		if err != nil {
-			status = "incomplete"
+		summary.CleanupOutcome = "complete"
+		if len(summary.Undeleted) > 0 || summary.ReconciliationUnresolved {
+			summary.CleanupOutcome = "incomplete"
 		}
-		err = errors.Join(err, result.line("# status "+status))
+		detail := ""
+		if err != nil {
+			detail = redact.clean(err.Error())
+		}
+		err = errors.Join(err, journal.Finish(summary.ScanOutcome, summary.ReconciliationUnresolved, detail))
 	}()
+	if err = ctx.Err(); err != nil {
+		return summary, err
+	}
 	spec := cloud.Spec{RunID: summary.RunID, Region: cfg.Region, InstanceType: cfg.InstanceType}
 	validateCtx, stop := context.WithTimeout(ctx, c.Timeouts.Ready)
 	err = c.Provider.Validate(validateCtx, spec)
@@ -147,6 +158,9 @@ func (c *Controller) Run(ctx context.Context, cfg scan.Config, out io.Writer, em
 			return summary, ctx.Err()
 		}
 		notify(Event{Shard: shard, State: "provisioning"})
+		if err = journal.Err(); err != nil {
+			return summary, err
+		}
 		spec.Shard = shard
 		attempted = true
 		// Let an in-flight creation settle even after Ctrl-C so a successful
@@ -154,9 +168,16 @@ func (c *Controller) Run(ctx context.Context, cfg scan.Config, out io.Writer, em
 		createCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), c.Timeouts.Create)
 		w, createErr := c.Provider.Create(createCtx, spec)
 		cancel()
+		redact.remember(w.Password)
+		if createErr != nil || w.ID == "" {
+			ambiguous = true
+		}
 		if w.ID != "" {
 			workers = append(workers, tracked{shard: shard, worker: w})
 			notify(Event{Shard: shard, ID: w.ID, IP: w.IP, State: "booting"})
+		}
+		if err = journal.Err(); err != nil {
+			return summary, err
 		}
 		if createErr != nil || w.ID == "" {
 			ambiguous = true
@@ -169,13 +190,14 @@ func (c *Controller) Run(ctx context.Context, cfg scan.Config, out io.Writer, em
 	}
 	// Prepare all workers before scanning, so incompatible backend builds
 	// cannot silently use different shard permutations.
-	if summary.Identity, err = c.prepare(ctx, workers, summary.RunID, notify); err != nil {
+	if summary.Identity, err = c.prepare(ctx, workers, summary.RunID, notify, redact.remember); err != nil {
 		return summary, err
 	}
 	notify(Event{State: "prepared", Identity: &summary.Identity})
-	if err = result.line(fmt.Sprintf("# backend=%s version=%s build=%s", summary.Identity.Name, summary.Identity.Version, summary.Identity.Build)); err != nil {
+	if err = journal.Err(); err != nil {
 		return summary, err
 	}
+
 	scanCtx, cancel := context.WithTimeout(ctx, c.Timeouts.Scan)
 	defer cancel()
 	var wg sync.WaitGroup
@@ -189,7 +211,7 @@ func (c *Controller) Run(ctx context.Context, cfg scan.Config, out io.Writer, em
 			w := item.worker
 			notify(Event{Shard: item.shard, ID: w.ID, IP: w.IP, State: "scanning"})
 			plan := plans[item.shard-1]
-			var runErr error
+			runErr := journal.Err()
 			if runErr == nil {
 				runErr = c.Runner.Scan(scanCtx, w, plan, func(f scan.Finding) error {
 					if err := result.accept(item.shard, f); err != nil {
@@ -235,7 +257,7 @@ func (c *Controller) Run(ctx context.Context, cfg scan.Config, out io.Writer, em
 	return summary, failure
 }
 
-func (c *Controller) prepare(ctx context.Context, workers []tracked, runID string, notify func(Event)) (scan.Identity, error) {
+func (c *Controller) prepare(ctx context.Context, workers []tracked, runID string, notify func(Event), remember func(string)) (scan.Identity, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var wg sync.WaitGroup
@@ -251,6 +273,7 @@ func (c *Controller) prepare(ctx context.Context, workers []tracked, runID strin
 			w, err := c.ready(readyCtx, item.worker, runID)
 			stop()
 			if err == nil {
+				remember(w.Password)
 				item.worker = w
 				notify(Event{Shard: item.shard, ID: w.ID, IP: w.IP, State: "preparing"})
 				prepCtx, stop := context.WithTimeout(ctx, c.Timeouts.Prepare)
@@ -259,7 +282,7 @@ func (c *Controller) prepare(ctx context.Context, workers []tracked, runID strin
 				versions[index] = prepared.Identity
 				stop()
 				if err == nil {
-					notify(Event{Shard: item.shard, ID: w.ID, IP: w.IP, State: "ready", Detail: prepared.String()})
+					notify(Event{Shard: item.shard, ID: w.ID, IP: w.IP, State: "ready", Detail: prepared.String(), Prepared: &prepared})
 				}
 			}
 			if err != nil {
@@ -307,7 +330,7 @@ func (c *Controller) ready(ctx context.Context, initial cloud.Worker, runID stri
 	}
 }
 
-func (c *Controller) cleanup(ctx context.Context, runID string, initial []tracked, ambiguous bool, notify func(Event)) ([]string, error) {
+func (c *Controller) cleanup(ctx context.Context, runID string, initial []tracked, ambiguous bool, notify func(Event)) ([]string, bool, error) {
 	known := make(map[string]tracked)
 	shutdown := make(map[string]bool)
 	for _, item := range initial {
@@ -385,7 +408,7 @@ func (c *Controller) cleanup(ctx context.Context, runID string, initial []tracke
 		failure = errors.Join(failure, fmt.Errorf("undeleted instance %s: %w", id, err))
 	}
 	slices.Sort(remaining)
-	return remaining, errors.Join(failure, reconciliation)
+	return remaining, reconciliation != nil, errors.Join(failure, reconciliation)
 }
 
 func (c *Controller) shutdown(ctx context.Context, item tracked, runID string, notify func(Event)) error {

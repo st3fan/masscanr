@@ -28,6 +28,7 @@ import (
 	"github.com/st3fan/masscanr/internal/controller"
 	"github.com/st3fan/masscanr/internal/remote"
 	"github.com/st3fan/masscanr/internal/scan"
+	"github.com/st3fan/masscanr/internal/scanfile"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -223,6 +224,10 @@ func TestHTTPSSHController(t *testing.T) {
 				if len(instances) != 1 || instances["existing"] == nil || created != 2 || deleted != 2 {
 					t.Fatal("lifecycle invariant failed", created, deleted)
 				}
+				state, replayErr := scanfile.Replay(strings.NewReader(output.String()), nil)
+				if replayErr != nil || state.Finished == nil || state.Complete() == failScan || state.Found != summary.Found {
+					t.Fatal("invalid run document", replayErr, output.String())
+				}
 				if !failScan {
 					a, _ := seeds.Load("1")
 					b, _ := seeds.Load("2")
@@ -230,13 +235,13 @@ func TestHTTPSSHController(t *testing.T) {
 					if name == "zmap" {
 						expected = 4
 					}
-					if !strings.Contains(output.String(), "backend="+name) || summary.Identity.Name != name {
+					if !strings.Contains(output.String(), `"backend":"`+name+`"`) || summary.Identity.Name != name {
 						t.Error("backend identity missing", summary, output.String())
 					}
-					if a == nil || a != b || summary.Found != expected || !strings.Contains(output.String(), "# status complete") {
+					if a == nil || a != b || summary.Found != expected || !state.Complete() {
 						t.Fatal(output.String(), summary)
 					}
-				} else if !strings.Contains(output.String(), "# status incomplete") {
+				} else if state.Complete() {
 					t.Fatal(output.String())
 				}
 			})

@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/st3fan/masscanr/internal/scan"
+	"github.com/st3fan/masscanr/internal/scanfile"
 )
 
 // accept is the sole authoritative finding path for every backend. Preserve
@@ -34,9 +35,10 @@ func (r *results) accept(shard int, f scan.Finding) error {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if err := writeString(r.out, fmt.Sprintf("# shard %d\nopen tcp %d %s %d\n", shard, f.Port, f.Address, f.Timestamp)); err != nil {
+	if err := r.journal.Append(scanfile.Record{Type: "finding", Finding: &scanfile.Finding{Shard: shard, IP: f.Address, Port: f.Port, Protocol: f.Protocol, State: f.State, Timestamp: f.Timestamp}}, false); err != nil {
 		return err
 	}
+
 	r.count++
 	if r.counts == nil {
 		r.counts = make(map[int]uint64)
