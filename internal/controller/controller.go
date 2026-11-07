@@ -217,8 +217,13 @@ func (c *Controller) prepare(ctx context.Context, workers []tracked, runID strin
 				item.worker = w
 				notify(Event{Shard: item.shard, ID: w.ID, IP: w.IP, State: "preparing"})
 				prepCtx, stop := context.WithTimeout(ctx, c.Timeouts.Prepare)
-				versions[index], err = c.Runner.Prepare(prepCtx, w)
+				var prepared remote.Prepared
+				prepared, err = c.Runner.Prepare(prepCtx, w)
+				versions[index] = prepared.Version
 				stop()
+				if err == nil {
+					notify(Event{Shard: item.shard, ID: w.ID, IP: w.IP, State: "ready", Detail: prepared.String()})
+				}
 			}
 			if err != nil {
 				mu.Lock()

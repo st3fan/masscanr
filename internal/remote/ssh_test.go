@@ -5,11 +5,13 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -101,15 +103,35 @@ func sshFixture(t *testing.T, handle func(string, ssh.Channel) uint32) (*SSH, cl
 	return runner, cloud.Worker{ID: "fixture", IP: "127.0.0.1", Password: "test-password"}
 }
 
+func alpinePreparationFixture(command string, ch ssh.Channel) (bool, uint32) {
+	switch {
+	case command == "id -u":
+		fmt.Fprintln(ch, "0")
+	case command == "cat /etc/alpine-release":
+		fmt.Fprintln(ch, "3.24.4")
+	case command == "cat /etc/apk/repositories":
+		fmt.Fprintln(ch, "https://dl-cdn.alpinelinux.org/alpine/v3.24/main")
+	case strings.HasPrefix(command, "exec 'apk' '--repositories-file' '/dev/null' '--no-cache'"):
+		if !strings.HasSuffix(command, "'add' 'masscan~1.3.2' 'coreutils' >&2") || !strings.Contains(command, "https://dl-cdn.alpinelinux.org/alpine/v3.24/community") {
+			return false, 1
+		}
+	case command == "stdbuf -oL masscan --version":
+		fmt.Fprintln(ch, "Masscan version 1.3.2 (fixture)")
+		return true, 1
+	case command == "apk --no-network info --installed -v masscan coreutils":
+		fmt.Fprint(ch, "masscan-1.3.2-r2\ncoreutils-9.11-r0\n")
+	default:
+		return false, 0
+	}
+	return true, 0
+}
+
 func TestRootPasswordPrepareAndSeparateStreams(t *testing.T) {
 	runner, worker := sshFixture(t, func(command string, ch ssh.Channel) uint32 {
+		if handled, status := alpinePreparationFixture(command, ch); handled {
+			return status
+		}
 		switch {
-		case command == "id -u":
-			fmt.Fprint(ch, "0\n")
-		case strings.Contains(command, "apt-get"):
-		case command == "masscan --version":
-			fmt.Fprint(ch, "Masscan version 1.3.2 (fixture)\n")
-			return 1
 		case strings.HasPrefix(command, "exec stdbuf -oL masscan "):
 			if !strings.Contains(command, "'1/2'") {
 				t.Error(command)
@@ -126,7 +148,7 @@ func TestRootPasswordPrepareAndSeparateStreams(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	version, err := runner.Prepare(ctx, worker)
-	if err != nil || version != "1.3.2" {
+	if err != nil || version.Version != "1.3.2" || version.Release != "3.24.4" || version.Packages != "masscan-1.3.2-r2, coreutils-9.11-r0" {
 		t.Fatal(version, err)
 	}
 	var out bytes.Buffer
@@ -141,18 +163,21 @@ func TestRootPasswordPrepareAndSeparateStreams(t *testing.T) {
 }
 
 func TestPrepareRejectsUnexpectedVersionFailure(t *testing.T) {
+	var versionChecked atomic.Bool
 	runner, worker := sshFixture(t, func(command string, ch ssh.Channel) uint32 {
-		if command == "id -u" {
-			fmt.Fprintln(ch, "0")
-		}
-		if command == "masscan --version" {
+		if command == "stdbuf -oL masscan --version" {
+			versionChecked.Store(true)
 			fmt.Fprintln(ch, "Masscan version 1.3.2")
 			return 2
 		}
-		return 0
+		if handled, status := alpinePreparationFixture(command, ch); handled {
+			return status
+		}
+		t.Error(command)
+		return 1
 	})
-	if _, err := runner.Prepare(t.Context(), worker); err == nil {
-		t.Fatal("accepted unexpected version-command exit status")
+	if _, err := runner.Prepare(t.Context(), worker); err == nil || !versionChecked.Load() {
+		t.Fatal("unexpected version-command exit status not checked", err)
 	}
 }
 
@@ -201,5 +226,110 @@ func TestProgressRecordsAndShellQuoting(t *testing.T) {
 	}
 	if got := QuoteArgs([]string{"x'y", "$(reboot)"}); got != "'x'\\''y' '$(reboot)'" {
 		t.Fatal(got)
+	}
+}
+
+func TestPrepareRejectsPlatformDriftBeforeInstalling(t *testing.T) {
+	const stable = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main\n"
+	for _, tc := range []struct{ name, command, response, want string }{
+		{"earlier-patch", "cat /etc/alpine-release", "3.24.3\n", "unsupported Alpine release"},
+		{"other-series", "cat /etc/alpine-release", "3.25.4\n", "unsupported Alpine release"},
+		{"non-Alpine", "cat /etc/alpine-release", "Debian 13\n", "unsupported Alpine release"},
+		{"edge", "cat /etc/apk/repositories", stable + "https://dl-cdn.alpinelinux.org/alpine/edge/community\n", "outside stable"},
+		{"missing-main", "cat /etc/apk/repositories", "", "main repository is required"},
+		{"credential", "cat /etc/apk/repositories", "https://user:private-token@mirror.example/alpine/v3.24/main\n", "credential-free"},
+		{"oversized-policy", "cat /etc/apk/repositories", "https://mirror.example/alpine/edge/main\n" + strings.Repeat("# comment\n", 8000) + stable, "exceeds 64 KiB"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var installed atomic.Bool
+			r, w := sshFixture(t, func(command string, ch ssh.Channel) uint32 {
+				if command == tc.command {
+					fmt.Fprint(ch, tc.response)
+					return 0
+				}
+				if strings.HasPrefix(command, "exec 'apk'") {
+					installed.Store(true)
+				}
+				if handled, status := alpinePreparationFixture(command, ch); handled {
+					return status
+				}
+				t.Error(command)
+				return 1
+			})
+			_, err := r.Prepare(t.Context(), w)
+			if err == nil || !strings.Contains(err.Error(), tc.want) || strings.Contains(err.Error(), "private-token") || installed.Load() {
+				t.Fatal("policy not enforced before installation", err, installed.Load())
+			}
+		})
+	}
+}
+
+func TestPrepareReportsAPKAndScannerFailures(t *testing.T) {
+	for _, phase := range []string{"install", "version", "package-info"} {
+		t.Run(phase, func(t *testing.T) {
+			r, w := sshFixture(t, func(command string, ch ssh.Channel) uint32 {
+				if phase == "install" && strings.HasPrefix(command, "exec 'apk'") {
+					fmt.Fprint(ch.Stderr(), "fixture package unavailable")
+					return 2
+				}
+				if phase == "version" && command == "stdbuf -oL masscan --version" {
+					fmt.Fprintln(ch, "Masscan version 1.3.3")
+					return 1
+				}
+				if phase == "package-info" && command == "apk --no-network info --installed -v masscan coreutils" {
+					return 0
+				}
+				if handled, status := alpinePreparationFixture(command, ch); handled {
+					return status
+				}
+				t.Error(command)
+				return 1
+			})
+			_, err := r.Prepare(t.Context(), w)
+			if err == nil {
+				t.Fatal("accepted invalid preparation")
+			}
+			if phase == "install" && !strings.Contains(err.Error(), "fixture package unavailable") {
+				t.Fatal(err)
+			}
+			if phase == "version" && !strings.Contains(err.Error(), "unsupported masscan version") {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestPreparationCancellationDuringAPK(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	entered, release := make(chan struct{}), make(chan struct{})
+	defer close(release)
+	r, w := sshFixture(t, func(command string, ch ssh.Channel) uint32 {
+		if strings.HasPrefix(command, "exec 'apk'") {
+			close(entered)
+			<-release
+			return 1
+		}
+		if handled, status := alpinePreparationFixture(command, ch); handled {
+			return status
+		}
+		t.Error(command)
+		return 1
+	})
+	done := make(chan error, 1)
+	go func() { _, err := r.Prepare(ctx, w); done <- err }()
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("APK was not started")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("preparation did not cancel promptly")
 	}
 }

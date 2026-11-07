@@ -55,7 +55,7 @@ func runPhase(s state) string {
 			if phase != "Waiting for responses" {
 				phase = "Collecting results"
 			}
-		case "preparing":
+		case "preparing", "ready":
 			if phase == "Provisioning" {
 				phase = "Preparing"
 			}
