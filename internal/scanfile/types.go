@@ -13,24 +13,26 @@ import (
 
 const (
 	Format         = "masscanr.scan"
-	Schema         = 1
+	Schema         = 2
+	LegacySchema   = 1
 	MaxRecordBytes = 4 << 20
 	MaxShards      = 65535
 )
 
 type Config struct {
-	Targets      []netip.Prefix    `json:"targets"`
-	Ports        string            `json:"ports"`
-	Backend      string            `json:"backend"`
-	Seed         string            `json:"seed"`
-	Shards       int               `json:"shards"`
-	Rate         uint64            `json:"rate_per_worker"`
-	Provider     string            `json:"provider"`
-	Region       string            `json:"region"`
-	InstanceType string            `json:"instance_type"`
-	Timeouts     map[string]string `json:"timeouts"`
-	Output       string            `json:"output"`
-	Exports      [2]string         `json:"exports"`
+	RequestedTargets []scan.Target     `json:"requested_targets,omitempty"`
+	Targets          []netip.Prefix    `json:"targets"`
+	Ports            string            `json:"ports"`
+	Backend          string            `json:"backend"`
+	Seed             string            `json:"seed"`
+	Shards           int               `json:"shards"`
+	Rate             uint64            `json:"rate_per_worker"`
+	Provider         string            `json:"provider"`
+	Region           string            `json:"region"`
+	InstanceType     string            `json:"instance_type"`
+	Timeouts         map[string]string `json:"timeouts"`
+	Output           string            `json:"output"`
+	Exports          [2]string         `json:"exports"`
 }
 
 func (c Config) Validate() error {

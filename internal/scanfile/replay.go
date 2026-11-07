@@ -13,19 +13,22 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/st3fan/masscanr/internal/scan"
 )
 
 type State struct {
-	Header    *Header
-	Seq       uint64
-	Found     uint64
-	Workers   map[string]Worker
-	Backends  map[int]Backend
-	Progress  map[int]Progress
-	Counts    map[int]uint64
-	Finished  *Final
-	Truncated bool
-	ports     []uint16
+	Header      *Header
+	Seq         uint64
+	Found       uint64
+	Workers     map[string]Worker
+	Backends    map[int]Backend
+	Progress    map[int]Progress
+	Counts      map[int]uint64
+	Finished    *Final
+	Truncated   bool
+	ports       []uint16
+	attribution *scan.AttributionIndex
 }
 
 func workerKey(w Worker) string {
@@ -78,11 +81,21 @@ func (s *State) Apply(r Record) error {
 	}
 	if r.Type == "scan" && r.Scan != nil {
 		h := r.Scan
-		if s.Header != nil || r.Seq != 1 || h.Format != Format || h.Schema != Schema || h.RunID == "" || h.CreatedAt.IsZero() || h.ControllerVersion == "" || h.Label != "masscanr" || h.OwnershipTag != "masscanr-run-"+h.RunID {
+		if s.Header != nil || r.Seq != 1 || h.Format != Format || (h.Schema != Schema && h.Schema != LegacySchema) || h.RunID == "" || h.CreatedAt.IsZero() || h.ControllerVersion == "" || h.Label != "masscanr" || h.OwnershipTag != "masscanr-run-"+h.RunID {
 			return fmt.Errorf("invalid or unsupported scan header")
 		}
 		if err := h.Config.Validate(); err != nil {
 			return err
+		}
+		if h.Schema == Schema {
+			if err := scan.ValidateTargets(h.Config.RequestedTargets, h.Config.Targets); err != nil {
+				return err
+			}
+			s.attribution = scan.NewAttributionIndex(h.Config.RequestedTargets)
+		} else {
+			// Schema 1 never defined provenance. Ignore extension values rather
+			// than treating them as validated historical target attribution.
+			h.Config.RequestedTargets = nil
 		}
 		s.Header = h
 		s.Workers = make(map[string]Worker)
@@ -174,6 +187,9 @@ func (s *State) Apply(r Record) error {
 		}
 		s.Progress[p.Shard] = p
 	case r.Type == "finding" && r.Finding != nil:
+		if s.Header.Schema == LegacySchema {
+			r.Finding.Target, r.Finding.Prefix = "", ""
+		}
 		f := *r.Finding
 		if !validShard(f.Shard) || !f.IP.Is4() || f.Protocol != "tcp" || f.State != "open" || !slices.Contains(s.ports, f.Port) {
 			return fmt.Errorf("invalid finding")
@@ -182,12 +198,19 @@ func (s *State) Apply(r Record) error {
 		if w.Phase != "scanning" && w.Phase != "waiting" {
 			return fmt.Errorf("finding outside scanning")
 		}
-		inScope := false
-		for _, p := range s.Header.Config.Targets {
-			inScope = inScope || p.Contains(f.IP)
-		}
-		if !inScope {
-			return fmt.Errorf("out-of-scope finding")
+		if s.Header.Schema == Schema {
+			target, prefix, ok := s.attribution.Lookup(f.IP)
+			if !ok || f.Target != target || f.Prefix != prefix {
+				return fmt.Errorf("finding provenance disagrees with frozen target mapping")
+			}
+		} else {
+			inScope := false
+			for _, p := range s.Header.Config.Targets {
+				inScope = inScope || p.Contains(f.IP)
+			}
+			if !inScope {
+				return fmt.Errorf("out-of-scope finding")
+			}
 		}
 		s.Found++
 		s.Counts[f.Shard]++

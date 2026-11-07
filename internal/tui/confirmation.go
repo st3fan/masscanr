@@ -54,7 +54,7 @@ func warningLines(cfg scan.Config, work scan.Workload, width int) []string {
 	for _, t := range cfg.RequestedTargets {
 		b.WriteString(t.Target)
 		if t.Resolution != nil {
-			b.WriteString(" (RIPE snapshot " + t.Resolution.SnapshotAt.Format("2006-01-02T15:04:05Z") + ")")
+			b.WriteString(" (RIPE snapshot " + t.Resolution.SnapshotAt.UTC().Format("2006-01-02T15:04:05Z") + ")")
 		}
 		b.WriteByte('\n')
 	}

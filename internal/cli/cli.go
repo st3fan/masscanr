@@ -64,7 +64,7 @@ func execute(ctx context.Context, args []string, stdout, stderr io.Writer, build
 		if len(args) != 1 {
 			return fmt.Errorf("usage: masscanr --version")
 		}
-		_, err := fmt.Fprintln(stdout, "masscanr v7")
+		_, err := fmt.Fprintln(stdout, "masscanr v8")
 		return err
 	case "inspect":
 		return inspectScan(ctx, args[1:], stdout, stderr)
@@ -85,7 +85,7 @@ func rootHelp(out io.Writer) error {
 	_, err := fmt.Fprint(out, `Usage: masscanr <command> [options]
 
 Commands:
-  scan                  Scan IPv4 CIDRs using temporary Vultr workers
+  scan                  Scan IPv4 CIDRs, addresses or AS targets using temporary Vultr workers
   inspect               Inspect a saved .scan document offline
   export                Export .scan findings as list, CSV or JSONL
   list-regions          Show region IDs, names, countries and continents
@@ -144,7 +144,7 @@ func executeScanWithResolver(ctx context.Context, args []string, stdout, stderr 
 	fs.BoolVar(&noTUI, "no-tui", false, "print lifecycle logs instead of a live table")
 	fs.BoolVar(&version, "version", false, "print version and exit")
 	fs.Usage = func() {
-		fmt.Fprint(stderr, "Usage: masscanr scan [options] IPv4-CIDR [IPv4-CIDR ...]\n\nTemporary Vultr workers run the selected scanner as root. The local controller needs no root.\nDefault ports: Nmap 7.95 top 100 TCP. Rate is per worker.\nCredentials: VULTR_API_TOKEN must be set in the environment.\nMore than 1,000,000 planned probes (unique addresses x TCP ports) requires interactive confirmation.\nNo unattended bypass; stdin and stderr must be terminals for large scans.\n\n")
+		fmt.Fprint(stderr, "Usage: masscanr scan [options] TARGET [TARGET ...]\n\nTemporary Vultr workers run the selected scanner as root. The local controller needs no root.\nTargets: IPv4 CIDR (10.0.0.0/8 or 10/8), IPv4 address, or AS1234.\nAS targets resolve through RIPE to IPv4 origin prefixes before confirmation.\nDefault ports: Nmap 7.95 top 100 TCP. Rate is per worker.\nCredentials: VULTR_API_TOKEN must be set in the environment.\nMore than 1,000,000 planned probes (unique addresses x TCP ports) requires interactive confirmation.\nNo unattended bypass; stdin and stderr must be terminals for large scans.\n\n")
 		fs.PrintDefaults()
 	}
 	ordered, orderErr := interspersed(fs, args)
@@ -158,7 +158,7 @@ func executeScanWithResolver(ctx context.Context, args []string, stdout, stderr 
 		return err
 	}
 	if version {
-		fmt.Fprintln(stdout, "masscanr v7")
+		fmt.Fprintln(stdout, "masscanr v8")
 		return nil
 	}
 	if strings.ContainsAny(slug, "/\\") || strings.IndexFunc(slug, unicode.IsControl) >= 0 {
@@ -316,6 +316,7 @@ func executeScanWithResolver(ctx context.Context, args []string, stdout, stderr 
 			fmt.Fprintf(stderr, "Exports: %s | %s\n", paths[0], paths[1])
 		}
 	}
+	fmt.Fprintf(stderr, "Requested targets: %s | effective IPv4 prefixes: %d | addresses: %s | planned probes: %s\n", targetNames(cfg.RequestedTargets), len(cfg.Targets), tui.Count(work.Addresses), tui.Count(work.Probes))
 	if len(summary.Undeleted) > 0 {
 		fmt.Fprintf(stderr, "VPS deletion unconfirmed: %s\n", strings.Join(summary.Undeleted, ", "))
 	}

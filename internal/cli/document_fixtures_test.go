@@ -21,7 +21,7 @@ func fixtureFindings() []scanfile.Finding {
 // fixtures do not execute the application, scanners or a cloud client.
 func scanFixture(name string, findings []scanfile.Finding, outcome string) string {
 	var out bytes.Buffer
-	h := scanfile.Header{Format: scanfile.Format, Schema: scanfile.Schema, RunID: "fixture", CreatedAt: time.Date(2026, 11, 7, 15, 0, 0, 0, time.UTC), ControllerVersion: "v6", Label: "masscanr", OwnershipTag: "masscanr-run-fixture", Config: scanfile.Config{Targets: []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24")}, Ports: "80,443", Backend: name, Seed: "7", Shards: 2, Rate: 500000, Provider: "vultr", Region: "atl", InstanceType: "vc2-1c-1gb", Output: "fixture.scan", Timeouts: map[string]string{"create": "1s", "ready": "1s", "prepare": "1s", "scan": "1s", "cleanup": "1s", "delete": "1s", "poll": "1s"}}}
+	h := scanfile.Header{Format: scanfile.Format, Schema: scanfile.LegacySchema, RunID: "fixture", CreatedAt: time.Date(2026, 11, 7, 15, 0, 0, 0, time.UTC), ControllerVersion: "v6", Label: "masscanr", OwnershipTag: "masscanr-run-fixture", Config: scanfile.Config{Targets: []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24")}, Ports: "80,443", Backend: name, Seed: "7", Shards: 2, Rate: 500000, Provider: "vultr", Region: "atl", InstanceType: "vc2-1c-1gb", Output: "fixture.scan", Timeouts: map[string]string{"create": "1s", "ready": "1s", "prepare": "1s", "scan": "1s", "cleanup": "1s", "delete": "1s", "poll": "1s"}}}
 	w, err := scanfile.NewWriter(&out, h, nil)
 	must := func(err error) {
 		if err != nil {

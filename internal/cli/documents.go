@@ -12,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 
 	"github.com/st3fan/masscanr/internal/scanfile"
 )
@@ -77,6 +76,9 @@ func inspectScan(ctx context.Context, args []string, stdout, stderr io.Writer) (
 		fmt.Fprintln(stderr, "Partial results: ignored an unterminated final record.")
 	}
 	fmt.Fprintf(out, "Scan outcome: %s\nCleanup outcome: %s\nAccepted findings: %d\nRecords: %d\n", scanOutcome, cleanup, s.Found, s.Seq)
+	if s.Header.Schema == scanfile.LegacySchema {
+		fmt.Fprintln(out, "Target attribution: unavailable (schema 1)")
+	}
 	config, err := json.MarshalIndent(s.Header.Config, "", "  ")
 	if err != nil {
 		return err
@@ -164,6 +166,9 @@ func exportScan(ctx context.Context, args []string, stdout, stderr io.Writer) (e
 	if s.Finished != nil && s.Finished.CleanupOutcome != "complete" {
 		fmt.Fprintln(stderr, "Worker cleanup is incomplete; inspect the .scan document for details.")
 	}
+	if s.Header.Schema == scanfile.LegacySchema {
+		fmt.Fprintln(stderr, "Target attribution unavailable in schema 1: CSV provenance cells are empty; JSONL provenance fields are absent.")
+	}
 	_, err = fmt.Fprintf(stderr, "Export: %s | findings: %d\n", *output, s.Found)
 	return err
 }
@@ -173,7 +178,7 @@ func writeFormat(in io.Reader, out io.Writer, format string, allow bool) (scanfi
 	cw := csv.NewWriter(buffer)
 	jw := json.NewEncoder(buffer)
 	if format == "csv" {
-		if err := cw.Write([]string{"ip", "port", "addr", "protocol", "state", "timestamp"}); err != nil {
+		if err := cw.Write(exportColumns); err != nil {
 			return scanfile.State{}, err
 		}
 	}
@@ -184,7 +189,7 @@ func writeFormat(in io.Reader, out io.Writer, format string, allow bool) (scanfi
 		row := exportFinding(f)
 		switch format {
 		case "csv":
-			return cw.Write([]string{row.IP, strconv.FormatUint(uint64(row.Port), 10), row.Addr, row.Protocol, row.State, strconv.FormatUint(row.Timestamp, 10)})
+			return cw.Write(exportRow(row))
 		case "jsonl":
 			return jw.Encode(row)
 		case "list":

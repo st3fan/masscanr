@@ -20,10 +20,10 @@ func TestExportFindingSchemasAndOrder(t *testing.T) {
 	}
 	rows, err := csv.NewReader(&csvOut).ReadAll()
 	want := [][]string{
-		{"ip", "port", "addr", "protocol", "state", "timestamp"},
-		{"192.0.2.1", "80", "192.0.2.1:80", "tcp", "open", "1700000000"},
-		{"192.0.2.1", "443", "192.0.2.1:443", "tcp", "open", "1700000001"},
-		{"192.0.2.1", "443", "192.0.2.1:443", "tcp", "open", "1700000001"},
+		{"ip", "port", "addr", "protocol", "state", "timestamp", "target", "prefix"},
+		{"192.0.2.1", "80", "192.0.2.1:80", "tcp", "open", "1700000000", "", ""},
+		{"192.0.2.1", "443", "192.0.2.1:443", "tcp", "open", "1700000001", "", ""},
+		{"192.0.2.1", "443", "192.0.2.1:443", "tcp", "open", "1700000001", "", ""},
 	}
 	if err != nil || !reflect.DeepEqual(rows, want) {
 		t.Fatal(rows, err)
@@ -49,7 +49,7 @@ func TestExportFindingSchemasAndOrder(t *testing.T) {
 
 func TestEmptyScanExports(t *testing.T) {
 	var c, j bytes.Buffer
-	if err := writeExports(strings.NewReader(scanFixture("masscan", nil, "complete")), &c, &j); err != nil || c.String() != "ip,port,addr,protocol,state,timestamp\n" || j.Len() != 0 {
+	if err := writeExports(strings.NewReader(scanFixture("masscan", nil, "complete")), &c, &j); err != nil || c.String() != "ip,port,addr,protocol,state,timestamp,target,prefix\n" || j.Len() != 0 {
 		t.Fatal(err, c.String(), j.String())
 	}
 }
