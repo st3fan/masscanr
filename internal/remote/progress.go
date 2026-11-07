@@ -20,8 +20,8 @@ type Progress struct {
 
 var statusPattern = regexp.MustCompile(`rate:\s*([0-9.]+)-kpps,\s*([0-9.]+)% done,\s*(?:(\d+):(\d+):(\d+) remaining|waiting (\d+)-secs),\s*found=(\d+)`)
 
-// ParseProgress matches the human-readable stderr emitted by Debian's masscan
-// 1.3.2; no dependency on the newer upstream --json-status feature.
+// ParseProgress matches packaged masscan 1.3.2 stderr, verified on Alpine/musl;
+// no dependency on the newer upstream --json-status feature.
 func ParseProgress(line string) (Progress, bool) {
 	m := statusPattern.FindStringSubmatch(line)
 	if m == nil {

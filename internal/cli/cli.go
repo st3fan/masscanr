@@ -61,7 +61,7 @@ func execute(ctx context.Context, args []string, stdout, stderr io.Writer, build
 		if len(args) != 1 {
 			return fmt.Errorf("usage: masscanr --version")
 		}
-		_, err := fmt.Fprintln(stdout, "masscanr v2")
+		_, err := fmt.Fprintln(stdout, "masscanr v3")
 		return err
 	case "scan":
 		return executeScan(ctx, args[1:], stdout, stderr, build)
@@ -137,7 +137,7 @@ func executeScanWithView(ctx context.Context, args []string, stdout, stderr io.W
 		return err
 	}
 	if version {
-		fmt.Fprintln(stdout, "masscanr v2")
+		fmt.Fprintln(stdout, "masscanr v3")
 		return nil
 	}
 	if strings.ContainsAny(slug, "/\\") || strings.IndexFunc(slug, unicode.IsControl) >= 0 {
