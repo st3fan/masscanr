@@ -11,6 +11,13 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
+const (
+	terminalGreen  = "#00FF00"
+	terminalYellow = "#FFFF00"
+	terminalRed    = "#FF5555"
+	terminalBlack  = "#000000"
+)
+
 type frameMsg struct {
 	state state
 	now   time.Time
@@ -150,7 +157,7 @@ func (m model) View() tea.View {
 	}
 	header := []string{fmt.Sprintf("masscanr  |  Run: %s  |  %s", run, phase)}
 	tabs := []string{"1 Overview", "2 Config"}
-	tabs[m.tab] = m.paint("["+tabs[m.tab]+"]", "6")
+	tabs[m.tab] = m.paint("["+tabs[m.tab]+"]", terminalYellow)
 	header = append(header, strings.Join(tabs, "   "), strings.Repeat("─", w))
 	footer := "tab tabs  ↑↓ shard  enter details  pgup/pgdown scroll  ctrl+c stop"
 	if m.tab == 1 {
@@ -183,10 +190,10 @@ func (m model) View() tea.View {
 			fmt.Sprintf("Rate %s pps  |  Found %d  |  Scan ETA %s", rate(total.Rate), total.Found, eta),
 			fmt.Sprintf("Shards %d/%d complete  |  VPSs remaining %d", total.Complete, m.state.Config.Scan.Shards, total.VPSs))
 		if total.Stale {
-			header = append(header, m.paint("Stale telemetry: last progress retained; stale rates excluded", "3"))
+			header = append(header, m.paint("Stale telemetry: last progress retained; stale rates excluded", terminalYellow))
 		}
 		if m.state.Final != nil && m.state.Final.Detail != "" {
-			header = append(header, m.paint("Run error (enter details): "+m.state.Final.Detail, "1"))
+			header = append(header, m.paint("Run error (enter details): "+m.state.Final.Detail, terminalRed))
 		}
 		body = m.overview(max(0, m.height-len(header)-2))
 	} else {
@@ -205,7 +212,14 @@ func (m model) View() tea.View {
 	for i, line := range lines {
 		lines[i] = ansi.Truncate(line, w, "")
 	}
-	v := tea.NewView(strings.Join(lines, "\n"))
+	content := strings.Join(lines, "\n")
+	if m.color {
+		content = lipgloss.NewStyle().Foreground(lipgloss.Color(terminalGreen)).Background(lipgloss.Color(terminalBlack)).Width(w).Render(content)
+	}
+	v := tea.NewView(content)
+	if m.color {
+		v.ForegroundColor, v.BackgroundColor = lipgloss.Color(terminalGreen), lipgloss.Color(terminalBlack)
+	}
 	v.AltScreen = true
 	return v
 }
@@ -271,13 +285,13 @@ func (m model) overview(height int) []string {
 		color := ""
 		switch {
 		case r.State == "failed" || r.Cleanup == "cleanup failed":
-			color = "1"
+			color = terminalRed
 		case r.State == "waiting" || r.Cleanup == "deleting":
-			color = "3"
+			color = terminalYellow
 		case r.State == "completed" || r.Cleanup == "shutdown":
-			color = "2"
+			color = terminalGreen
 		case i == selected:
-			color = "6"
+			color = terminalYellow
 		}
 		if color != "" {
 			line = m.paint(line, color)
@@ -337,7 +351,10 @@ func shardETA(r shardState, now time.Time) string {
 
 func progressBar(percent float64, width int) string {
 	n := min(width, max(0, int(percent*float64(width)/100)))
-	return strings.Repeat("█", n) + strings.Repeat("░", width-n)
+	if n == width {
+		return "[" + strings.Repeat("=", width) + "]"
+	}
+	return "[" + strings.Repeat("=", n) + ">" + strings.Repeat(".", width-n-1) + "]"
 }
 
 func rate(value float64) string {

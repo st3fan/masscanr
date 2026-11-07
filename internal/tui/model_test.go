@@ -121,7 +121,7 @@ func TestLongDiagnosticsAreSanitizedAndInspectable(t *testing.T) {
 
 func TestUnknownStaleAndCleanupFailureVisible(t *testing.T) {
 	m := fixtureModel(2)
-	if strings.Contains(m.View().Content, "0.0%░") {
+	if strings.Count(m.View().Content, "0.0%") != 1 {
 		t.Fatal("invented worker progress")
 	}
 	m.state.apply(controller.Event{Shard: 1, State: "scanning", Progress: &remote.Progress{Percent: 90, Rate: 500000}}, m.now.Add(-staleAfter))
@@ -194,5 +194,34 @@ func TestCompletedRunStaysNavigableUntilExplicitQuit(t *testing.T) {
 	_, cmd := key(m, 'q', 0)
 	if cmd != nil {
 		t.Fatal("q must not bypass active cleanup")
+	}
+}
+
+func TestASCIIBarsAndGreenOnBlackTheme(t *testing.T) {
+	for _, tc := range []struct {
+		percent float64
+		want    string
+	}{
+		{0, "[>.......]"}, {50, "[====>...]"}, {100, "[========]"},
+	} {
+		if got := progressBar(tc.percent, 8); got != tc.want {
+			t.Fatalf("%g%%: %q", tc.percent, got)
+		}
+	}
+	m := fixtureModel(1)
+	m.color = true
+	v := m.View()
+	if v.ForegroundColor == nil || v.BackgroundColor == nil {
+		t.Fatal("theme colors missing")
+	}
+	r, g, b, _ := v.ForegroundColor.RGBA()
+	br, bg, bb, _ := v.BackgroundColor.RGBA()
+	if r != 0 || g != 65535 || b != 0 || br != 0 || bg != 0 || bb != 0 {
+		t.Fatal("expected bright green on black")
+	}
+	m.color = false
+	plain := m.View()
+	if plain.ForegroundColor != nil || plain.BackgroundColor != nil || strings.Contains(plain.Content, "\x1b") {
+		t.Fatal("plain mode includes color controls")
 	}
 }
