@@ -30,6 +30,7 @@ go.work.sum
 .env.*
 /masscanr
 *.list
+*.scan
 *.csv
 *.jsonl
 

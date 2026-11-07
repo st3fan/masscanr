@@ -21,7 +21,7 @@ func TestBackendSelection(t *testing.T) {
 	var configs []scan.Config
 	for _, name := range []string{"", "masscan", "zmap"} {
 		t.Run(name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "scan.list")
+			path := filepath.Join(t.TempDir(), "scan.scan")
 			args := []string{"192.0.2.0/24", "--ports=22,443", "--output", path}
 			want := name
 			if want == "" {
@@ -35,7 +35,7 @@ func TestBackendSelection(t *testing.T) {
 				}
 				return func(_ context.Context, cfg scan.Config, out io.Writer, _ func(controller.Event)) (controller.Summary, error) {
 					configs = append(configs, cfg)
-					_, err := io.WriteString(out, "# backend="+want+"\nopen tcp 443 192.0.2.1 1700000000\n# status complete\n")
+					_, err := io.WriteString(out, scanFixture(want, fixtureFindings()[1:2], "complete"))
 					return controller.Summary{Identity: scan.Identity{Name: want, Version: "fixture", Build: "fixture"}}, err
 				}
 			}
@@ -59,7 +59,7 @@ func TestBackendSelection(t *testing.T) {
 func TestBackendPreflightBeforeOutputOrCredentials(t *testing.T) {
 	t.Setenv("VULTR_API_TOKEN", "")
 	for _, opts := range [][]string{{"--backend", "unknown"}, {"--backend", "ZMAP"}, {"--backend", "zmap", "--rate=2147483648"}, {"--backend", "zmap", "--shards=65536"}, {"--backend", "zmap", "--ports=80", "--shards=2"}} {
-		path := filepath.Join(t.TempDir(), "scan.list")
+		path := filepath.Join(t.TempDir(), "scan.scan")
 		var out, errout bytes.Buffer
 		args := append([]string{"192.0.2.1/32", "--output", path}, opts...)
 		err := executeScan(t.Context(), args, &out, &errout, noScanner(t))
@@ -85,7 +85,7 @@ func TestBothBackendsStdoutAndPlainOutput(t *testing.T) {
 				build := func(_ string, _ controller.Timeouts, engine backend.Backend) runFunc {
 					return func(_ context.Context, _ scan.Config, out io.Writer, emit func(controller.Event)) (controller.Summary, error) {
 						emit(controller.Event{Shard: 1, State: "scanning"})
-						_, err := io.WriteString(out, "# backend="+engine.Name()+"\n"+exportFixture)
+						_, err := io.WriteString(out, scanFixture(engine.Name(), fixtureFindings(), "complete"))
 						return controller.Summary{Identity: scan.Identity{Name: engine.Name()}}, err
 					}
 				}
@@ -93,7 +93,7 @@ func TestBothBackendsStdoutAndPlainOutput(t *testing.T) {
 				if err := executeScan(t.Context(), args, &out, &errout, build); err != nil {
 					t.Fatal(err)
 				}
-				if strings.Contains(out.String(), "scanning") || strings.Contains(out.String(), "synack") || !strings.Contains(out.String(), "open tcp") || strings.Contains(errout.String(), "\x1b") || !strings.Contains(errout.String(), "Backend: "+name) {
+				if strings.Contains(out.String(), "synack") || !strings.Contains(out.String(), `"type":"finding"`) || strings.Contains(errout.String(), "\x1b") || !strings.Contains(errout.String(), "Backend: "+name) {
 					t.Fatal(out.String(), errout.String())
 				}
 				for _, ext := range []string{"csv", "jsonl"} {

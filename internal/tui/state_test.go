@@ -13,7 +13,7 @@ func TestAggregateProgressAndOutcomes(t *testing.T) {
 	now := time.Unix(100, 0)
 	cfg := scan.Defaults()
 	cfg.Shards = 4
-	s := newState(NewRunConfig(cfg, controller.DefaultTimeouts(), "inventory.list", [2]string{}))
+	s := newState(NewRunConfig(cfg, controller.DefaultTimeouts(), "inventory.scan", [2]string{}))
 	if total := s.totals(now); total.Percent != 0 || total.ETAKnown || total.VPSs != 0 || s.rows["1"].Known {
 		t.Fatalf("pending: %+v", total)
 	}

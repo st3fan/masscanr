@@ -19,7 +19,7 @@ func TestV2RunWalkthrough(t *testing.T) {
 	cfg.Targets, _ = scan.ParseTargets([]string{"192.0.2.42/24", "192.0.2.0/25", "198.51.100.0/24", "203.0.113.0/24"})
 	cfg.Ports, _ = scan.ParsePorts("1-65535")
 	v := New(io.Discard, false, cfg.Shards)
-	v.Configure(NewRunConfig(cfg, controller.DefaultTimeouts(), "inventory.list", [2]string{"inventory.csv", "inventory.jsonl"}), nil)
+	v.Configure(NewRunConfig(cfg, controller.DefaultTimeouts(), "inventory.scan", [2]string{"inventory.csv", "inventory.jsonl"}), nil)
 	v.Start()
 	defer v.Stop()
 	seed := uint64(123)

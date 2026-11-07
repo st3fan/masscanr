@@ -47,7 +47,7 @@ func (v *fixtureView) Finish(ctx context.Context, summary controller.Summary, er
 
 func TestUIConfigAndExportLifecycle(t *testing.T) {
 	t.Setenv("VULTR_API_TOKEN", "fixture-secret")
-	path := filepath.Join(t.TempDir(), "scan.list")
+	path := filepath.Join(t.TempDir(), "scan.scan")
 	var stdout, stderr bytes.Buffer
 	v := &fixtureView{}
 	reviewed := false
@@ -98,7 +98,7 @@ func TestUIConfigAndExportLifecycle(t *testing.T) {
 
 func TestUICancellationPreservesResultsAndReportsUndeleted(t *testing.T) {
 	t.Setenv("VULTR_API_TOKEN", "fixture-secret")
-	path := filepath.Join(t.TempDir(), "scan.list")
+	path := filepath.Join(t.TempDir(), "scan.scan")
 	var stdout, stderr bytes.Buffer
 	v := &fixtureView{}
 	v.start = func() { v.cancel() } // Same callback used by the Ctrl+C key.
@@ -114,7 +114,7 @@ func TestUICancellationPreservesResultsAndReportsUndeleted(t *testing.T) {
 				t.Fatal("UI cancellation did not reach controller")
 			}
 			emit(controller.Event{Shard: 1, ID: "worker-1", State: "cleanup failed"})
-			io.WriteString(out, "# status incomplete\n")
+			io.WriteString(out, scanFixture("masscan", nil, "cancelled"))
 			return controller.Summary{RunID: "fixture", Undeleted: []string{"worker-1"}}, ctx.Err()
 		}
 	}
@@ -133,7 +133,7 @@ func TestNoTUIAndRedirectedStderrRemainPlain(t *testing.T) {
 	t.Setenv("VULTR_API_TOKEN", "fixture-secret")
 	for _, flag := range []string{"", "--no-tui"} {
 		var stdout, stderr bytes.Buffer
-		args := []string{"192.0.2.0/24", "--output", filepath.Join(t.TempDir(), "scan.list")}
+		args := []string{"192.0.2.0/24", "--output", filepath.Join(t.TempDir(), "scan.scan")}
 		if flag != "" {
 			args = append(args, flag)
 		}

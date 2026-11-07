@@ -36,7 +36,7 @@ func (m model) configLines() []string {
 	}
 	output := c.Output
 	if output == "-" {
-		output = "stdout (streaming native list)"
+		output = "stdout (streaming scan JSON Lines)"
 	}
 	version, build := "pending", "pending"
 	if m.state.Identity.Version != "" {
@@ -63,7 +63,7 @@ func (m model) configLines() []string {
 		"Region                "+c.Scan.Region,
 		"Instance type         "+c.Scan.InstanceType,
 		"", "OUTPUT",
-		"List                  "+output,
+		"Scan document         "+output,
 		"Expected CSV          "+c.Exports[0],
 		"Expected JSONL        "+c.Exports[1],
 		"Exports are produced only after a successful scan.",

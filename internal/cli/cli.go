@@ -19,6 +19,7 @@ import (
 	"github.com/st3fan/masscanr/internal/controller"
 	"github.com/st3fan/masscanr/internal/remote"
 	"github.com/st3fan/masscanr/internal/scan"
+	"github.com/st3fan/masscanr/internal/scanfile"
 	"github.com/st3fan/masscanr/internal/tui"
 	"golang.org/x/term"
 )
@@ -45,7 +46,7 @@ func execute(ctx context.Context, args []string, stdout, stderr io.Writer, build
 			return fmt.Errorf("usage: masscanr help [command]")
 		}
 		switch args[1] {
-		case "scan", "list-regions", "list-instance-types":
+		case "scan", "inspect", "export", "list-regions", "list-instance-types":
 			args = []string{args[1], "--help"}
 		default:
 			return fmt.Errorf("unknown command %q", args[1])
@@ -61,8 +62,12 @@ func execute(ctx context.Context, args []string, stdout, stderr io.Writer, build
 		if len(args) != 1 {
 			return fmt.Errorf("usage: masscanr --version")
 		}
-		_, err := fmt.Fprintln(stdout, "masscanr v5")
+		_, err := fmt.Fprintln(stdout, "masscanr v6")
 		return err
+	case "inspect":
+		return inspectScan(ctx, args[1:], stdout, stderr)
+	case "export":
+		return exportScan(ctx, args[1:], stdout, stderr)
 	case "scan":
 		return executeScan(ctx, args[1:], stdout, stderr, build)
 	case "list-regions":
@@ -79,6 +84,8 @@ func rootHelp(out io.Writer) error {
 
 Commands:
   scan                  Scan IPv4 CIDRs using temporary Vultr workers
+  inspect               Inspect a saved .scan document offline
+  export                Export .scan findings as list, CSV or JSONL
   list-regions          Show region IDs, names, countries and continents
   list-instance-types   Show plans available in a region (default: atl)
 
@@ -114,7 +121,7 @@ func executeScanWithView(ctx context.Context, args []string, stdout, stderr io.W
 	var ports, output, slug string
 	fs.StringVar(&ports, "ports", scan.TopPorts, "TCP ports/ranges, e.g. 22,80,443,8000-8100 (default: Nmap top 100)")
 	fs.StringVar(&ports, "p", scan.TopPorts, "alias for --ports")
-	fs.StringVar(&output, "output", "", "new local list file plus CSV/JSONL exports (default: timestamped masscanr-*); - streams list to stdout")
+	fs.StringVar(&output, "output", "", "new .scan document plus CSV/JSONL exports (default: timestamped masscanr-*.scan); - streams scan JSON Lines to stdout")
 	fs.StringVar(&slug, "slug", "", "text in generated filenames (with --output=-, names the CSV/JSONL exports)")
 	timeouts := controller.DefaultTimeouts()
 	fs.DurationVar(&timeouts.Scan, "timeout", timeouts.Scan, "maximum scanning time, followed by cleanup")
@@ -137,7 +144,7 @@ func executeScanWithView(ctx context.Context, args []string, stdout, stderr io.W
 		return err
 	}
 	if version {
-		fmt.Fprintln(stdout, "masscanr v5")
+		fmt.Fprintln(stdout, "masscanr v6")
 		return nil
 	}
 	if strings.ContainsAny(slug, "/\\") || strings.IndexFunc(slug, unicode.IsControl) >= 0 {
@@ -148,6 +155,9 @@ func executeScanWithView(ctx context.Context, args []string, stdout, stderr io.W
 	}
 	if cfg.Ports, err = scan.ParsePorts(ports); err != nil {
 		return err
+	}
+	if cfg.Shards > scanfile.MaxShards {
+		return fmt.Errorf("scan documents support at most %d shards", scanfile.MaxShards)
 	}
 	if err = cfg.Validate(); err != nil {
 		return err
@@ -183,7 +193,7 @@ func executeScanWithView(ctx context.Context, args []string, stdout, stderr io.W
 	} else {
 		// Keep stdout streaming while retaining a private source for conversion.
 		exportOutput = outputFilename(slug, time.Now())
-		file, err = os.CreateTemp("", "masscanr-results-*.list")
+		file, err = os.CreateTemp("", "masscanr-results-*.scan")
 		if err != nil {
 			return fmt.Errorf("create temporary export source: %w", err)
 		}
@@ -219,7 +229,8 @@ func executeScanWithView(ctx context.Context, args []string, stdout, stderr io.W
 		return view.Stop()
 	}
 	defer func() { err = errors.Join(err, stopView()) }()
-	summary, scanErr := build(token, timeouts, engine)(runCtx, cfg, destination, view.Update)
+	persisted := privateDestination{Destination: scanfile.Destination{Writer: destination, SyncFunc: file.Sync, Output: output, Exports: paths}, token: token}
+	summary, scanErr := build(token, timeouts, engine)(runCtx, cfg, persisted, view.Update)
 	if summary.Identity.Name == "" {
 		summary.Identity.Name = engine.Name()
 	}
@@ -233,7 +244,7 @@ func executeScanWithView(ctx context.Context, args []string, stdout, stderr io.W
 	if scanErr == nil {
 		view.Update(controller.Event{State: "exporting"})
 		if exportErr = exportResults(source, exportOutput); exportErr != nil {
-			exportErr = fmt.Errorf("scan completed but CSV/JSONL export failed (native list output: %s): %w", output, exportErr)
+			exportErr = fmt.Errorf("scan completed but CSV/JSONL export failed (scan document: %s): %w", output, exportErr)
 		}
 	}
 	view.Finish(ctx, summary, errors.Join(scanErr, exportErr))
@@ -242,7 +253,10 @@ func executeScanWithView(ctx context.Context, args []string, stdout, stderr io.W
 		uiErr = fmt.Errorf("terminal UI: %w", uiErr)
 	}
 	err = errors.Join(scanErr, exportErr, uiErr)
-	if scanErr != nil {
+	if scanErr != nil && summary.ScanOutcome == "complete" {
+		fmt.Fprintf(stderr, "Backend: %s\n", summary.Identity.String())
+		fmt.Fprintf(stderr, "Scan complete. Results: %s | run: %s | found: %d | cleanup incomplete or document persistence failed\n", output, summary.RunID, summary.Found)
+	} else if scanErr != nil {
 		fmt.Fprintf(stderr, "Backend: %s\n", summary.Identity.String())
 		fmt.Fprintf(stderr, "Incomplete scan. Partial results: %s | run: %s | found: %d\n", output, summary.RunID, summary.Found)
 	} else {
@@ -268,7 +282,7 @@ func outputFilename(slug string, when time.Time) string {
 	if slug != "" {
 		prefix += "-" + slug
 	}
-	return prefix + "-" + when.UTC().Format("20060102T150405.000000000Z") + ".list"
+	return prefix + "-" + when.UTC().Format("20060102T150405.000000000Z") + ".scan"
 }
 
 // flag normally stops at the first CIDR; keep masscan-style options usable
@@ -310,4 +324,14 @@ func apiToken() (string, error) {
 		return "", fmt.Errorf("VULTR_API_TOKEN is required in the environment")
 	}
 	return token, nil
+}
+
+// Keep credentials out of persisted diagnostics while retaining destination sync.
+type privateDestination struct {
+	scanfile.Destination
+	token string
+}
+
+func (d privateDestination) Sanitize(s string) string {
+	return strings.ReplaceAll(s, d.token, "[REDACTED]")
 }

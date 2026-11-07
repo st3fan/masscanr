@@ -24,7 +24,7 @@ func TestConfigEffectiveSettingsAndScrolling(t *testing.T) {
 	m.state.Seed, m.state.SeedKnown = 42, true
 	m.tab = 1
 	all := strings.Join(m.configLines(), "\n")
-	for _, want := range []string{"40 CIDRs · 10240 IPs", "192.0.39.0/24", "22,80,443,8000-8100", "Port count            104", "2000000 pps", "500000 pps", "stdout (streaming native list)", "inventory.csv", "inventory.jsonl", "24h0m0s", "5m0s", "42"} {
+	for _, want := range []string{"40 CIDRs · 10240 IPs", "192.0.39.0/24", "22,80,443,8000-8100", "Port count            104", "2000000 pps", "500000 pps", "stdout (streaming scan JSON Lines)", "inventory.csv", "inventory.jsonl", "24h0m0s", "5m0s", "42"} {
 		if !strings.Contains(all, want) {
 			t.Fatalf("missing %q:\n%s", want, all)
 		}
@@ -56,11 +56,11 @@ func TestConfigFullIPv4AndLongValues(t *testing.T) {
 	m := fixtureModel(4)
 	m.state.Config.Scan.Targets = []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0")}
 	m.state.Config.Scan.Rate = math.MaxUint64
-	m.state.Config.Output = strings.Repeat("long-path/", 50) + "END.list"
+	m.state.Config.Output = strings.Repeat("long-path/", 50) + "END.scan"
 	m.width = 30
 	lines := m.configLines()
 	text := strings.Join(lines, "\n")
-	if !strings.Contains(text, "4294967296") || !strings.Contains(strings.ReplaceAll(text, "\n", ""), "73786976294838206460") || !strings.Contains(text, "END.list") {
+	if !strings.Contains(text, "4294967296") || !strings.Contains(strings.ReplaceAll(text, "\n", ""), "73786976294838206460") || !strings.Contains(text, "END.scan") {
 		t.Fatal("overflowed count or truncated output path", text)
 	}
 	m.width = 120
