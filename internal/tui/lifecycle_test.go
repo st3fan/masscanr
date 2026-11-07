@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -100,5 +101,55 @@ func TestUIRuntimeFailureRequestsControllerCancellation(t *testing.T) {
 	}
 	if err := v.Stop(); err == nil {
 		t.Fatal("UI error was discarded")
+	}
+}
+
+func TestFinalScreenWaitsForExplicitQuit(t *testing.T) {
+	for _, runErr := range []error{nil, io.ErrClosedPipe, context.Canceled} {
+		t.Run(fmt.Sprint(runErr), func(t *testing.T) {
+			v := New(io.Discard, true, 1)
+			input, keys := io.Pipe()
+			defer input.Close()
+			defer keys.Close()
+			finalSeen := make(chan struct{})
+			var once sync.Once
+			v.start(tea.WithInput(input), tea.WithoutRenderer(), tea.WithFilter(func(_ tea.Model, msg tea.Msg) tea.Msg {
+				if frame, ok := msg.(frameMsg); ok && frame.state.Final != nil {
+					once.Do(func() { close(finalSeen) })
+				}
+				return msg
+			}))
+			defer v.Stop()
+			returned := make(chan struct{})
+			go func() {
+				v.Finish(t.Context(), controller.Summary{RunID: "fixture", Found: 42}, runErr)
+				close(returned)
+			}()
+			select {
+			case <-finalSeen:
+			case <-time.After(2 * time.Second):
+				t.Fatal("final state was not rendered")
+			}
+			select {
+			case <-returned:
+				t.Fatal("completed screen exited automatically")
+			default:
+			}
+			s := v.snapshot()
+			if s.Final.Found != 42 || (runErr != nil && s.Final.Detail != runErr.Error()) {
+				t.Fatal("final summary lost", s.Final)
+			}
+			if _, err := io.WriteString(keys, "2q"); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-returned:
+			case <-time.After(2 * time.Second):
+				t.Fatal("explicit quit did not dismiss completed UI")
+			}
+			if err := v.Stop(); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }

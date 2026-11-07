@@ -20,6 +20,7 @@ type fixtureView struct {
 	cancel func()
 	start  func()
 	stop   func() error
+	finish func(context.Context, controller.Summary, error)
 	events []controller.Event
 }
 
@@ -37,11 +38,29 @@ func (v *fixtureView) Stop() error {
 }
 func (v *fixtureView) Update(e controller.Event) { v.events = append(v.events, e) }
 
+func (v *fixtureView) Finish(ctx context.Context, summary controller.Summary, err error) {
+	if v.finish != nil {
+		v.finish(ctx, summary, err)
+	}
+}
+
 func TestUIConfigAndExportLifecycle(t *testing.T) {
 	t.Setenv("VULTR_API_KEY", "fixture-secret")
 	path := filepath.Join(t.TempDir(), "scan.list")
 	var stdout, stderr bytes.Buffer
 	v := &fixtureView{}
+	reviewed := false
+	v.finish = func(_ context.Context, summary controller.Summary, err error) {
+		reviewed = true
+		if err != nil || summary.RunID != "fixture" || strings.Contains(stderr.String(), "Scan complete") {
+			t.Fatal("invalid review state", summary, err)
+		}
+		for _, name := range exportPaths(path) {
+			if _, err := os.Stat(name); err != nil {
+				t.Fatal("review started before export finished", err)
+			}
+		}
+	}
 	stops := 0
 	v.stop = func() error {
 		stops++
@@ -68,7 +87,7 @@ func TestUIConfigAndExportLifecycle(t *testing.T) {
 		}
 	}
 	err := executeScanWithView(t.Context(), []string{"192.0.2.42/24", "192.0.2.0/25", "--ports=22,443", "--output", path}, &stdout, &stderr, build, func(io.Writer, bool, int) scanView { return v })
-	if err != nil || stops != 1 || len(v.events) != 2 || v.events[1].State != "exporting" {
+	if err != nil || !reviewed || stops != 1 || len(v.events) != 2 || v.events[1].State != "exporting" {
 		t.Fatal(err, stops, v.events)
 	}
 	if stdout.Len() != 0 || !strings.Contains(stderr.String(), "Run complete.") || strings.Contains(stderr.String(), "fixture-secret") {
@@ -82,6 +101,11 @@ func TestUICancellationPreservesResultsAndReportsUndeleted(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	v := &fixtureView{}
 	v.start = func() { v.cancel() } // Same callback used by the Ctrl+C key.
+	v.finish = func(_ context.Context, summary controller.Summary, err error) {
+		if !errors.Is(err, context.Canceled) || len(summary.Undeleted) != 1 {
+			t.Fatal("incomplete result missing from review", err, summary)
+		}
+	}
 	v.stop = func() error { return errors.New("fixture UI error") }
 	build := func(string, controller.Timeouts) runFunc {
 		return func(ctx context.Context, _ scan.Config, out io.Writer, emit func(controller.Event)) (controller.Summary, error) {

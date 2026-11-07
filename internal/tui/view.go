@@ -2,6 +2,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"strings"
@@ -16,7 +17,7 @@ import (
 
 // View is the bridge between controller callbacks and the interactive model.
 // Callbacks only update in-memory state; terminal I/O happens on a separate loop.
-// Configure, Start, and Stop are called by the CLI in that order.
+// Configure, Start, Finish, and Stop are called by the CLI in that order.
 type View struct {
 	mu sync.Mutex
 	state
@@ -63,6 +64,34 @@ func (v *View) start(options ...tea.ProgramOption) {
 			v.cancel() // UI failure must still follow the controller's cleanup path.
 		}
 	}()
+}
+
+// Finish publishes an immutable final outcome after scanning, cleanup and export.
+// Interactive runs remain navigable until the user quits; plain output returns
+// immediately. An external cancellation may dismiss the settled interface.
+func (v *View) Finish(ctx context.Context, summary controller.Summary, runErr error) {
+	final := &completion{Status: "Complete", Found: summary.Found}
+	if runErr != nil {
+		final.Status, final.Detail = "Failed", clean(runErr.Error())
+	}
+	if len(summary.Undeleted) > 0 {
+		final.Status = "Failed"
+		final.Detail += " VPS deletion unconfirmed: " + clean(strings.Join(summary.Undeleted, ", "))
+	}
+	v.mu.Lock()
+	v.Final, v.Phase = final, final.Status
+	if summary.RunID != "" {
+		v.RunID = clean(summary.RunID)
+	}
+	v.mu.Unlock()
+	if !v.terminal {
+		return
+	}
+	select {
+	case <-v.done:
+	case <-ctx.Done():
+		v.Stop()
+	}
 }
 
 // Stop waits for terminal restoration before the CLI writes its final summary.

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/st3fan/masscanr/internal/controller"
 	"golang.org/x/sys/unix"
 	"golang.org/x/term"
@@ -23,6 +24,7 @@ import (
 // Exercise the real renderer and raw-mode lifecycle on a local pseudo-terminal.
 // This runs synthetic UI events only: no app/controller/provider or scan traffic.
 func TestTerminalRestoredAfterCancellationAndCleanup(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
 	master, err := os.OpenFile("/dev/ptmx", os.O_RDWR|unix.O_NOCTTY|unix.O_NONBLOCK, 0)
 	if err != nil {
 		t.Skipf("pseudo-terminal unavailable: %v", err)
@@ -70,7 +72,14 @@ func TestTerminalRestoredAfterCancellationAndCleanup(t *testing.T) {
 	defer cancel()
 	v := New(slave, true, 1)
 	v.cancel = cancel
-	v.start(tea.WithInput(slave), tea.WithEnvironment([]string{"TERM=xterm-256color", "NO_COLOR=1"}))
+	finalSeen := make(chan struct{})
+	var once sync.Once
+	v.start(tea.WithInput(slave), tea.WithEnvironment([]string{"TERM=xterm-256color"}), tea.WithFilter(func(_ tea.Model, msg tea.Msg) tea.Msg {
+		if frame, ok := msg.(frameMsg); ok && frame.state.Final != nil {
+			once.Do(func() { close(finalSeen) })
+		}
+		return msg
+	}))
 	defer v.Stop()
 	deadline := time.Now().Add(3 * time.Second)
 	for {
@@ -101,6 +110,29 @@ func TestTerminalRestoredAfterCancellationAndCleanup(t *testing.T) {
 	}
 	v.Update(controller.Event{Shard: 1, ID: "fixture-worker", State: "deleting"})
 	v.Update(controller.Event{Shard: 1, State: "shutdown"})
+	reviewDone := make(chan struct{})
+	go func() {
+		v.Finish(t.Context(), controller.Summary{RunID: "fixture"}, context.Canceled)
+		close(reviewDone)
+	}()
+	select {
+	case <-finalSeen:
+	case <-time.After(3 * time.Second):
+		t.Fatal("final screen never rendered")
+	}
+	select {
+	case <-v.done:
+		t.Fatal("UI quit without an explicit quit")
+	default:
+	}
+	if _, err := io.WriteString(master, "q"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-reviewDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("quit was not handled")
+	}
 	if err := v.Stop(); err != nil {
 		t.Fatal(err)
 	}
@@ -120,5 +152,8 @@ func TestTerminalRestoredAfterCancellationAndCleanup(t *testing.T) {
 	capture.Unlock()
 	if !strings.Contains(text, "\x1b[?1049h") || !strings.Contains(text, "\x1b[?1049l") {
 		t.Fatal("alternate screen was not entered and restored")
+	}
+	if !strings.Contains(text, ansi.ResetBackgroundColor) || !strings.Contains(text, ansi.ResetForegroundColor) {
+		t.Fatal("theme colors were not restored")
 	}
 }

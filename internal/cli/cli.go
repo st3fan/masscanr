@@ -91,6 +91,7 @@ Use 'masscanr --version' to print the version.
 type scanView interface {
 	Configure(tui.RunConfig, func())
 	Start()
+	Finish(context.Context, controller.Summary, error)
 	Stop() error
 	Update(controller.Event)
 }
@@ -225,6 +226,7 @@ func executeScanWithView(ctx context.Context, args []string, stdout, stderr io.W
 			exportErr = fmt.Errorf("scan completed but CSV/JSONL export failed (native list output: %s): %w", output, exportErr)
 		}
 	}
+	view.Finish(ctx, summary, errors.Join(scanErr, exportErr))
 	uiErr := stopView()
 	if uiErr != nil {
 		uiErr = fmt.Errorf("terminal UI: %w", uiErr)
