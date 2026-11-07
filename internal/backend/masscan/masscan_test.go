@@ -40,3 +40,15 @@ func TestArgumentsAndDecoder(t *testing.T) {
 		}
 	}
 }
+
+func TestUnrepresentableETAStaysUnknown(t *testing.T) {
+	for _, line := range []string{
+		"rate:1.00-kpps, 10.00% done, 999999999:00:00 remaining, found=0",
+		"rate:0.00-kpps, 100.00% done, waiting 18446744073709551615-secs, found=0",
+	} {
+		p, ok := ParseProgress(line)
+		if !ok || !p.ETAUnknown || p.ETA != 0 {
+			t.Fatal(p, ok)
+		}
+	}
+}

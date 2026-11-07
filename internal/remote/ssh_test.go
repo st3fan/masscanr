@@ -375,3 +375,23 @@ func TestDecoderAndSinkFailureCancelRemote(t *testing.T) {
 		})
 	}
 }
+
+type eofErrorDecoder struct{ backend.Decoder }
+
+var fixtureDecodeError = errors.New("fixture decoder error")
+
+func (d eofErrorDecoder) Results(r io.Reader, _ func(scan.Finding) error) error {
+	io.Copy(io.Discard, r)
+	return fixtureDecodeError
+}
+
+func TestDecoderFailurePreservesRemoteExitDiagnostics(t *testing.T) {
+	r, w := sshFixture(t, func(_ string, ch ssh.Channel) uint32 { fmt.Fprintln(ch.Stderr(), "fixture root cause"); return 3 })
+	plan := fixturePlan()
+	base := plan.NewDecoder
+	plan.NewDecoder = func() backend.Decoder { return eofErrorDecoder{base()} }
+	err := r.Scan(t.Context(), w, plan, func(scan.Finding) error { return nil }, nil)
+	if !errors.Is(err, fixtureDecodeError) || !strings.Contains(err.Error(), "fixture root cause") || !strings.Contains(err.Error(), "status 3") {
+		t.Fatal("lost remote cause", err)
+	}
+}

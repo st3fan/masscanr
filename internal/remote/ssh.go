@@ -332,13 +332,11 @@ func (s *SSH) Scan(ctx context.Context, w cloud.Worker, plan backend.Plan, sink 
 	outWriter.Close()
 	errWriter.Close()
 	resultErr, statusErr := <-resultDone, <-statusDone
-	if resultErr != nil || statusErr != nil {
-		return errors.Join(resultErr, statusErr)
-	}
+	var commandErr error
 	if runErr != nil {
-		return fmt.Errorf("remote scanner: %w (%s)", runErr, strings.TrimSpace(tail.String()))
+		commandErr = fmt.Errorf("remote scanner: %w (%s)", runErr, strings.TrimSpace(tail.String()))
 	}
-	return nil
+	return errors.Join(resultErr, statusErr, commandErr)
 }
 
 func validFile(name string) bool {
