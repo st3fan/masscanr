@@ -16,6 +16,7 @@ import (
 	"github.com/st3fan/masscanr/internal/backend/masscan"
 	"github.com/st3fan/masscanr/internal/cloud"
 	"github.com/st3fan/masscanr/internal/scan"
+	"github.com/st3fan/masscanr/internal/scanfile"
 )
 
 type fakeProvider struct {
@@ -439,12 +440,14 @@ func TestLifecycleAndFailureCleanup(t *testing.T) {
 			if len(events) == 0 || len(summary.Undeleted) > 0 {
 				t.Fatal(summary)
 			}
-			if !tc.fail && (summary.Found != 2 || strings.Count(output.String(), "open tcp") != 2 || !strings.Contains(output.String(), "# status complete")) {
-				t.Fatal(output.String(), summary)
+			state, replayErr := scanfile.Replay(strings.NewReader(output.String()), nil)
+			if replayErr != nil || state.Finished == nil || state.Complete() == tc.fail || state.Found != summary.Found {
+				t.Fatal("invalid run document", replayErr, output.String())
 			}
-			if tc.fail && !strings.Contains(output.String(), "# status incomplete") {
-				t.Fatal(output.String())
+			if !tc.fail && summary.Found != 2 {
+				t.Fatal(summary)
 			}
+
 		})
 	}
 }
@@ -489,8 +492,8 @@ func (w *failingOutput) Write(p []byte) (int, error) {
 func TestOutputAndDeletionFailure(t *testing.T) {
 	p := newProvider()
 	_, err := testController(p, fakeRunner{}).Run(t.Context(), testConfig(), &failingOutput{}, nil)
-	if err == nil || p.deleted != 2 {
-		t.Fatal(err, p.deleted)
+	if err == nil || p.created != 0 || p.deleted != 0 {
+		t.Fatal(err, p.created, p.deleted)
 	}
 	p = newProvider()
 	p.deleteFail = true
