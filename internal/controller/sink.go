@@ -23,19 +23,9 @@ func (r *results) accept(shard int, f scan.Finding) error {
 	if !slices.Contains(r.cfg.Ports, f.Port) {
 		return fmt.Errorf("unexpected result port from shard %d", shard)
 	}
-	inScope := false
-	for _, p := range r.cfg.Targets {
-		if p.Contains(f.Address) {
-			inScope = true
-			break
-		}
-	}
-	if !inScope {
-		return fmt.Errorf("out-of-scope result from shard %d", shard)
-	}
 	target, prefix, matched := r.attribution.Lookup(f.Address)
 	if !matched {
-		return fmt.Errorf("finding has no requested target from shard %d", shard)
+		return fmt.Errorf("out-of-scope finding has no requested target from shard %d", shard)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()

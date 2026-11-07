@@ -25,6 +25,20 @@ func (m model) configLines() []string {
 	for _, p := range c.Scan.Targets {
 		lines = append(lines, fmt.Sprintf("%-24s %d", p, uint64(1)<<(32-p.Bits())))
 	}
+	if len(c.Scan.RequestedTargets) > 0 {
+		requested := []string{"REQUESTED TARGETS (first matching target wins)"}
+		for _, t := range c.Scan.RequestedTargets {
+			requested = append(requested, t.Target+" (input "+t.Input+")")
+			if t.Resolution != nil {
+				requested = append(requested, "RIPE snapshot "+t.Resolution.SnapshotAt.UTC().Format("2006-01-02T15:04:05Z")+" · fetched "+t.Resolution.FetchedAt.UTC().Format("2006-01-02T15:04:05Z"), t.Resolution.Source)
+			}
+			for _, p := range t.Prefixes {
+				requested = append(requested, "  "+p.String())
+			}
+		}
+		lines[0] = "EFFECTIVE IPv4 " + lines[0]
+		lines = append(append(requested, ""), lines...)
+	}
 	ports := "Custom TCP selection"
 	if slices.Equal(c.Scan.Ports, defaultPorts) {
 		ports = "Nmap 7.95 top 100 TCP (effective set)"

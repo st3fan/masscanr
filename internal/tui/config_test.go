@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/st3fan/masscanr/internal/controller"
@@ -83,5 +84,28 @@ func TestBackendIdentityAndUnknownRendering(t *testing.T) {
 		if !strings.Contains(all, want) {
 			t.Fatal(all)
 		}
+	}
+}
+
+func TestRequestedTargetsInConfigAreFrozenAndWrapped(t *testing.T) {
+	cfg := scan.Defaults()
+	cfg.RequestedTargets, _ = scan.ParseRequestedTargets([]string{"AS1234", "192.0.2.42"})
+	cfg.RequestedTargets[0].Prefixes = []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24")}
+	cfg.RequestedTargets[0].Resolution = &scan.Resolution{Source: scan.RIPEEndpoint, SnapshotAt: time.Unix(90, 0), FetchedAt: time.Unix(100, 0)}
+	cfg.Targets = scan.TargetUnion(cfg.RequestedTargets)
+	m := fixtureModel(2)
+	m.state.Config = NewRunConfig(cfg, controller.DefaultTimeouts(), "inventory.scan", [2]string{})
+	cfg.RequestedTargets[0].Target = "changed"
+	cfg.RequestedTargets[0].Prefixes[0] = netip.MustParsePrefix("0.0.0.0/0")
+	cfg.RequestedTargets[0].Resolution.Source = "changed"
+	m.width = 30
+	text := strings.ReplaceAll(strings.Join(m.configLines(), "\n"), "\n", "")
+	for _, want := range []string{"AS1234", "RIPE snapshot", "1970-01-01T00:01:30Z", "192.0.2.0/24", "192.0.2.42/32", "EFFECTIVE IPv4"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("missing %q: %s", want, text)
+		}
+	}
+	if strings.Contains(text, "changed") {
+		t.Fatal("UI mapping is mutable")
 	}
 }

@@ -15,6 +15,8 @@ import (
 )
 
 type finding struct {
+	Target    string `json:"target,omitempty"`
+	Prefix    string `json:"prefix,omitempty"`
 	IP        string `json:"ip"`
 	Port      uint16 `json:"port"`
 	Addr      string `json:"addr"`
@@ -77,13 +79,13 @@ func exportResults(source, output string) (err error) {
 
 func writeExports(in io.Reader, csvOut, jsonlOut io.Writer) error {
 	cw := csv.NewWriter(csvOut)
-	if err := cw.Write([]string{"ip", "port", "addr", "protocol", "state", "timestamp"}); err != nil {
+	if err := cw.Write(exportColumns); err != nil {
 		return err
 	}
 	jw := json.NewEncoder(jsonlOut)
 	state, err := scanfile.Replay(in, func(f scanfile.Finding) error {
 		row := exportFinding(f)
-		if err := cw.Write([]string{row.IP, strconv.FormatUint(uint64(row.Port), 10), row.Addr, row.Protocol, row.State, strconv.FormatUint(row.Timestamp, 10)}); err != nil {
+		if err := cw.Write(exportRow(row)); err != nil {
 			return err
 		}
 		return jw.Encode(row)
@@ -99,5 +101,11 @@ func writeExports(in io.Reader, csvOut, jsonlOut io.Writer) error {
 }
 
 func exportFinding(f scanfile.Finding) finding {
-	return finding{IP: f.IP.String(), Port: f.Port, Addr: netip.AddrPortFrom(f.IP, f.Port).String(), Protocol: f.Protocol, State: f.State, Timestamp: f.Timestamp}
+	return finding{IP: f.IP.String(), Port: f.Port, Addr: netip.AddrPortFrom(f.IP, f.Port).String(), Protocol: f.Protocol, State: f.State, Timestamp: f.Timestamp, Target: f.Target, Prefix: f.Prefix}
+}
+
+var exportColumns = []string{"ip", "port", "addr", "protocol", "state", "timestamp", "target", "prefix"}
+
+func exportRow(row finding) []string {
+	return []string{row.IP, strconv.FormatUint(uint64(row.Port), 10), row.Addr, row.Protocol, row.State, strconv.FormatUint(row.Timestamp, 10), row.Target, row.Prefix}
 }
