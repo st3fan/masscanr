@@ -14,7 +14,8 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/st3fan/masscanr/internal/backend/masscan"
+	"github.com/st3fan/masscanr/internal/backend"
+	"github.com/st3fan/masscanr/internal/backend/registry"
 	"github.com/st3fan/masscanr/internal/cloud"
 	"github.com/st3fan/masscanr/internal/cloud/vultr"
 	"github.com/st3fan/masscanr/internal/controller"
@@ -25,11 +26,11 @@ import (
 )
 
 type runFunc func(context.Context, scan.Config, io.Writer, func(controller.Event)) (controller.Summary, error)
-type factory func(string, controller.Timeouts) runFunc
+type factory func(string, controller.Timeouts, backend.Backend) runFunc
 
 func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
-	return execute(ctx, args, stdout, stderr, func(key string, timeouts controller.Timeouts) runFunc {
-		c := &controller.Controller{Backend: masscan.Backend{}, Provider: vultr.New(key), Runner: remote.NewSSH(), Timeouts: timeouts}
+	return execute(ctx, args, stdout, stderr, func(key string, timeouts controller.Timeouts, engine backend.Backend) runFunc {
+		c := &controller.Controller{Backend: engine, Provider: vultr.New(key), Runner: remote.NewSSH(), Timeouts: timeouts}
 		return c.Run
 	}, vultr.New(""))
 }
@@ -62,7 +63,7 @@ func execute(ctx context.Context, args []string, stdout, stderr io.Writer, build
 		if len(args) != 1 {
 			return fmt.Errorf("usage: masscanr --version")
 		}
-		_, err := fmt.Fprintln(stdout, "masscanr v3")
+		_, err := fmt.Fprintln(stdout, "masscanr v4")
 		return err
 	case "scan":
 		return executeScan(ctx, args[1:], stdout, stderr, build)
@@ -107,6 +108,7 @@ func executeScanWithView(ctx context.Context, args []string, stdout, stderr io.W
 	cfg := scan.Defaults()
 	fs := flag.NewFlagSet("masscanr scan", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.StringVar(&cfg.Backend, "backend", cfg.Backend, "scanning backend: masscan or zmap")
 	fs.IntVar(&cfg.Shards, "shards", cfg.Shards, "number of temporary VPS workers")
 	fs.Uint64Var(&cfg.Rate, "rate", cfg.Rate, "packets/second per worker")
 	fs.StringVar(&cfg.Region, "region", cfg.Region, "Vultr region identifier (Atlanta: atl)")
@@ -124,7 +126,7 @@ func executeScanWithView(ctx context.Context, args []string, stdout, stderr io.W
 	fs.BoolVar(&noTUI, "no-tui", false, "print lifecycle logs instead of a live table")
 	fs.BoolVar(&version, "version", false, "print version and exit")
 	fs.Usage = func() {
-		fmt.Fprint(stderr, "Usage: masscanr scan [options] IPv4-CIDR [IPv4-CIDR ...]\n\nTemporary Vultr workers run root masscan. The local controller needs no root.\nDefault ports: Nmap 7.95 top 100 TCP. Rate is per worker.\n\n")
+		fmt.Fprint(stderr, "Usage: masscanr scan [options] IPv4-CIDR [IPv4-CIDR ...]\n\nTemporary Vultr workers run the selected scanner as root. The local controller needs no root.\nDefault ports: Nmap 7.95 top 100 TCP. Rate is per worker.\n\n")
 		fs.PrintDefaults()
 	}
 	ordered, orderErr := interspersed(fs, args)
@@ -138,7 +140,7 @@ func executeScanWithView(ctx context.Context, args []string, stdout, stderr io.W
 		return err
 	}
 	if version {
-		fmt.Fprintln(stdout, "masscanr v3")
+		fmt.Fprintln(stdout, "masscanr v4")
 		return nil
 	}
 	if strings.ContainsAny(slug, "/\\") || strings.IndexFunc(slug, unicode.IsControl) >= 0 {
@@ -151,6 +153,13 @@ func executeScanWithView(ctx context.Context, args []string, stdout, stderr io.W
 		return err
 	}
 	if err = cfg.Validate(); err != nil {
+		return err
+	}
+	engine, err := registry.Resolve(cfg.Backend)
+	if err != nil {
+		return err
+	}
+	if err = engine.Validate(cfg.Intent(), cfg.Shards); err != nil {
 		return err
 	}
 	if timeouts.Scan <= 0 || timeouts.Cleanup <= 0 {
@@ -202,7 +211,7 @@ func executeScanWithView(ctx context.Context, args []string, stdout, stderr io.W
 	view := newView(stderr, terminal && !noTUI, cfg.Shards)
 	paths := exportPaths(exportOutput)
 	view.Configure(tui.NewRunConfig(cfg, timeouts, output, paths), cancelScan)
-	fmt.Fprintf(stderr, "Targets: %v | workers: %d | rate: %d pps/worker | output: %s\n", cfg.Targets, cfg.Shards, cfg.Rate, output)
+	fmt.Fprintf(stderr, "Backend: %s | Targets: %v | workers: %d | rate: %d pps/worker | output: %s\n", engine.Name(), cfg.Targets, cfg.Shards, cfg.Rate, output)
 	view.Start()
 	stopped := false
 	stopView := func() error {
@@ -213,7 +222,10 @@ func executeScanWithView(ctx context.Context, args []string, stdout, stderr io.W
 		return view.Stop()
 	}
 	defer func() { err = errors.Join(err, stopView()) }()
-	summary, scanErr := build(key, timeouts)(runCtx, cfg, destination, view.Update)
+	summary, scanErr := build(key, timeouts, engine)(runCtx, cfg, destination, view.Update)
+	if summary.Identity.Name == "" {
+		summary.Identity.Name = engine.Name()
+	}
 	source := file.Name()
 	scanErr = errors.Join(scanErr, file.Sync(), file.Close())
 	file = nil
@@ -234,8 +246,10 @@ func executeScanWithView(ctx context.Context, args []string, stdout, stderr io.W
 	}
 	err = errors.Join(scanErr, exportErr, uiErr)
 	if scanErr != nil {
+		fmt.Fprintf(stderr, "Backend: %s\n", summary.Identity.String())
 		fmt.Fprintf(stderr, "Incomplete scan. Partial results: %s | run: %s | found: %d\n", output, summary.RunID, summary.Found)
 	} else {
+		fmt.Fprintf(stderr, "Backend: %s\n", summary.Identity.String())
 		fmt.Fprintf(stderr, "Scan complete. Results: %s | run: %s | found: %d | workers deleted\n", output, summary.RunID, summary.Found)
 		if exportErr == nil {
 			fmt.Fprintf(stderr, "Exports: %s | %s\n", paths[0], paths[1])

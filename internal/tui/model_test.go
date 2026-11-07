@@ -127,7 +127,7 @@ func TestUnknownStaleAndCleanupFailureVisible(t *testing.T) {
 	m.state.apply(controller.Event{Shard: 2, State: "completed"}, m.now)
 	m.state.apply(controller.Event{Shard: 2, State: "cleanup failed", Detail: "provider unavailable"}, m.now)
 	text := m.View().Content
-	for _, want := range []string{"45.0%", "Stale telemetry", "cleanup failed", "Scan ETA —"} {
+	for _, want := range []string{"95.0%", "Stale telemetry", "cleanup failed", "Scan ETA —"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing %q:\n%s", want, text)
 		}

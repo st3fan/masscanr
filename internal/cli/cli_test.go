@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/st3fan/masscanr/internal/backend"
 	"github.com/st3fan/masscanr/internal/controller"
 	"github.com/st3fan/masscanr/internal/scan"
 )
@@ -20,7 +21,7 @@ func TestCLIFlagsAndResultsWithoutInfrastructure(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "scan.list")
 	var stdout, stderr bytes.Buffer
 	called := false
-	factory := func(key string, timeouts controller.Timeouts) runFunc {
+	factory := func(key string, timeouts controller.Timeouts, _ backend.Backend) runFunc {
 		if key != "fixture-key" {
 			t.Fatal("wrong key source")
 		}
@@ -62,7 +63,10 @@ func TestCLIFlagsAndResultsWithoutInfrastructure(t *testing.T) {
 func TestCLIValidationDoesNotBuildController(t *testing.T) {
 	for _, args := range [][]string{{"--help"}, {"--version"}, {}, {"scan", "--help"}, {"help", "scan"}, {"scan"}, {"scan", "::/0"}, {"scan", "192.0.2.0/24", "--shards=0"}, {"scan", "192.0.2.0/24", "--ports=80;reboot"}, {"scan", "--ports"}, {"192.0.2.0/24"}, {"scna"}} {
 		var out, errout bytes.Buffer
-		build := func(string, controller.Timeouts) runFunc { t.Fatal("controller built before validation"); return nil }
+		build := func(string, controller.Timeouts, backend.Backend) runFunc {
+			t.Fatal("controller built before validation")
+			return nil
+		}
 		err := execute(t.Context(), args, &out, &errout, build, nil)
 		help := len(args) == 0 || args[0] == "--help" || args[0] == "--version" || args[0] == "help" || len(args) > 1 && args[1] == "--help"
 		if (err == nil) != help {
@@ -75,7 +79,7 @@ func TestPartialOutputPreserved(t *testing.T) {
 	t.Setenv("VULTR_API_KEY", "fixture-key")
 	path := filepath.Join(t.TempDir(), "partial.list")
 	var stdout, stderr bytes.Buffer
-	build := func(string, controller.Timeouts) runFunc {
+	build := func(string, controller.Timeouts, backend.Backend) runFunc {
 		return func(_ context.Context, _ scan.Config, out io.Writer, _ func(controller.Event)) (controller.Summary, error) {
 			io.WriteString(out, "# status incomplete\n")
 			return controller.Summary{}, errors.New("fixture scan failed")
@@ -141,7 +145,7 @@ func TestSlugOutputSelectionWithFakeController(t *testing.T) {
 			t.Setenv("VULTR_API_KEY", "fixture-key")
 			var stdout, stderr bytes.Buffer
 			called := false
-			build := func(string, controller.Timeouts) runFunc {
+			build := func(string, controller.Timeouts, backend.Backend) runFunc {
 				return func(_ context.Context, _ scan.Config, out io.Writer, _ func(controller.Event)) (controller.Summary, error) {
 					called = true
 					_, err := io.WriteString(out, exportFixture)
@@ -201,7 +205,7 @@ func TestCLIExportFailurePreservesCompletedList(t *testing.T) {
 	if err := os.WriteFile(paths[1], []byte("existing"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	build := func(string, controller.Timeouts) runFunc {
+	build := func(string, controller.Timeouts, backend.Backend) runFunc {
 		return func(_ context.Context, _ scan.Config, out io.Writer, _ func(controller.Event)) (controller.Summary, error) {
 			_, err := io.WriteString(out, exportFixture)
 			return controller.Summary{Found: 3}, err

@@ -20,6 +20,9 @@ type RunConfig struct {
 }
 
 func NewRunConfig(cfg scan.Config, timeouts controller.Timeouts, output string, exports [2]string) RunConfig {
+	if cfg.Backend == "" {
+		cfg.Backend = "masscan"
+	}
 	cfg.Targets = slices.Clone(cfg.Targets)
 	cfg.Ports = slices.Clone(cfg.Ports)
 	return RunConfig{Scan: cfg, ScanTimeout: timeouts.Scan, CleanupTimeout: timeouts.Cleanup, Output: output, Exports: exports}
@@ -47,6 +50,7 @@ func (r shardState) active(now time.Time) bool {
 // state is updated under View's lock and copied before rendering. It has no
 // terminal or framework dependencies, and keeps scan and cleanup outcomes apart.
 type state struct {
+	Identity  scan.Identity
 	Config    RunConfig
 	RunID     string
 	Seed      uint64
@@ -87,6 +91,13 @@ func (s *state) apply(e controller.Event, now time.Time) bool {
 	if e.IP != "" {
 		r.IP = clean(e.IP)
 	}
+	if e.Found != nil {
+		r.Progress.Found = max(r.Progress.Found, *e.Found)
+	}
+	if e.State == "finding" {
+		s.rows[key] = r
+		return false
+	}
 	changed := false
 	switch e.State {
 	case "deleting", "shutdown", "cleanup failed":
@@ -105,8 +116,16 @@ func (s *state) apply(e controller.Event, now time.Time) bool {
 		}
 	}
 	if e.Progress != nil {
+		priorFound := r.Progress.Found
 		r.Progress = *e.Progress // Callbacks may reuse their progress value.
+		r.Progress.Found = max(priorFound, r.Progress.Found)
 		r.Known, r.Updated = true, now
+	}
+	if e.State == "completed" {
+		r.Progress.Percent = 100
+		r.Progress.PercentUnknown = false
+		r.Progress.Rate = 0
+		r.Known = true
 	}
 	s.rows[key] = r
 	return changed
@@ -143,13 +162,14 @@ func (s state) sorted() []shardState {
 }
 
 type totals struct {
-	Percent        float64
-	Rate           float64
-	Found          uint64
-	Complete, VPSs int
-	ETA            time.Duration
-	ETAKnown       bool
-	Stale          bool
+	Percent                     float64
+	Rate                        float64
+	Found                       uint64
+	Complete, VPSs              int
+	ETA                         time.Duration
+	ETAKnown                    bool
+	Stale                       bool
+	PercentUnknown, RateUnknown bool
 }
 
 func (s state) totals(now time.Time) totals {
@@ -161,20 +181,33 @@ func (s state) totals(now time.Time) totals {
 		if r.Shard < 1 || r.Shard > s.Config.Scan.Shards {
 			continue
 		}
-		if r.Known {
-			// Native shards have approximately equal shares of scan work.
-			t.Percent += min(100, max(0, r.Progress.Percent)) / float64(s.Config.Scan.Shards)
-			t.Found += r.Progress.Found
-		}
+		t.Found += r.Progress.Found
 		if r.State == "completed" {
+			t.Percent += 100 / float64(s.Config.Scan.Shards)
 			t.Complete++
 			continue
 		}
+		if r.Known {
+			// Approximate equal weighting of native shards. Never infer sending
+			// percentage from ZMap's estimate of elapsed time plus cooldown.
+			if r.Progress.PercentUnknown {
+				t.PercentUnknown = true
+			} else {
+				t.Percent += min(100, max(0, r.Progress.Percent)) / float64(s.Config.Scan.Shards)
+			}
+		} else if r.State == "scanning" || r.State == "waiting" {
+			t.PercentUnknown = true
+			t.RateUnknown = true
+		}
+
 		t.Stale = t.Stale || r.stale(now)
-		if r.active(now) {
+		if r.active(now) && r.Progress.RateUnknown {
+			t.RateUnknown = true
+		}
+		if r.active(now) && !r.Progress.RateUnknown {
 			t.Rate += r.Progress.Rate
 		}
-		if (r.active(now) || (r.State == "waiting" && r.Known && !r.stale(now))) && r.Progress.ETA >= 0 {
+		if (r.active(now) || (r.State == "waiting" && r.Known && !r.stale(now))) && !r.Progress.ETAUnknown && r.Progress.ETA >= 0 {
 			t.ETA = max(t.ETA, r.Progress.ETA)
 		} else {
 			t.ETAKnown = false
@@ -182,6 +215,11 @@ func (s state) totals(now time.Time) totals {
 	}
 	if s.Final != nil {
 		t.Rate, t.Found, t.ETAKnown, t.Stale = 0, s.Final.Found, false, false
+		t.RateUnknown = false
+		if s.Final.Status == "Complete" {
+			t.Percent = 100
+			t.PercentUnknown = false
+		}
 	}
 	return t
 }

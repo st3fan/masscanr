@@ -38,8 +38,16 @@ func (m model) configLines() []string {
 	if output == "-" {
 		output = "stdout (streaming native list)"
 	}
+	version, build := "pending", "pending"
+	if m.state.Identity.Version != "" {
+		version = m.state.Identity.Version
+		build = m.state.Identity.Build
+	}
 	lines = append(lines,
 		"", "SCAN",
+		"Backend               "+c.Scan.Backend,
+		"Scanner version       "+version,
+		"Scanner build         "+build,
 		"Protocol              TCP SYN",
 		fmt.Sprintf("Port selection        %s", ports),
 		fmt.Sprintf("Port count            %d", len(c.Scan.Ports)),

@@ -196,7 +196,14 @@ func (m model) lines() []string {
 	} else if m.stopping {
 		phase = "Stopping; cleaning up"
 	}
-	header := []string{fmt.Sprintf("masscanr  |  Run: %s  |  %s", run, phase)}
+	name := m.state.Config.Scan.Backend
+	if name == "" {
+		name = "masscan"
+	}
+	if m.state.Identity.Version != "" {
+		name += " " + clean(m.state.Identity.Version)
+	}
+	header := []string{fmt.Sprintf("masscanr %s  |  Run: %s  |  %s", name, run, phase)}
 	tabs := []string{"1 Overview", "2 Config"}
 	tabs[m.tab] = m.paint("["+tabs[m.tab]+"]", terminalYellow)
 	header = append(header, strings.Join(tabs, "   "), "", strings.Repeat("─", w), "")
@@ -226,9 +233,13 @@ func (m model) lines() []string {
 		if total.ETAKnown {
 			eta = total.ETA.Round(time.Second).String()
 		}
+		observed := rate(total.Rate)
+		if total.RateUnknown {
+			observed = "—"
+		}
 		header = append(header,
-			fmt.Sprintf("Scan progress  %s  %.1f%%", progressBar(total.Percent, min(28, max(4, w-28))), total.Percent),
-			fmt.Sprintf("Rate %s pps  |  Found %d  |  Scan ETA %s", rate(total.Rate), total.Found, eta),
+			fmt.Sprintf("Scan progress  %s", progressLabel(total.Percent, total.PercentUnknown, min(28, max(4, w-28)))),
+			fmt.Sprintf("Rate %s pps  |  Found %d  |  Scan ETA %s", observed, total.Found, eta),
 			fmt.Sprintf("Shards %d/%d complete  |  VPSs remaining %d", total.Complete, m.state.Config.Scan.Shards, total.VPSs))
 		if total.Stale {
 			header = append(header, m.paint("Stale telemetry: last progress retained; stale rates excluded", terminalYellow))
@@ -295,12 +306,12 @@ func (m model) overview(height int) []string {
 		}
 		pct, observed, eta := "—", "—", "—"
 		if r.Known {
-			pct = fmt.Sprintf("%s %5.1f%%", progressBar(r.Progress.Percent, 8), r.Progress.Percent)
+			pct = progressLabel(r.Progress.Percent, r.Progress.PercentUnknown, 8)
 		}
-		if r.active(m.now) {
+		if r.active(m.now) && !r.Progress.RateUnknown {
 			observed = rate(r.Progress.Rate)
 		}
-		if r.Known && !r.stale(m.now) && (r.State == "scanning" || r.State == "waiting") {
+		if r.Known && !r.Progress.ETAUnknown && !r.stale(m.now) && (r.State == "scanning" || r.State == "waiting") {
 			eta = r.Progress.ETA.Round(time.Second).String()
 		}
 		shard := fmt.Sprintf("%d/%d", r.Shard, m.state.Config.Scan.Shards)
@@ -375,7 +386,7 @@ func shardLabel(r shardState) string {
 }
 
 func shardETA(r shardState, now time.Time) string {
-	if !r.Known || r.stale(now) || (r.State != "scanning" && r.State != "waiting") {
+	if !r.Known || r.Progress.ETAUnknown || r.stale(now) || (r.State != "scanning" && r.State != "waiting") {
 		return "—"
 	}
 	return r.Progress.ETA.Round(time.Second).String()
@@ -397,4 +408,11 @@ func rate(value float64) string {
 		return fmt.Sprintf("%.1fk", value/1000)
 	}
 	return fmt.Sprintf("%.0f", value)
+}
+
+func progressLabel(percent float64, unknown bool, width int) string {
+	if unknown {
+		return "[" + strings.Repeat(".", width) + "] unknown"
+	}
+	return fmt.Sprintf("%s %.1f%%", progressBar(percent, width), percent)
 }

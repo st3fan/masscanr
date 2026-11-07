@@ -23,10 +23,13 @@ type Event struct {
 	ID, IP, State, Detail string
 	Progress              *scan.Progress
 	RunID                 string
+	Identity              *scan.Identity
+	Found                 *uint64
 	Seed                  *uint64 // Present only on run-start metadata events.
 }
 
 type Summary struct {
+	Identity  scan.Identity
 	RunID     string
 	Seed      uint64
 	Found     uint64
@@ -55,6 +58,8 @@ type tracked struct {
 }
 
 func (c *Controller) Run(ctx context.Context, cfg scan.Config, out io.Writer, emit func(Event)) (summary Summary, err error) {
+	cfg.Targets = slices.Clone(cfg.Targets)
+	cfg.Ports = slices.Clone(cfg.Ports)
 	if err = cfg.Validate(); err != nil {
 		return summary, err
 	}
@@ -64,6 +69,10 @@ func (c *Controller) Run(ctx context.Context, cfg scan.Config, out io.Writer, em
 	if c.Backend == nil || c.Provider == nil || c.Runner == nil || out == nil {
 		return summary, fmt.Errorf("backend, provider, runner and output are required")
 	}
+	if cfg.Backend != "" && cfg.Backend != c.Backend.Name() {
+		return summary, fmt.Errorf("configured backend differs from selected backend")
+	}
+	summary.Identity.Name = c.Backend.Name()
 	if err = c.Backend.Validate(cfg.Intent(), cfg.Shards); err != nil {
 		return summary, err
 	}
@@ -77,7 +86,7 @@ func (c *Controller) Run(ctx context.Context, cfg scan.Config, out io.Writer, em
 		return summary, err
 	}
 	summary.RunID = hex.EncodeToString(id)
-	if summary.Seed, err = scan.NewSeed(); err != nil {
+	if summary.Seed, err = scan.NewSeedWithin(c.Backend.MaxSeed()); err != nil {
 		return summary, err
 	}
 	var events sync.Mutex
@@ -85,12 +94,23 @@ func (c *Controller) Run(ctx context.Context, cfg scan.Config, out io.Writer, em
 		if emit != nil {
 			events.Lock()
 			defer events.Unlock()
+			if e.Identity != nil {
+				identity := *e.Identity
+				e.Identity = &identity
+			}
 			emit(e)
 		}
 	}
-	notify(Event{State: "validating", RunID: summary.RunID, Seed: &summary.Seed})
+	plans := make([]backend.Plan, cfg.Shards)
+	for i := range plans {
+		plans[i], err = c.Backend.Build(cfg.Intent(), scan.Shard{Index: i + 1, Total: cfg.Shards}, summary.Seed)
+		if err != nil {
+			return summary, err
+		}
+	}
+	notify(Event{State: "validating", RunID: summary.RunID, Seed: &summary.Seed, Identity: &summary.Identity})
 	result := &results{out: out, cfg: cfg}
-	if err = result.line(fmt.Sprintf("#masscan\n# masscanr run=%s seed=%d targets=%v ports=%s rate=%d shards=%d", summary.RunID, summary.Seed, cfg.Targets, cfg.PortSpec(), cfg.Rate, cfg.Shards)); err != nil {
+	if err = result.line(fmt.Sprintf("#masscan\n# masscanr backend=%s run=%s seed=%d targets=%v ports=%s rate=%d shards=%d", c.Backend.Name(), summary.RunID, summary.Seed, cfg.Targets, cfg.PortSpec(), cfg.Rate, cfg.Shards)); err != nil {
 		return summary, err
 	}
 	var workers []tracked
@@ -149,7 +169,11 @@ func (c *Controller) Run(ctx context.Context, cfg scan.Config, out io.Writer, em
 	}
 	// Prepare all workers before scanning, so incompatible backend builds
 	// cannot silently use different shard permutations.
-	if err = c.prepare(ctx, workers, summary.RunID, notify); err != nil {
+	if summary.Identity, err = c.prepare(ctx, workers, summary.RunID, notify); err != nil {
+		return summary, err
+	}
+	notify(Event{State: "prepared", Identity: &summary.Identity})
+	if err = result.line(fmt.Sprintf("# backend=%s version=%s build=%s", summary.Identity.Name, summary.Identity.Version, summary.Identity.Build)); err != nil {
 		return summary, err
 	}
 	scanCtx, cancel := context.WithTimeout(ctx, c.Timeouts.Scan)
@@ -164,10 +188,18 @@ func (c *Controller) Run(ctx context.Context, cfg scan.Config, out io.Writer, em
 			defer wg.Done()
 			w := item.worker
 			notify(Event{Shard: item.shard, ID: w.ID, IP: w.IP, State: "scanning"})
-			plan, planErr := c.Backend.Build(cfg.Intent(), scan.Shard{Index: item.shard, Total: cfg.Shards}, summary.Seed)
-			runErr := planErr
+			plan := plans[item.shard-1]
+			var runErr error
 			if runErr == nil {
-				runErr = c.Runner.Scan(scanCtx, w, plan, func(f scan.Finding) error { return result.accept(item.shard, f) }, func(p scan.Progress) {
+				runErr = c.Runner.Scan(scanCtx, w, plan, func(f scan.Finding) error {
+					if err := result.accept(item.shard, f); err != nil {
+						return err
+					}
+					found := result.countFor(item.shard)
+					notify(Event{Shard: item.shard, ID: w.ID, IP: w.IP, State: "finding", Found: &found})
+					return nil
+				}, func(p scan.Progress) {
+					p.Found = result.countFor(item.shard)
 					state := "scanning"
 					if p.Waiting {
 						state = "waiting"
@@ -203,7 +235,7 @@ func (c *Controller) Run(ctx context.Context, cfg scan.Config, out io.Writer, em
 	return summary, failure
 }
 
-func (c *Controller) prepare(ctx context.Context, workers []tracked, runID string, notify func(Event)) error {
+func (c *Controller) prepare(ctx context.Context, workers []tracked, runID string, notify func(Event)) (scan.Identity, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var wg sync.WaitGroup
@@ -241,14 +273,14 @@ func (c *Controller) prepare(ctx context.Context, workers []tracked, runID strin
 	}
 	wg.Wait()
 	if failure != nil {
-		return failure
+		return scan.Identity{Name: c.Backend.Name()}, failure
 	}
 	for _, version := range versions {
 		if !version.Valid() || version.Name != c.Backend.Name() || version != versions[0] {
-			return fmt.Errorf("workers have different or unknown backend builds")
+			return scan.Identity{Name: c.Backend.Name()}, fmt.Errorf("workers have different or unknown backend builds")
 		}
 	}
-	return ctx.Err()
+	return versions[0], ctx.Err()
 }
 
 func (c *Controller) ready(ctx context.Context, initial cloud.Worker, runID string) (cloud.Worker, error) {

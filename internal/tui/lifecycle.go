@@ -7,6 +7,9 @@ import (
 // runEvent consumes metadata and phases, never creating a fictitious shard 0.
 // The caller holds View.mu. No credentials are carried on these events.
 func (v *View) runEvent(e controller.Event) {
+	if e.Identity != nil {
+		v.Identity = *e.Identity
+	}
 	if e.RunID != "" {
 		v.RunID = clean(e.RunID)
 	}

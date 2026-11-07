@@ -38,5 +38,9 @@ func (r *results) accept(shard int, f scan.Finding) error {
 		return err
 	}
 	r.count++
+	if r.counts == nil {
+		r.counts = make(map[int]uint64)
+	}
+	r.counts[shard]++
 	return nil
 }
