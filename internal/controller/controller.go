@@ -20,7 +20,7 @@ import (
 type Event struct {
 	Shard                 int
 	ID, IP, State, Detail string
-	Progress              *remote.Progress
+	Progress              *scan.Progress
 	RunID                 string
 	Seed                  *uint64 // Present only on run-start metadata events.
 }
@@ -163,7 +163,7 @@ func (c *Controller) Run(ctx context.Context, cfg scan.Config, out io.Writer, em
 			output := &shardWriter{target: result, shard: item.shard}
 			runErr := argErr
 			if runErr == nil {
-				runErr = c.Runner.Scan(scanCtx, w, args, output, func(p remote.Progress) {
+				runErr = c.Runner.Scan(scanCtx, w, args, output, func(p scan.Progress) {
 					state := "scanning"
 					if p.Waiting {
 						state = "waiting"

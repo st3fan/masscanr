@@ -8,15 +8,12 @@ import (
 	"regexp"
 	"strconv"
 	"time"
+
+	"github.com/st3fan/masscanr/internal/scan"
 )
 
-type Progress struct {
-	Percent float64
-	Rate    float64 // packets per second
-	ETA     time.Duration
-	Found   uint64
-	Waiting bool
-}
+// Progress is retained as an alias while callers migrate to the common domain.
+type Progress = scan.Progress
 
 var statusPattern = regexp.MustCompile(`rate:\s*([0-9.]+)-kpps,\s*([0-9.]+)% done,\s*(?:(\d+):(\d+):(\d+) remaining|waiting (\d+)-secs),\s*found=(\d+)`)
 

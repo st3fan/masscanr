@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/st3fan/masscanr/internal/controller"
-	"github.com/st3fan/masscanr/internal/remote"
 	"github.com/st3fan/masscanr/internal/scan"
 )
 
@@ -32,7 +31,7 @@ type shardState struct {
 	Shard                          int
 	ID, IP, State, Cleanup, Detail string
 	CleanupDetail                  string
-	Progress                       remote.Progress
+	Progress                       scan.Progress
 	Updated                        time.Time
 	Known                          bool
 }

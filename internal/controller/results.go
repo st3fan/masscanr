@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/netip"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -83,32 +82,17 @@ func (w *shardWriter) record(line string) error {
 		return fmt.Errorf("invalid masscan list record from shard %d", w.shard)
 	}
 	port, err := strconv.ParseUint(fields[2], 10, 16)
-	if err != nil || !slices.Contains(w.target.cfg.Ports, uint16(port)) {
-		return fmt.Errorf("unexpected result port from shard %d", w.shard)
+	if err != nil {
+		return fmt.Errorf("invalid result port from shard %d", w.shard)
 	}
 	ip, err := netip.ParseAddr(fields[3])
-	if err != nil || !ip.Is4() {
+	if err != nil {
 		return fmt.Errorf("invalid result address from shard %d", w.shard)
 	}
-	inScope := false
-	for _, target := range w.target.cfg.Targets {
-		if target.Contains(ip) {
-			inScope = true
-			break
-		}
-	}
-	if !inScope {
-		return fmt.Errorf("out-of-scope result from shard %d", w.shard)
-	}
-	if _, err := strconv.ParseUint(fields[4], 10, 64); err != nil {
+
+	timestamp, err := strconv.ParseUint(fields[4], 10, 64)
+	if err != nil {
 		return fmt.Errorf("invalid result timestamp from shard %d", w.shard)
 	}
-	r := w.target
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if err := writeString(r.out, fmt.Sprintf("# shard %d\n%s\n", w.shard, strings.Join(fields, " "))); err != nil {
-		return err
-	}
-	r.count++
-	return nil
+	return w.target.accept(w.shard, scan.Finding{Address: ip, Port: uint16(port), Timestamp: timestamp, Protocol: fields[1], State: fields[0]})
 }
