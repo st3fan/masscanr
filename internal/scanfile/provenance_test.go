@@ -187,3 +187,29 @@ func TestDirectFindingOmitsPrefixAndRetainsCanonicalTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestMaximumPrefixMappingFitsAndReplays(t *testing.T) {
+	h := provenanceHeader()
+	h.Config.RequestedTargets = h.Config.RequestedTargets[:1]
+	prefixes := make([]netip.Prefix, scan.MaxResolvedPrefixes)
+	for i := range prefixes {
+		prefixes[i] = netip.PrefixFrom(netip.AddrFrom4([4]byte{10, byte(i >> 8), byte(i), 1}), 32)
+	}
+	h.Config.RequestedTargets[0].Prefixes = prefixes
+	h.Config.Targets = prefixes
+	var out bytes.Buffer
+	w, err := NewWriter(&out, h, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if out.Len() > MaxRecordBytes {
+		t.Fatal("maximum mapping exceeds record limit", out.Len())
+	}
+	s, err := Replay(&out, nil)
+	if err != nil || len(s.Header.Config.RequestedTargets[0].Prefixes) != scan.MaxResolvedPrefixes {
+		t.Fatal(err)
+	}
+}

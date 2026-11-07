@@ -84,3 +84,19 @@ func TestPrefixUnionLarge(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func BenchmarkAttributionAtPrefixLimit(b *testing.B) {
+	prefixes := make([]netip.Prefix, MaxResolvedPrefixes)
+	for i := range prefixes {
+		prefixes[i] = netip.PrefixFrom(netip.AddrFrom4([4]byte{10, byte(i >> 8), byte(i), 1}), 32)
+	}
+	x := NewAttributionIndex([]Target{{Target: "AS1234", Prefixes: prefixes}})
+	ip := netip.MustParseAddr("10.127.255.1")
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		if _, _, ok := x.Lookup(ip); !ok {
+			b.Fatal("missing attribution")
+		}
+	}
+}
