@@ -17,7 +17,7 @@ import (
 )
 
 func TestBackendSelection(t *testing.T) {
-	t.Setenv("VULTR_API_KEY", "fixture")
+	t.Setenv("VULTR_API_TOKEN", "fixture")
 	var configs []scan.Config
 	for _, name := range []string{"", "masscan", "zmap"} {
 		t.Run(name, func(t *testing.T) {
@@ -57,12 +57,13 @@ func TestBackendSelection(t *testing.T) {
 	}
 }
 func TestBackendPreflightBeforeOutputOrCredentials(t *testing.T) {
+	t.Setenv("VULTR_API_TOKEN", "")
 	for _, opts := range [][]string{{"--backend", "unknown"}, {"--backend", "ZMAP"}, {"--backend", "zmap", "--rate=2147483648"}, {"--backend", "zmap", "--shards=65536"}, {"--backend", "zmap", "--ports=80", "--shards=2"}} {
 		path := filepath.Join(t.TempDir(), "scan.list")
 		var out, errout bytes.Buffer
-		args := append([]string{"192.0.2.1/32", "--env-file=/does/not/exist", "--output", path}, opts...)
+		args := append([]string{"192.0.2.1/32", "--output", path}, opts...)
 		err := executeScan(t.Context(), args, &out, &errout, noScanner(t))
-		if err == nil || strings.Contains(err.Error(), "VULTR_API_KEY") {
+		if err == nil || strings.Contains(err.Error(), "VULTR_API_TOKEN") {
 			t.Fatal("backend preflight did not run first", err)
 		}
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -76,7 +77,7 @@ func TestBothBackendsStdoutAndPlainOutput(t *testing.T) {
 		for _, noTUI := range []bool{false, true} {
 			t.Run(name+"/plain="+strconv.FormatBool(noTUI), func(t *testing.T) {
 				t.Chdir(t.TempDir())
-				t.Setenv("VULTR_API_KEY", "fixture")
+				t.Setenv("VULTR_API_TOKEN", "fixture")
 				args := []string{"192.0.2.0/24", "--backend", name, "--output=-", "--slug=backend"}
 				if noTUI {
 					args = append(args, "--no-tui")

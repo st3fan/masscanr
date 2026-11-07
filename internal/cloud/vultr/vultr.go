@@ -66,7 +66,7 @@ func owned(w cloud.Worker, tag string) bool {
 func (c *Client) Validate(ctx context.Context, spec cloud.Spec) error {
 	c.osID = 0
 	if strings.TrimSpace(c.key) == "" {
-		return fmt.Errorf("VULTR_API_KEY is required")
+		return fmt.Errorf("VULTR_API_TOKEN is required")
 	}
 	if _, err := runTag(spec.RunID); err != nil {
 		return err

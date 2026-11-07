@@ -46,7 +46,7 @@ func (v *fixtureView) Finish(ctx context.Context, summary controller.Summary, er
 }
 
 func TestUIConfigAndExportLifecycle(t *testing.T) {
-	t.Setenv("VULTR_API_KEY", "fixture-secret")
+	t.Setenv("VULTR_API_TOKEN", "fixture-secret")
 	path := filepath.Join(t.TempDir(), "scan.list")
 	var stdout, stderr bytes.Buffer
 	v := &fixtureView{}
@@ -97,7 +97,7 @@ func TestUIConfigAndExportLifecycle(t *testing.T) {
 }
 
 func TestUICancellationPreservesResultsAndReportsUndeleted(t *testing.T) {
-	t.Setenv("VULTR_API_KEY", "fixture-secret")
+	t.Setenv("VULTR_API_TOKEN", "fixture-secret")
 	path := filepath.Join(t.TempDir(), "scan.list")
 	var stdout, stderr bytes.Buffer
 	v := &fixtureView{}
@@ -130,7 +130,7 @@ func TestUICancellationPreservesResultsAndReportsUndeleted(t *testing.T) {
 }
 
 func TestNoTUIAndRedirectedStderrRemainPlain(t *testing.T) {
-	t.Setenv("VULTR_API_KEY", "fixture-secret")
+	t.Setenv("VULTR_API_TOKEN", "fixture-secret")
 	for _, flag := range []string{"", "--no-tui"} {
 		var stdout, stderr bytes.Buffer
 		args := []string{"192.0.2.0/24", "--output", filepath.Join(t.TempDir(), "scan.list")}
