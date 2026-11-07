@@ -205,7 +205,7 @@ func writeFormat(in io.Reader, out io.Writer, format string, allow bool) (scanfi
 		if s.Complete() {
 			status = "complete"
 		}
-		fmt.Fprintf(buffer, "# masscanr run=%s backend=%s\n# status %s\n", s.Header.RunID, s.Header.Config.Backend, status)
+		fmt.Fprintf(buffer, "# masscanr run=%q backend=%s\n# status %s\n", s.Header.RunID, s.Header.Config.Backend, status)
 	}
 	if format == "csv" {
 		cw.Flush()
