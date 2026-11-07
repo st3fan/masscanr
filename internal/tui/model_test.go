@@ -152,3 +152,47 @@ func TestDiagnosticScrollDoesNotOvershootAndNarrowFooterShowsStop(t *testing.T) 
 		t.Fatal("stop hint clipped in narrow terminal")
 	}
 }
+
+func TestCompletedRunStaysNavigableUntilExplicitQuit(t *testing.T) {
+	for _, outcome := range []string{"Complete", "Failed", "Cancelled"} {
+		t.Run(outcome, func(t *testing.T) {
+			m := fixtureModel(2)
+			m.stopping = true
+			m.state.Final = &completion{Status: outcome, Detail: "final diagnostic", Found: 123}
+			next, cmd := m.Update(frameMsg{state: m.state, now: m.now})
+			m = next.(model)
+			if cmd == nil {
+				t.Fatal("final snapshot must keep polling, not exit")
+			}
+			for _, want := range []string{outcome, "Found 123", "q / ctrl+c quit", "Run error"} {
+				if !strings.Contains(m.View().Content, want) {
+					t.Fatalf("missing %q:\n%s", want, m.View().Content)
+				}
+			}
+			m, _ = key(m, tea.KeyTab, 0)
+			if m.tab != 1 {
+				t.Fatal("config inaccessible after completion")
+			}
+			m, _ = key(m, '1', 0)
+			m, _ = key(m, tea.KeyDown, 0)
+			m, _ = key(m, tea.KeyEnter, 0)
+			if m.selected != 1 || !m.details {
+				t.Fatal("shard details inaccessible after completion")
+			}
+			for _, k := range []tea.KeyPressMsg{{Code: 'q'}, {Code: 'c', Mod: tea.ModCtrl}} {
+				_, quit := m.Update(k)
+				if quit == nil {
+					t.Fatal("explicit quit ignored")
+				}
+				if _, ok := quit().(tea.QuitMsg); !ok {
+					t.Fatal("explicit quit did not quit")
+				}
+			}
+		})
+	}
+	m := fixtureModel(1)
+	_, cmd := key(m, 'q', 0)
+	if cmd != nil {
+		t.Fatal("q must not bypass active cleanup")
+	}
+}

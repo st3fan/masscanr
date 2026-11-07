@@ -63,7 +63,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = max(1, msg.Width), max(1, msg.Height)
 	case tea.KeyPressMsg:
 		switch msg.String() {
+		case "q":
+			if m.state.Final != nil {
+				return m, tea.Quit
+			}
 		case "ctrl+c":
+			if m.state.Final != nil {
+				return m, tea.Quit
+			}
 			if !m.stopping {
 				m.stopping = true
 				if m.cancel != nil {
@@ -111,6 +118,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.state.totals(m.now).Stale {
 			headerHeight++
 		}
+		if m.state.Final != nil && m.state.Final.Detail != "" {
+			headerHeight++
+		}
 		detailHeight := m.detailHeight(max(0, m.height-headerHeight-2))
 		rows := m.state.sorted()
 		selected := min(m.selected, len(rows)-1)
@@ -133,7 +143,9 @@ func (m model) View() tea.View {
 		run = "pending"
 	}
 	phase := m.state.Phase
-	if m.stopping {
+	if m.state.Final != nil {
+		phase = m.state.Final.Status
+	} else if m.stopping {
 		phase = "Stopping; cleaning up"
 	}
 	header := []string{fmt.Sprintf("masscanr  |  Run: %s  |  %s", run, phase)}
@@ -150,6 +162,15 @@ func (m model) View() tea.View {
 			footer = "^C stop · tab tabs · ↑↓ scroll"
 		}
 	}
+	if m.state.Final != nil {
+		footer = "q / ctrl+c quit  tab tabs  ↑↓ shard  enter details  pgup/pgdown scroll"
+		if m.tab == 1 {
+			footer = "q / ctrl+c quit  tab tabs  ↑↓ / pgup/pgdown scroll"
+		}
+		if w < 76 {
+			footer = "q quit · tab tabs · ↑↓ · enter"
+		}
+	}
 	var body []string
 	if m.tab == 0 {
 		total := m.state.totals(m.now)
@@ -163,6 +184,9 @@ func (m model) View() tea.View {
 			fmt.Sprintf("Shards %d/%d complete  |  VPSs remaining %d", total.Complete, m.state.Config.Scan.Shards, total.VPSs))
 		if total.Stale {
 			header = append(header, m.paint("Stale telemetry: last progress retained; stale rates excluded", "3"))
+		}
+		if m.state.Final != nil && m.state.Final.Detail != "" {
+			header = append(header, m.paint("Run error (enter details): "+m.state.Final.Detail, "1"))
 		}
 		body = m.overview(max(0, m.height-len(header)-2))
 	} else {
@@ -286,6 +310,9 @@ func (m model) detailLines(r shardState) []string {
 	}
 	if r.CleanupDetail != "" {
 		detail += "\nCleanup: " + r.CleanupDetail
+	}
+	if m.state.Final != nil && m.state.Final.Detail != "" {
+		detail += "\nRun error: " + m.state.Final.Detail
 	}
 	return strings.Split(ansi.Wrap(detail, max(1, m.width), ""), "\n")
 }
