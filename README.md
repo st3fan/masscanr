@@ -1,7 +1,7 @@
 # masscanr
 
 Run masscan or ZMap shards on temporary Vultr VPS workers, stream discoveries back to a
-local list file with CSV/JSONL exports, and watch each worker in a terminal UI. The controller is
+local `.scan` document with CSV/JSONL exports, and watch each worker in a terminal UI. The controller is
 written in Go and needs no root privileges. Masscan is the default; select
 ZMap with `--backend zmap`. Workers use Alpine packages and root/password SSH.
 
@@ -12,7 +12,8 @@ defines the Alpine worker platform. Work is tracked in native version sub-issues
 and small PRs ordered with `gh stack`. [V4 guidance](https://github.com/st3fan/masscanr/issues/33)
 defines selectable masscan/ZMap backends and their shared scan contract.
 [V5 guidance](https://github.com/st3fan/masscanr/issues/57) defines environment-only
-Vultr credentials.
+Vultr credentials. [V6 guidance](https://github.com/st3fan/masscanr/issues/60)
+defines self-contained text scan documents and offline inspection/export.
 
 ## Build and configure
 
@@ -54,7 +55,7 @@ addresses; replace them with your authorized target ranges:
 ```sh
 ./masscanr scan 192.0.2.0/24 198.51.100.0/24
 ./masscanr scan --shards=4 --rate=500000 --region=atl \
-  --instance-type=vc2-1c-1gb --output=inventory.list 192.0.2.0/24
+  --instance-type=vc2-1c-1gb --output=inventory.scan 192.0.2.0/24
 ./masscanr scan --ports=22,80,443,8000-8100 192.0.2.0/24
 ./masscanr scan --slug=epag 192.0.2.0/24
 ./masscanr scan --backend zmap --shards=4 --ports=22,80,443 192.0.2.0/24
@@ -72,7 +73,7 @@ Scanning requires the `scan` subcommand; a bare CIDR is an unknown command.
 | `--region` | `atl` | Vultr region (Atlanta) |
 | `--instance-type` | `vc2-1c-1gb` | Vultr plan |
 | `--ports`, `-p` | Nmap 7.95 top 100 TCP ports | Comma-separated ports, inclusive ranges, or mixed forms |
-| `--output` | Timestamped `masscanr-*.list` | New list file plus CSV/JSONL exports; `-` streams the list to stdout |
+| `--output` | Timestamped `masscanr-*.scan` | New scan document plus CSV/JSONL exports; `-` streams scan JSON Lines to stdout |
 | `--slug` | Empty | Text inserted before the timestamp in generated output filenames |
 | `--timeout` | `24h` | Maximum scanning time; cleanup follows |
 | `--cleanup-timeout` | `5m` | Separate deadline for worker deletion |
@@ -80,8 +81,8 @@ Scanning requires the `scan` subcommand; a bare CIDR is an unknown command.
 | `--version` | | Print version and exit |
 
 For example, `--slug=epag` generates a name such as
-`masscanr-epag-20261105T042952.086607609Z.list`. Omitting the slug preserves
-`masscanr-<timestamp>.list`. Slug text is preserved; path separators and control
+`masscanr-epag-20261105T042952.086607609Z.scan`. Omitting the slug preserves
+`masscanr-<timestamp>.scan`. Slug text is preserved; path separators and control
 characters are rejected. An explicit `--output` path takes precedence over the
 slug. With `--output=-`, CSV/JSONL filenames still use the timestamp and slug.
 
@@ -224,38 +225,62 @@ collected, including the selected engine's response-wait phase. Its status becom
 `shutdown` after deletion is confirmed, while other shards continue scanning.
 The row keeps its scan statistics and any scan failure.
 
-Both engines stream into one local masscan-compatible list file. Files are
-created with mode `0600`, and existing files are never overwritten. Example:
+Both engines stream into one private (`0600`), exclusively created `.scan`
+document. It contains the effective configuration, shared seed, observed backend
+and worker platform, instance identities and ownership tag, lifecycle changes,
+sampled progress, every accepted finding, and final scan/cleanup outcomes. The
+[format contract](docs/scan-format.md) specifies schema 1 and recovery rules.
 
-```text
-#masscan
-# masscanr backend=zmap run=... seed=... targets=... ports=... rate=... shards=...
-# backend=zmap version=4.3.4 build=zmap-4.3.4-r0 sha256:...
-# shard 1
-open tcp 80 192.0.2.1 1700000000
-# shard 2
-open tcp 443 192.0.2.2 1700000001
-# status complete
+The file is UTF-8 JSON Lines: one record per line, with contiguous sequence
+numbers, controller observation time, type, and matching payload. For example,
+a finding record within a document looks like this:
+
+```jsonl
+{"type":"finding","seq":42,"at":"2026-11-07T15:01:00Z","finding":{"shard":1,"ip":"192.0.2.1","port":443,"protocol":"tcp","state":"open","timestamp":1794063660}}
 ```
 
-Comment lines record configuration, shard attribution, and completion status.
-Discoveries use the same list format for either engine: state, protocol, port,
-address, timestamp. ZMap CSV headers never enter this stream; the adapter uses
-the response TCP source port as the target port and the capture observation
-timestamp in Unix seconds, with no local-clock fallback. Metadata comments and
-the durable stderr summary identify the backend and observed version/build.
-Response-wait completion and the remote exit status are checked before a shard
-is complete. Results are checked against the requested addresses and ports.
+Configuration appears first and remains immutable. The seed is a decimal string
+so general JSON tools cannot lose integer precision. Progress measurements may
+be `null` (unknown), distinct from measured zero. Findings preserve arrival
+order and duplicates; their numeric Unix-seconds timestamp is the scanner's
+original observation time. Both backends use the common scope/port validator.
+ZMap uses the response TCP source port and capture timestamp, with no local-clock
+fallback. Raw ZMap CSV headers never enter the document.
 
-After a successful scan, the controller parses the saved list and also writes
-CSV and JSONL exports. For example, `masscanr-epag-<timestamp>.list` produces
-`masscanr-epag-<timestamp>.csv` and `masscanr-epag-<timestamp>.jsonl`.
-With `--output=inventory.list`, exports are `inventory.csv` and
-`inventory.jsonl` in the same directory. If the custom path does not end in
-`.list`, the extensions are appended (`inventory.txt.csv`, for example).
+The controller syncs configuration before provisioning, creation intent before
+each create call, known instance identities and lifecycle transitions immediately,
+and findings in batches on a one-second timer. A final `finished` record is
+synced before success is reported. Disk, flush, sync or close errors still cause
+an unsuccessful command and may prevent durable results or a final record.
+Storage failure stops scans and triggers independent ownership-checked cleanup;
+cleanup continues even when the file cannot be updated.
 
-Each finding becomes one CSV row or JSONL object, preserving order and
-duplicates. CSV has a header; JSONL has no surrounding array:
+Scan completion requires every scanner's successful exit, final response wait
+and drained streams. Cleanup is recorded separately: complete findings remain
+complete when deletion fails, while the command exits unsuccessfully and identifies
+unresolved resources. Export delivery errors also remain separate from scan outcome.
+
+Inspect a saved document without credentials or cloud access:
+
+```sh
+./masscanr inspect inventory.scan
+```
+
+Inspection displays configuration, accepted finding count, observed backend,
+last recorded worker state, errors and independent scan/cleanup outcomes.
+These are historical observations, not evidence of currently running workers.
+Without `finished`, completion is unconfirmed. An unterminated final record is
+ignored with an explicit truncation diagnostic; the complete validated prefix
+remains available. Malformed newline-terminated records, invalid state/sequence,
+inconsistent summaries and unsupported schemas are errors, never silently skipped.
+Records are limited to 4 MiB, JSON nesting to 64, and shards to 65,535. No API
+tokens, passwords, environment snapshots or raw commands are persisted.
+
+After a successful scan and cleanup, the controller also writes CSV and
+findings-only JSONL exports. `inventory.scan` produces `inventory.csv` and
+`inventory.jsonl`; custom filenames without a trailing `.scan` have extensions
+appended (`inventory.txt.csv`, for example). Each finding becomes one row/object,
+preserving order and duplicates:
 
 ```csv
 ip,port,addr,protocol,state,timestamp
@@ -268,23 +293,46 @@ ip,port,addr,protocol,state,timestamp
 {"ip":"192.0.2.2","port":443,"addr":"192.0.2.2:443","protocol":"tcp","state":"open","timestamp":1700000001}
 ```
 
-`port` and Unix-seconds `timestamp` are JSON numbers. Configuration, shard,
-and status comments remain in the native list. An empty successful scan
-produces a CSV header and an empty JSONL file. Conversion streams from disk;
-exports use mode `0600` and never overwrite existing files. Conversion errors
-preserve the list, discard failed partial exports, and exit nonzero with an
-export-specific error. Failed/cancelled scans do not produce exports.
+An empty successful scan produces a CSV header and an empty findings JSONL file.
+Exports stream from disk, use private permissions and never overwrite existing
+files. Conversion failure preserves the `.scan` source, discards failed partial
+exports, and returns an export-specific error. Failed/cancelled scans do not
+produce automatic exports.
 
-With `--output=-`, the list continues streaming to stdout while a private
-temporary copy supports conversion. CSV/JSONL are saved in the current
-directory using the generated scan name (and `--slug`, when supplied); their
-paths are printed on stderr. The temporary list is removed on normal exit.
+Export later, including a masscan-compatible `.list` for existing tools:
 
-A failed/cancelled run preserves collected results, writes `# status incomplete`
-where output is still writable, and exits nonzero. No completion footer means
-completion was not confirmed. A disk/write/sync error can prevent a footer or
-durable data; stderr and exit status take precedence. No inventory database,
-job/session history, resume, or automatic shard replacement is included in V1.
+```sh
+./masscanr export inventory.scan --format=list --output=inventory.list
+./masscanr export inventory.scan --format=csv --output=inventory.csv
+./masscanr export inventory.scan --format=jsonl --output=inventory.jsonl
+./masscanr export interrupted.scan --format=csv --output=partial.csv --allow-incomplete
+```
+
+Explicit export requires confirmed complete results by default. It also works
+when scanning completed but cleanup failed, with a cleanup diagnostic. The
+`--allow-incomplete` flag permits the validated prefix of failed, cancelled,
+unfinished or truncated documents, with a partial-results warning. It cannot
+bypass corruption. Partial discoveries do not establish coverage of unobserved
+endpoints. Input and export destinations are never overwritten.
+
+With `--output=-`, the entire scan JSON Lines stream goes to stdout; the UI and
+summaries remain on stderr. A private temporary spool supports automatic CSV/JSONL
+conversion and is removed on normal exit. Exports use generated timestamp/slug
+names in the current directory. Use a file destination to retain a `.scan`
+artifact, or arrange persistence of stdout yourself.
+
+**V6 migration:** primary output, including `--output=-` and explicit filenames
+ending in `.list`, now contains scan JSON Lines. Change filenames to `.scan`,
+update consumers, or use the explicit list export above. Existing old `.list`
+files remain usable with their original tools; V6 does not import or rewrite them.
+The findings-only `.jsonl` export keeps its existing schema and is distinct from
+the `.scan` journal.
+
+The format is an append-only text journal with linear replay, not a transactional
+database. Sync timing is not a hard loss bound during storage failure. It supports
+inspection and manual reconciliation, not restart/resume or automatic post-crash
+worker deletion. Session history, a cross-scan inventory database and automatic
+shard replacement remain deferred.
 
 ## Temporary workers and cleanup
 
@@ -380,7 +428,11 @@ Default tests need no credentials and create no cloud resources. They exercise
 Vultr HTTP fixtures, local root/password SSH servers, CLI validation, progress
 parsing, combined output, concurrency, cancellation, ownership protection and
 cleanup. A cross-component test runs the real HTTP/SSH clients against local
-fixtures through the controller.
+fixtures through the controller. V6 adds offline scan-document replay,
+inspection/export, exact-integer and corruption checks, injected persistence
+failures, periodic sync cancellation, and large streamed-result coverage.
+The benchmarks in `internal/scanfile` measure in-memory append/replay overhead;
+they do not measure disk sync latency or scanner throughput.
 
 V2 UI checks use synthetic lifecycle events for aggregation, navigation, long
 CIDR/port lists, resizing, stale telemetry, cancellation and cleanup failures.
