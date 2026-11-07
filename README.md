@@ -14,6 +14,7 @@ defines selectable masscan/ZMap backends and their shared scan contract.
 [V5 guidance](https://github.com/st3fan/masscanr/issues/57) defines environment-only
 Vultr credentials. [V6 guidance](https://github.com/st3fan/masscanr/issues/60)
 defines self-contained text scan documents and offline inspection/export.
+[V8 guidance](https://github.com/st3fan/masscanr/issues/72) defines IPv4 address/AS targets and result provenance.
 [V7 guidance](https://github.com/st3fan/masscanr/issues/65) defines confirmation
 before large scans, measured by planned probes.
 
@@ -51,11 +52,13 @@ chosen plan. The app fails before provisioning if the plan/image is unavailable.
 
 ## Run
 
-Supply one or more company-owned IPv4 CIDRs. These examples use documentation
-addresses; replace them with your authorized target ranges:
+Supply one or more company-owned, authorized IPv4 CIDRs, individual IPv4
+addresses, or AS targets. These examples use documentation addresses; replace
+them with your authorized scope:
 
 ```sh
 ./masscanr scan 192.0.2.0/24 198.51.100.0/24
+./masscanr scan 192.0.2.42 198.51.100/24
 ./masscanr scan --shards=4 --rate=500000 --region=atl \
   --instance-type=vc2-1c-1gb --output=inventory.scan 192.0.2.0/24
 ./masscanr scan --ports=22,80,443,8000-8100 192.0.2.0/24
@@ -63,7 +66,7 @@ addresses; replace them with your authorized target ranges:
 ./masscanr scan --backend zmap --shards=4 --ports=22,80,443 192.0.2.0/24
 ```
 
-Scan options work before or after CIDRs, following `scan`. Use
+Scan options work before or after targets, following `scan`. Use
 `masscanr scan --help` for scan options and `masscanr --help` for commands.
 Scanning requires the `scan` subcommand; a bare CIDR is an unknown command.
 
@@ -103,6 +106,49 @@ unsupported settings fail before credentials, output creation or provisioning.
 Two default workers request a combined 1,000,000 packets/second. The UI shows
 observed rates; actual throughput depends on the VPS and network.
 
+## IPv4 and AS targets
+
+Full and abbreviated CIDRs are accepted: `10.0.0.0/8` and `10/8` both mean
+`10.0.0.0/8`; `192.168/16` means `192.168.0.0/16`. Missing trailing octets are
+zero-filled before masking. An individual IPv4 address such as `192.168.0.1`
+means exactly `192.168.0.1/32`, including its result `target` value. Bare addresses
+require four octets. Ambiguous leading-zero octets, IPv6, names and address ranges
+are rejected.
+
+`AS1234` resolves through the controller's HTTPS connection to the
+[RIPEstat RIS Prefixes API](https://stat.ripe.net/docs/data-api/api-endpoints/ris-prefixes).
+Use `masscanr scan AS1234` only when the entire expanded scope is authorized.
+AS input is case-insensitive and accepts decimal 1–4294967295; for example,
+`as001234` becomes `AS1234`. Bare numbers, AS0, signs and ASDOT syntax are rejected.
+
+The lookup requests originating IPv4 prefixes from the latest available snapshot
+(`list_prefixes=true`, `types=o`, `af=v4`, `noise=keep`). Transit networks are
+excluded. Snapshot time and local fetch time are shown and saved. Routing
+observations can lag current conditions and do not establish ownership or scan
+authorization. You must be authorized to scan every expanded prefix.
+
+Mixed targets are supported. Each distinct AS is resolved once per invocation;
+identical canonical targets are deduplicated in first-occurrence order. No RIPE
+request is made for direct-only scans. Resolution happens after local option
+validation and before the V7 confirmation gate, artifact creation or workers.
+Any lookup failure or AS with no IPv4 origin prefixes fails the entire invocation.
+The controller does not continue with partial targets or an older cached mapping.
+The approved mapping is frozen for the run; workers and offline tools do not look
+up or refresh AS data.
+
+Lookups have a 20-second deadline per AS, a 4 MiB response limit, at most 1,024
+requested target arguments of at most 64 bytes each, and at most 32,768 total
+resolved prefix memberships across all targets. Exceeding a limit fails before
+provisioning. Responses must match the expected resource, origin-prefix schema,
+counts, and snapshot. IPv6 values are excluded; malformed prefixes are errors.
+
+Workers scan the exact normalized union of the resolved scope, removing duplicate
+and contained ranges without adding addresses. Overlapping targets do not create
+extra probes or result copies. For each accepted finding, the first matching
+requested target in command-line order supplies `target`. Within that AS, the
+most-specific resolved origin prefix containing the IP supplies `prefix`.
+Real scanner duplicates remain in results.
+
 ## Large-scan confirmation
 
 V7 asks for confirmation when **planned probes exceed 1,000,000**:
@@ -111,7 +157,8 @@ V7 asks for confirmation when **planned probes exceed 1,000,000**:
 planned probes = unique requested IPv4 addresses × unique requested TCP ports
 ```
 
-The count covers the union of all normalized CIDRs and deduplicated port ranges.
+The count covers the resolved union of all target types and deduplicated port
+ranges. AS expansion therefore happens before the confirmation decision.
 Shards divide this work and do not multiply it. Both masscan and ZMap use the
 same requested-scope count, before any backend-specific exclusions. This is
 planned scan work, rather than a prediction of exact wire packets or duration;
@@ -269,14 +316,14 @@ Both engines stream into one private (`0600`), exclusively created `.scan`
 document. It contains the effective configuration, shared seed, observed backend
 and worker platform, instance identities and ownership tag, lifecycle changes,
 sampled progress, every accepted finding, and final scan/cleanup outcomes. The
-[format contract](docs/scan-format.md) specifies schema 1 and recovery rules.
+[format contract](docs/scan-format.md) specifies schema 2, schema-1 compatibility and recovery rules.
 
 The file is UTF-8 JSON Lines: one record per line, with contiguous sequence
 numbers, controller observation time, type, and matching payload. For example,
 a finding record within a document looks like this:
 
 ```jsonl
-{"type":"finding","seq":42,"at":"2026-11-07T15:01:00Z","finding":{"shard":1,"ip":"192.0.2.1","port":443,"protocol":"tcp","state":"open","timestamp":1794063660}}
+{"type":"finding","seq":42,"at":"2026-11-07T15:01:00Z","finding":{"shard":1,"ip":"192.0.2.1","port":443,"protocol":"tcp","state":"open","timestamp":1794063660,"target":"192.0.2.0/24"}}
 ```
 
 Configuration appears first and remains immutable. The seed is a decimal string
@@ -323,15 +370,25 @@ appended (`inventory.txt.csv`, for example). Each finding becomes one row/object
 preserving order and duplicates:
 
 ```csv
-ip,port,addr,protocol,state,timestamp
-192.0.2.1,80,192.0.2.1:80,tcp,open,1700000000
-192.0.2.2,443,192.0.2.2:443,tcp,open,1700000001
+ip,port,addr,protocol,state,timestamp,target,prefix
+192.0.2.1,80,192.0.2.1:80,tcp,open,1700000000,192.0.2.0/24,
+192.0.2.2,443,192.0.2.2:443,tcp,open,1700000001,192.0.2.0/24,
 ```
 
 ```jsonl
-{"ip":"192.0.2.1","port":80,"addr":"192.0.2.1:80","protocol":"tcp","state":"open","timestamp":1700000000}
-{"ip":"192.0.2.2","port":443,"addr":"192.0.2.2:443","protocol":"tcp","state":"open","timestamp":1700000001}
+{"ip":"192.0.2.1","port":80,"addr":"192.0.2.1:80","protocol":"tcp","state":"open","timestamp":1700000000,"target":"192.0.2.0/24"}
+{"ip":"192.0.2.2","port":443,"addr":"192.0.2.2:443","protocol":"tcp","state":"open","timestamp":1700000001,"target":"192.0.2.0/24"}
 ```
+
+An AS finding also includes its origin prefix, for example (illustrative mapping):
+
+```jsonl
+{"ip":"192.0.2.42","port":443,"addr":"192.0.2.42:443","protocol":"tcp","state":"open","timestamp":1700000000,"target":"AS1234","prefix":"192.0.2.0/24"}
+```
+
+Direct CIDR/IP findings omit `prefix` in JSON and have an empty CSV cell.
+Masscan-compatible list exports keep their existing finding lines and cannot
+carry these per-finding fields; use `.scan`, CSV or JSONL to retain provenance.
 
 An empty successful scan produces a CSV header and an empty findings JSONL file.
 Exports stream from disk, use private permissions and never overwrite existing
@@ -365,8 +422,14 @@ artifact, or arrange persistence of stdout yourself.
 ending in `.list`, now contains scan JSON Lines. Change filenames to `.scan`,
 update consumers, or use the explicit list export above. Existing old `.list`
 files remain usable with their original tools; V6 does not import or rewrite them.
-The findings-only `.jsonl` export keeps its existing schema and is distinct from
-the `.scan` journal.
+The findings-only `.jsonl` export is distinct from the `.scan` journal.
+
+**V8 migration:** new scan documents use schema 2 and require ordered target
+mappings and finding provenance. Older readers must be upgraded to read schema 2.
+V8 still inspects and exports schema-1 documents offline, without inventing target
+attribution or querying RIPE. Their new CSV provenance columns are empty and their
+JSONL provenance fields are absent. New CSV exports append `target,prefix` after
+the existing six columns; update consumers that require an exact column count.
 
 The format is an append-only text journal with linear replay, not a transactional
 database. Sync timing is not a hard loss bound during storage failure. It supports

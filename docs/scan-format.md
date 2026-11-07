@@ -1,4 +1,4 @@
-# Scan documents, schema 1
+# Scan documents, schema 2 (with schema-1 reading)
 
 A `.scan` file is UTF-8 JSON Lines: one object and newline per record, one
 run per file. New files are private (`0600`) and exclusively created. Schema
@@ -14,10 +14,10 @@ UTC RFC3339 `at`, and exactly one matching payload object:
 | `backend` | Shard, observed name/version/build and platform/packages |
 | `worker` | Shard/instance identity, phase, cleanup status and bounded detail |
 | `progress` | Shard, nullable percent/rate/ETA seconds and response-wait flag |
-| `finding` | Shard, IP, port, protocol, state and scanner Unix-seconds timestamp |
+| `finding` | Shard, IP, port, protocol, state, scanner Unix-seconds timestamp, target and conditional AS prefix |
 | `finished` | Scan/cleanup outcomes, findings, shard outcomes, undeleted IDs and errors |
 
-The header is first and immutable. It has `format: "masscanr.scan"`, `schema: 1`,
+The header is first and immutable. It has `format: "masscanr.scan"`, `schema: 2`,
 `run_id`, `created_at`, `controller_version`, `label: "masscanr"`,
 `ownership_tag: "masscanr-run-<run_id>"`, and `config`.
 
@@ -27,6 +27,42 @@ Configuration contains normalized/deduplicated IPv4 `targets`, canonical TCP
 `output`, and two `exports` destinations. The timeout keys are `create`, `ready`,
 `prepare`, `scan`, `cleanup`, `delete`, and `poll`. Seeds retain their full
 unsigned 64-bit range; ZMap restricts them to its supported signed 63-bit range.
+
+Schema 2 adds `config.requested_targets` in command-line order. Each entry has:
+
+- `input`: the original first-occurrence argument (at most 64 bytes).
+- `target`: canonical masked IPv4 CIDR (including `/32` for single addresses), or
+  uppercase decimal AS identity without leading zeros.
+- `prefixes`: sorted, unique, masked IPv4 membership. Retain contained origin
+  prefixes here even when they disappear from the worker union.
+- `resolution`: AS-only RIPE provenance: `source` is
+  `https://stat.ripe.net/data/ris-prefixes/data.json`; `fetched_at` and `snapshot_at`
+  are recorded timestamps. The source requests originating IPv4 prefixes from
+  its latest snapshot; the snapshot cannot be later than the fetch time.
+
+There are at most 1,024 requested targets and 32,768 total prefix memberships.
+The stored `targets` worker union must exactly equal the deduplicated,
+containment-free union of these memberships. Direct targets have exactly their
+canonical CIDR as membership and no resolution metadata. AS entries require a
+nonempty mapping and complete resolution metadata. Canonical identities are
+unique. Inputs must parse to their recorded canonical identities.
+
+Schema-2 findings always have `target`. The first matching requested target wins
+for overlaps; if it is an AS, `prefix` is its most-specific containing origin
+prefix. Direct findings omit `prefix`. Replay validates these relationships
+against the immutable mapping, including first-match and longest-prefix rules.
+Findings do not create extra records because several targets match; actual scanner
+duplicates are preserved. The attribution index has at most one entry per prefix;
+each lookup checks only the 33 possible IPv4 prefix lengths.
+
+V8 reads both schemas 1 and 2; unknown schema numbers fail. Schema 1 did not define
+provenance: readers ignore such extension fields and do not invent historical
+identities or make network requests. Inspection identifies attribution as
+unavailable. CSV appends `target,prefix` with empty cells for schema 1; findings-only
+JSONL omits unavailable fields. New direct results have `target` with no JSON
+`prefix` (empty CSV prefix cell). Masscan-compatible list finding lines do not
+carry these fields. Existing lifecycle, sequence and completion validation applies
+to both schemas.
 
 Each complete record, including its newline, is limited to 4 MiB. Shards are
 limited to 65,535, with at most that many additional reconciliation-only worker
