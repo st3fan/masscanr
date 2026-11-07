@@ -6,7 +6,9 @@ written in Go and needs no root privileges. Workers use Debian's packaged
 masscan and root/password SSH.
 
 [V1 project description](https://github.com/st3fan/masscanr/issues/1) defines the
-scope. Work is tracked in linked sub-issues and one `gh stack` PR stack.
+scan engine and worker lifecycle. [V2 guidance](https://github.com/st3fan/masscanr/issues/21)
+specifies the Bubble Tea terminal interface. Work is tracked in sub-issues and
+small PRs ordered with `gh stack`.
 
 ## Build and configure
 
@@ -103,10 +105,50 @@ including local-disk High Frequency and High Performance plans.
 
 ## Progress and results
 
-The TUI runs on stderr, with a row for each worker: instance/address, lifecycle,
-scan progress, observed rate, ETA, discoveries and deletion status. Narrow
-terminals use two lines per worker. Redirecting stderr automatically selects
-plain lifecycle logs. Ctrl-C and SIGTERM stop scans and start cleanup.
+The Bubble Tea TUI runs on stderr and has two tabs:
+
+- **Overview** shows total scan progress, observed packets/second, discoveries,
+  scan ETA, completed shards and VPSs whose deletion is not yet confirmed. The
+  table retains each shard's address, lifecycle, progress and observed rate;
+  wide terminals also show ETA and discoveries. Enter expands the selected
+  shard's full instance ID, scan/cleanup outcomes and diagnostic details.
+- **Config** shows every normalized CIDR with address counts, the exact TCP port
+  selection, per-worker and aggregate requested rates, worker settings, shared
+  seed, timeouts and output destinations. These are the effective settings for
+  the current run and are read-only. Long lists and paths wrap and scroll.
+
+| Key | Action |
+| --- | --- |
+| Tab / Shift+Tab | Switch tabs |
+| 1 / 2 | Open Overview / Config |
+| Up / Down | Select a shard on Overview; scroll on Config |
+| Enter | Expand/collapse selected-shard details |
+| Page Up / Page Down | Scroll details when expanded, otherwise move through shards; scroll Config |
+| Ctrl-C | Stop scans and continue displaying cleanup until it finishes |
+
+Native shards have approximately equal shares of scan work; overall progress
+uses equal weights and includes pending/failed shards in the denominator.
+Unknown per-shard percentages show `—`. Failure retains the last percentage.
+Discoveries sum the latest cumulative shard counters and do not represent a
+count of unique hosts. Rates are observed throughput, distinct from Config's
+requested limits. Telemetry becomes stale after five seconds without progress;
+its last percentage remains visible, but its rate is excluded from totals.
+Scan ETA is the slowest remaining shard's estimate, shown only when every
+unfinished shard has fresh telemetry. It excludes provisioning, collection,
+export and cleanup time.
+
+Reaching 100% still permits response waiting, result collection and VPS cleanup.
+Scan outcome and deletion outcome are retained separately, so deletion cannot
+hide a scan failure. The UI remains active through export and restores the
+terminal before printing a durable run summary. SIGTERM also cancels scans and
+starts cleanup. Narrow terminals use two lines per worker; long tables scroll
+with selection. Set `NO_COLOR=1` to disable color. State labels remain readable
+without color.
+
+`--no-tui` selects plain lifecycle logs. Redirecting stderr selects this mode
+automatically. Native results on stdout (`--output=-`) remain separate from the
+UI. A terminal UI failure requests scan cancellation and cleanup, and returns
+an error.
 
 Each worker is deleted as soon as its scanner finishes and its output is
 collected, including masscan's response-wait phase. Its status becomes
@@ -244,6 +286,13 @@ Vultr HTTP fixtures, local root/password SSH servers, CLI validation, progress
 parsing, combined output, concurrency, cancellation, ownership protection and
 cleanup. A cross-component test runs the real HTTP/SSH clients against local
 fixtures through the controller.
+
+V2 UI checks use synthetic lifecycle events for aggregation, navigation, long
+CIDR/port lists, resizing, stale telemetry, cancellation and cleanup failures.
+A Linux pseudo-terminal test runs only the UI with fixture events and verifies
+raw-mode and alternate-screen restoration after Ctrl-C and cleanup. It skips
+when pseudo-terminals are unavailable. These checks do not run the app or scan
+any network.
 
 CI also installs masscan and exercises native configuration and saved-result
 replay checks. These checks send no probes and require no cloud credentials.
