@@ -6,6 +6,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/st3fan/masscanr/internal/backend/zmap"
+	"github.com/st3fan/masscanr/internal/scan"
 	"math"
 	"os"
 	"os/exec"
@@ -54,6 +56,18 @@ func TestZMapCapabilities(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("%s; %s", strings.TrimSpace(string(data)), strings.TrimSpace(string(checksum)))
+	preparation := (zmap.Backend{}).Preparation()
+	outputs := make([]string, len(preparation.Probes))
+	for i, probe := range preparation.Probes {
+		result, err := exec.CommandContext(t.Context(), probe.Command.Executable, probe.Command.Args...).Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		outputs[i] = string(result)
+	}
+	if identity, err := preparation.Verify(outputs, strings.TrimSpace(string(data))); err != nil || !identity.Valid() {
+		t.Fatal(identity, err)
+	}
 }
 
 // Explicit network metadata avoids interface discovery/ARP. Dryrun's source
@@ -76,8 +90,9 @@ func TestZMapSharding(t *testing.T) {
 		{"192.0.2.1/32\n192.0.2.4/31\n", "0,22,443", []string{"192.0.2.1", "192.0.2.4", "192.0.2.5"}, []string{"0", "22", "443"}},
 		{"192.0.2.0/30\n", "21-23,443,65535", []string{"192.0.2.0", "192.0.2.1", "192.0.2.2", "192.0.2.3"}, []string{"21", "22", "23", "443", "65535"}},
 	}
+	sawEmpty := false
 	for caseID, tc := range cases {
-		allow := filepath.Join(t.TempDir(), "allowlist")
+		allow := filepath.Join(t.TempDir(), "targets.txt")
 		if err := os.WriteFile(allow, []byte(tc.scope), 0600); err != nil {
 			t.Fatal(err)
 		}
@@ -87,7 +102,22 @@ func TestZMapSharding(t *testing.T) {
 					seen := map[string]int{}
 					for shard := 0; shard < shards; shard++ {
 						ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-						command := exec.CommandContext(ctx, program, zmapDryArgs(allow, tc.ports, shards, shard, seed)...)
+						args := zmapDryArgs(allow, tc.ports, shards, shard, seed)
+						if shards <= len(tc.ips)*len(tc.selected) {
+							cfg := scan.Defaults()
+							cfg.Targets, _ = scan.ParseTargets(strings.Fields(tc.scope))
+							cfg.Ports, _ = scan.ParsePorts(tc.ports)
+							plan, err := (zmap.Backend{}).Build(cfg.Intent(), scan.Shard{Index: shard + 1, Total: shards}, seed)
+							if err != nil {
+								t.Fatal(err)
+							}
+							if plan.Files[0].Content != tc.scope {
+								t.Fatal("adapter changed scope", plan.Files)
+							}
+							args = append(plan.Command.Args, "--dryrun", "--interface", "lo", "--source-ip", "192.0.2.200", "--source-mac", "00:00:00:00:00:01", "--gateway-mac", "00:00:00:00:00:02", "--verbosity", "0")
+						}
+						command := exec.CommandContext(ctx, program, args...)
+						command.Dir = filepath.Dir(allow)
 						var stderr bytes.Buffer
 						command.Stderr = &stderr
 						data, err := command.Output()
@@ -102,6 +132,9 @@ func TestZMapSharding(t *testing.T) {
 							t.Fatal(err, stderr.String())
 						}
 						ports, ips := portPattern.FindAllStringSubmatch(string(data), -1), ipPattern.FindAllStringSubmatch(string(data), -1)
+						if len(ports) == 0 {
+							sawEmpty = true
+						}
 						if len(ports) != len(ips) {
 							t.Fatal("unrecognized native packet output", string(data))
 						}
@@ -127,5 +160,9 @@ func TestZMapSharding(t *testing.T) {
 				})
 			}
 		}
+	}
+
+	if !sawEmpty {
+		t.Fatal("native fixture no longer exercises an empty shard")
 	}
 }
