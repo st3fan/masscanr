@@ -13,8 +13,6 @@ import (
 	"testing"
 )
 
-const exportFixture = "#masscan\n# shard 1\nopen tcp 80 192.0.2.1 1700000000\n# shard 2\nopen tcp 443 192.0.2.1 1700000001\nopen tcp 443 192.0.2.1 1700000001\n# status complete\n"
-
 func TestExportFindingSchemasAndOrder(t *testing.T) {
 	var csvOut, jsonlOut bytes.Buffer
 	if err := writeExports(strings.NewReader(exportFixture), &csvOut, &jsonlOut); err != nil {
@@ -51,26 +49,25 @@ func TestExportFindingSchemasAndOrder(t *testing.T) {
 
 func TestEmptyScanExports(t *testing.T) {
 	var c, j bytes.Buffer
-	if err := writeExports(strings.NewReader("#masscan\n# status complete\n"), &c, &j); err != nil || c.String() != "ip,port,addr,protocol,state,timestamp\n" || j.Len() != 0 {
+	if err := writeExports(strings.NewReader(scanFixture("masscan", nil, "complete")), &c, &j); err != nil || c.String() != "ip,port,addr,protocol,state,timestamp\n" || j.Len() != 0 {
 		t.Fatal(err, c.String(), j.String())
 	}
 }
 
-func TestExportRejectsInvalidOrIncompleteList(t *testing.T) {
+func TestExportRejectsInvalidOrIncompleteDocument(t *testing.T) {
 	for _, input := range []string{
-		"", "# status incomplete\n", "open tcp 80 192.0.2.1 1\n",
-		"open tcp 65536 192.0.2.1 1\n# status complete\n",
-		"open tcp 80 ::1 1\n# status complete\n",
-		"open tcp 80 invalid 1\n# status complete\n",
-		"open tcp 80 192.0.2.1 -1\n# status complete\n",
-		"open udp 80 192.0.2.1 1\n# status complete\n",
-		"garbage\n# status complete\n",
-		"# status complete\nopen tcp 80 192.0.2.1 1\n",
-		"# status complete\n# status complete\n",
-		strings.Repeat("x", 1<<20) + "\n# status complete\n",
+		"", unfinished(exportFixture),
+		scanFixture("masscan", fixtureFindings(), "failed"),
+		strings.Replace(exportFixture, `"schema":1`, `"schema":2`, 1),
+		strings.Replace(exportFixture, `"port":80`, `"port":65536`, 1),
+		strings.Replace(exportFixture, `"ip":"192.0.2.1"`, `"ip":"198.51.100.1"`, 1),
+		strings.Replace(exportFixture, `"timestamp":1700000000`, `"timestamp":-1`, 1),
+		strings.Replace(exportFixture, `"protocol":"tcp"`, `"protocol":"udp"`, 1),
+		exportFixture + "{}\n",
+		strings.Repeat("x", 4<<20) + "\n",
 	} {
 		if err := writeExports(strings.NewReader(input), io.Discard, io.Discard); err == nil {
-			t.Fatal("accepted malformed or incomplete list")
+			t.Fatal("accepted malformed or incomplete document")
 		}
 	}
 }
@@ -91,7 +88,7 @@ func TestExportFilesAndRollback(t *testing.T) {
 	for _, mode := range []string{"success", "malformed", "csv-collision", "jsonl-collision"} {
 		t.Run(mode, func(t *testing.T) {
 			dir := t.TempDir()
-			path := filepath.Join(dir, "scan.list")
+			path := filepath.Join(dir, "scan.scan")
 			data := exportFixture
 			if mode == "malformed" {
 				data = "garbage\n# status complete\n"
@@ -150,7 +147,7 @@ func TestExportPaths(t *testing.T) {
 		input string
 		want  [2]string
 	}{
-		{"dir/masscanr-office-20261105T042952.086607609Z.list", [2]string{"dir/masscanr-office-20261105T042952.086607609Z.csv", "dir/masscanr-office-20261105T042952.086607609Z.jsonl"}},
+		{"dir/masscanr-office-20261105T042952.086607609Z.scan", [2]string{"dir/masscanr-office-20261105T042952.086607609Z.csv", "dir/masscanr-office-20261105T042952.086607609Z.jsonl"}},
 		{"custom.txt", [2]string{"custom.txt.csv", "custom.txt.jsonl"}},
 		{"custom.csv", [2]string{"custom.csv.csv", "custom.csv.jsonl"}},
 	} {

@@ -23,7 +23,7 @@ func TestCLIFlagsAndResultsWithoutInfrastructure(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("VULTR_API_TOKEN", "fixture-key")
-	path := filepath.Join(t.TempDir(), "scan.list")
+	path := filepath.Join(t.TempDir(), "scan.scan")
 	var stdout, stderr bytes.Buffer
 	called := false
 	factory := func(key string, timeouts controller.Timeouts, _ backend.Backend) runFunc {
@@ -39,7 +39,7 @@ func TestCLIFlagsAndResultsWithoutInfrastructure(t *testing.T) {
 				t.Fatal(cfg.Targets)
 			}
 			emit(controller.Event{Shard: 1, State: "completed"})
-			_, err := io.WriteString(out, "open tcp 80 192.0.2.1 1700000000\n# status complete\n")
+			_, err := io.WriteString(out, scanFixture("masscan", fixtureFindings()[:1], "complete"))
 			return controller.Summary{RunID: "fixture", Found: 1}, err
 		}
 	}
@@ -51,7 +51,7 @@ func TestCLIFlagsAndResultsWithoutInfrastructure(t *testing.T) {
 		t.Fatal("credentials leaked to command output")
 	}
 	data, _ := os.ReadFile(path)
-	if !strings.HasPrefix(string(data), "open tcp") || stdout.Len() != 0 || !strings.Contains(stderr.String(), "192.0.2.0/24") {
+	if !strings.HasPrefix(string(data), `{"type":"scan"`) || stdout.Len() != 0 || !strings.Contains(stderr.String(), "192.0.2.0/24") {
 		t.Fatal(string(data), stdout.String(), stderr.String())
 	}
 	info, _ := os.Stat(path)
@@ -85,11 +85,11 @@ func TestCLIValidationDoesNotBuildController(t *testing.T) {
 
 func TestPartialOutputPreserved(t *testing.T) {
 	t.Setenv("VULTR_API_TOKEN", "fixture-key")
-	path := filepath.Join(t.TempDir(), "partial.list")
+	path := filepath.Join(t.TempDir(), "partial.scan")
 	var stdout, stderr bytes.Buffer
 	build := func(string, controller.Timeouts, backend.Backend) runFunc {
 		return func(_ context.Context, _ scan.Config, out io.Writer, _ func(controller.Event)) (controller.Summary, error) {
-			io.WriteString(out, "# status incomplete\n")
+			io.WriteString(out, scanFixture("masscan", nil, "failed"))
 			return controller.Summary{}, errors.New("fixture scan failed")
 		}
 	}
@@ -97,7 +97,7 @@ func TestPartialOutputPreserved(t *testing.T) {
 		t.Fatal("success on failure")
 	}
 	data, err := os.ReadFile(path)
-	if err != nil || !strings.Contains(string(data), "incomplete") || !strings.Contains(stderr.String(), "Partial results") {
+	if err != nil || !strings.Contains(string(data), `"scan_outcome":"failed"`) || !strings.Contains(stderr.String(), "Partial results") {
 		t.Fatal(err, stderr.String())
 	}
 	for _, export := range exportPaths(path) {
@@ -134,14 +134,14 @@ func TestScanRequiresEnvironmentTokenBeforeOutputOrController(t *testing.T) {
 				t.Fatal("controller built without an environment token")
 				return nil
 			}
-			err := executeScan(t.Context(), []string{"192.0.2.0/24", "--output=scan.list"}, &stdout, &stderr, build)
+			err := executeScan(t.Context(), []string{"192.0.2.0/24", "--output=scan.scan"}, &stdout, &stderr, build)
 			if err == nil || err.Error() != "VULTR_API_TOKEN is required in the environment" {
 				t.Fatalf("unexpected credential error: %v", err)
 			}
 			if stdout.Len() != 0 || stderr.Len() != 0 {
 				t.Fatal("credential failure produced output")
 			}
-			if _, err := os.Stat("scan.list"); !errors.Is(err, os.ErrNotExist) {
+			if _, err := os.Stat("scan.scan"); !errors.Is(err, os.ErrNotExist) {
 				t.Fatal("output created before credential validation", err)
 			}
 		})
@@ -169,9 +169,9 @@ func TestScanHelpDocumentsEnvironmentToken(t *testing.T) {
 func TestOutputFilenameSlugAndUTCTimestamp(t *testing.T) {
 	when := time.Date(2026, 11, 4, 23, 29, 52, 86607609, time.FixedZone("EST", -5*60*60))
 	for _, tc := range []struct{ slug, want string }{
-		{"", "masscanr-20261105T042952.086607609Z.list"},
-		{"epag", "masscanr-epag-20261105T042952.086607609Z.list"},
-		{"North Office", "masscanr-North Office-20261105T042952.086607609Z.list"},
+		{"", "masscanr-20261105T042952.086607609Z.scan"},
+		{"epag", "masscanr-epag-20261105T042952.086607609Z.scan"},
+		{"North Office", "masscanr-North Office-20261105T042952.086607609Z.scan"},
 	} {
 		if got := outputFilename(tc.slug, when); got != tc.want {
 			t.Errorf("got %q, expected %q", got, tc.want)
@@ -180,7 +180,7 @@ func TestOutputFilenameSlugAndUTCTimestamp(t *testing.T) {
 }
 
 func TestSlugOutputSelectionWithFakeController(t *testing.T) {
-	for _, output := range []string{"", "custom.list", "-"} {
+	for _, output := range []string{"", "custom.scan", "-"} {
 		t.Run("output="+output, func(t *testing.T) {
 			t.Chdir(t.TempDir())
 			tempDir := t.TempDir()
@@ -202,7 +202,7 @@ func TestSlugOutputSelectionWithFakeController(t *testing.T) {
 			if err := execute(t.Context(), args, &stdout, &stderr, build, nil); err != nil || !called {
 				t.Fatal(err)
 			}
-			files, err := filepath.Glob("*.list")
+			files, err := filepath.Glob("*.scan")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -211,8 +211,8 @@ func TestSlugOutputSelectionWithFakeController(t *testing.T) {
 				if len(files) != 0 || stdout.String() != exportFixture {
 					t.Fatal(files, stdout.String())
 				}
-			case "custom.list":
-				if len(files) != 1 || files[0] != "custom.list" {
+			case "custom.scan":
+				if len(files) != 1 || files[0] != "custom.scan" {
 					t.Fatal(files)
 				}
 			default:
@@ -225,7 +225,7 @@ func TestSlugOutputSelectionWithFakeController(t *testing.T) {
 				if err != nil || len(exports) != 1 {
 					t.Fatal(exports, err)
 				}
-				if output == "custom.list" {
+				if output == "custom.scan" {
 					if exports[0] != "custom."+extension {
 						t.Fatal(exports)
 					}
@@ -243,7 +243,7 @@ func TestSlugOutputSelectionWithFakeController(t *testing.T) {
 
 func TestCLIExportFailurePreservesCompletedList(t *testing.T) {
 	t.Setenv("VULTR_API_TOKEN", "fixture-key")
-	path := filepath.Join(t.TempDir(), "scan.list")
+	path := filepath.Join(t.TempDir(), "scan.scan")
 	paths := exportPaths(path)
 	if err := os.WriteFile(paths[1], []byte("existing"), 0600); err != nil {
 		t.Fatal(err)

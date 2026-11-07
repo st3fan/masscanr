@@ -1,11 +1,11 @@
 package cli
 
 import (
-	"bufio"
 	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/st3fan/masscanr/internal/scanfile"
 	"io"
 	"net/netip"
 	"os"
@@ -24,7 +24,7 @@ type finding struct {
 }
 
 func exportPaths(output string) [2]string {
-	base := strings.TrimSuffix(output, ".list")
+	base := strings.TrimSuffix(output, ".scan")
 	return [2]string{base + ".csv", base + ".jsonl"}
 }
 
@@ -81,47 +81,23 @@ func writeExports(in io.Reader, csvOut, jsonlOut io.Writer) error {
 		return err
 	}
 	jw := json.NewEncoder(jsonlOut)
-	scanner := bufio.NewScanner(in)
-	scanner.Buffer(make([]byte, 4096), 1<<20)
-	complete := false
-	lineNumber := 0
-	for scanner.Scan() {
-		lineNumber++
-		line := strings.TrimSpace(scanner.Text())
-		if line == "# status complete" && !complete {
-			complete = true
-			continue
-		}
-		if strings.HasPrefix(line, "# status ") {
-			return fmt.Errorf("line %d: invalid or incomplete scan status", lineNumber)
-		}
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		fields := strings.Fields(line)
-		if complete || len(fields) != 5 || fields[0] != "open" || fields[1] != "tcp" {
-			return fmt.Errorf("line %d: invalid masscan list record", lineNumber)
-		}
-		ip, ipErr := netip.ParseAddr(fields[3])
-		port, portErr := strconv.ParseUint(fields[2], 10, 16)
-		timestamp, timestampErr := strconv.ParseUint(fields[4], 10, 64)
-		if ipErr != nil || !ip.Is4() || portErr != nil || timestampErr != nil {
-			return fmt.Errorf("line %d: invalid finding address, port or timestamp", lineNumber)
-		}
-		f := finding{IP: ip.String(), Port: uint16(port), Addr: netip.AddrPortFrom(ip, uint16(port)).String(), Protocol: fields[1], State: fields[0], Timestamp: timestamp}
-		if err := cw.Write([]string{f.IP, strconv.FormatUint(port, 10), f.Addr, f.Protocol, f.State, strconv.FormatUint(timestamp, 10)}); err != nil {
+	state, err := scanfile.Replay(in, func(f scanfile.Finding) error {
+		row := exportFinding(f)
+		if err := cw.Write([]string{row.IP, strconv.FormatUint(uint64(row.Port), 10), row.Addr, row.Protocol, row.State, strconv.FormatUint(row.Timestamp, 10)}); err != nil {
 			return err
 		}
-		if err := jw.Encode(f); err != nil {
-			return err
-		}
-	}
-	if err := scanner.Err(); err != nil {
+		return jw.Encode(row)
+	})
+	if err != nil {
 		return err
 	}
-	if !complete {
-		return fmt.Errorf("missing scan completion footer")
+	if !state.Complete() {
+		return fmt.Errorf("scan completion unconfirmed; results are incomplete")
 	}
 	cw.Flush()
 	return cw.Error()
+}
+
+func exportFinding(f scanfile.Finding) finding {
+	return finding{IP: f.IP.String(), Port: f.Port, Addr: netip.AddrPortFrom(f.IP, f.Port).String(), Protocol: f.Protocol, State: f.State, Timestamp: f.Timestamp}
 }

@@ -15,7 +15,7 @@ import (
 func fixtureModel(shards int) model {
 	cfg := scan.Defaults()
 	cfg.Shards = shards
-	s := newState(NewRunConfig(cfg, controller.DefaultTimeouts(), "inventory.list", [2]string{}))
+	s := newState(NewRunConfig(cfg, controller.DefaultTimeouts(), "inventory.scan", [2]string{}))
 	s.RunID, s.Phase = "fixture", "Scanning"
 	m := newModel(s, nil, nil, nil)
 	m.now = time.Unix(100, 0)
