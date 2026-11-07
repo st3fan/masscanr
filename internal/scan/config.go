@@ -8,7 +8,6 @@ import (
 	"math"
 	"math/big"
 	"net/netip"
-	"sort"
 	"strconv"
 	"strings"
 )
@@ -27,13 +26,14 @@ const (
 const TopPorts = "7,9,13,21,22,23,25,26,37,53,79,80,81,88,106,110,111,113,119,135,139,143,144,179,199,389,427,443,444,445,465,513,514,515,543,544,548,554,587,631,646,873,990,993,995,1025,1026,1027,1028,1029,1110,1433,1720,1723,1755,1900,2000,2001,2049,2121,2717,3000,3128,3306,3389,3986,4899,5000,5009,5051,5060,5101,5190,5357,5432,5631,5666,5800,5900,6000,6001,6646,7070,8000,8008,8009,8080,8081,8443,8888,9100,9999,10000,32768,49152,49153,49154,49155,49156,49157"
 
 type Config struct {
-	Backend      string
-	Targets      []netip.Prefix
-	Ports        []uint16
-	Shards       int
-	Rate         uint64
-	Region       string
-	InstanceType string
+	Backend          string
+	Targets          []netip.Prefix
+	RequestedTargets []Target
+	Ports            []uint16
+	Shards           int
+	Rate             uint64
+	Region           string
+	InstanceType     string
 }
 
 func Defaults() Config {
@@ -54,27 +54,7 @@ func ParseTargets(values []string) ([]netip.Prefix, error) {
 		}
 		prefixes = append(prefixes, p.Masked())
 	}
-	sort.Slice(prefixes, func(i, j int) bool {
-		if prefixes[i].Bits() != prefixes[j].Bits() {
-			return prefixes[i].Bits() < prefixes[j].Bits()
-		}
-		return prefixes[i].Addr().Less(prefixes[j].Addr())
-	})
-	var result []netip.Prefix
-	for _, p := range prefixes {
-		covered := false
-		for _, parent := range result {
-			if parent.Contains(p.Addr()) {
-				covered = true
-				break
-			}
-		}
-		if !covered {
-			result = append(result, p)
-		}
-	}
-	sort.Slice(result, func(i, j int) bool { return result[i].Addr().Less(result[j].Addr()) })
-	return result, nil
+	return PrefixUnion(prefixes), nil
 }
 
 // ParsePorts accepts masscan-style TCP lists and inclusive ranges, including
@@ -117,6 +97,11 @@ func (c Config) Validate() error {
 	for _, p := range c.Targets {
 		if !p.IsValid() || !p.Addr().Is4() || p != p.Masked() {
 			return fmt.Errorf("targets must be normalized IPv4 CIDRs")
+		}
+	}
+	if len(c.RequestedTargets) > 0 {
+		if err := ValidateTargets(c.RequestedTargets, c.Targets); err != nil {
+			return err
 		}
 	}
 	if len(c.Ports) == 0 {
