@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"slices"
 	"syscall"
 	"testing"
 	"time"
@@ -87,6 +88,9 @@ func TestVultrWorkerSmoke(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		if current.ID != w.ID || current.Label != cloud.Label || !slices.Contains(current.Tags, "masscanr-run-"+runID) {
+			t.Fatal("smoke worker ownership changed before SSH preparation")
+		}
 		if current.Password == "" {
 			current.Password = w.Password
 		}
@@ -101,11 +105,11 @@ func TestVultrWorkerSmoke(t *testing.T) {
 		}
 	}
 	runner := remote.NewSSH()
-	version, err := runner.Prepare(ctx, w)
+	prepared, err := runner.Prepare(ctx, w)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Log("root/password SSH and Debian masscan ready; version", version)
+	t.Log("root/password SSH ready;", prepared.String())
 	cfg := scan.Defaults()
 	cfg.Targets, _ = scan.ParseTargets([]string{"192.0.2.0/30"})
 	args, _ := cfg.Args(1, 42)

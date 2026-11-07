@@ -30,18 +30,27 @@ import (
 // Exercise HTTP provisioning -> root/password SSH -> both streams -> merged
 // output -> confirmed deletion with actual protocol clients and no cloud VMs.
 func TestHTTPSSHController(t *testing.T) {
-	for _, failScan := range []bool{false, true} {
-		t.Run(fmt.Sprintf("failure=%v", failScan), func(t *testing.T) {
+	for _, phase := range []string{"", "scan", "release", "install"} {
+		failScan := phase != ""
+		t.Run(fmt.Sprintf("failure=%s", phase), func(t *testing.T) {
 			var seeds sync.Map
 			port := localSSH(t, func(command string, ch ssh.Channel) uint32 {
 				switch {
 				case command == "id -u":
 					fmt.Fprintln(ch, "0")
 				case command == "cat /etc/alpine-release":
-					fmt.Fprintln(ch, "3.24.4")
+					if phase == "release" {
+						fmt.Fprintln(ch, "3.25.4")
+					} else {
+						fmt.Fprintln(ch, "3.24.4")
+					}
 				case command == "cat /etc/apk/repositories":
 					fmt.Fprint(ch, "https://dl-cdn.alpinelinux.org/alpine/v3.24/main\nhttps://dl-cdn.alpinelinux.org/alpine/v3.24/community\n")
 				case strings.HasPrefix(command, "exec 'apk'"):
+					if phase == "install" {
+						fmt.Fprint(ch.Stderr(), "fixture APK failed")
+						return 2
+					}
 				case command == "apk --no-network info --installed -v masscan coreutils":
 					fmt.Fprint(ch, "masscan-1.3.2-r2\ncoreutils-9.11-r0\n")
 				case command == "stdbuf -oL masscan --version":
@@ -57,7 +66,7 @@ func TestHTTPSSHController(t *testing.T) {
 					seeds.Store(shard[1], seed[1])
 					fmt.Fprintf(ch, "#masscan\nopen tcp 80 192.0.2.%s 1700000000\n# end\n", shard[1])
 					fmt.Fprint(ch.Stderr(), "rate:500.00-kpps, 100.00% done, waiting 0-secs, found=1\r")
-					if failScan && shard[1] == "2" {
+					if phase == "scan" && shard[1] == "2" {
 						return 3
 					}
 				}
@@ -125,9 +134,26 @@ func TestHTTPSSHController(t *testing.T) {
 			var output bytes.Buffer
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
-			summary, err := c.Run(ctx, cfg, &output, nil)
+			ready := 0
+			summary, err := c.Run(ctx, cfg, &output, func(event controller.Event) {
+				if event.State == "ready" {
+					ready++
+					if !strings.Contains(event.Detail, "Alpine 3.24.4") || !strings.Contains(event.Detail, "masscan-1.3.2-r2") {
+						t.Error("missing observed preparation identity", event.Detail)
+					}
+				}
+				if event.State == "scanning" && ready != 2 {
+					t.Error("scanner started before all workers were prepared")
+				}
+			})
 			if (err != nil) != failScan {
 				t.Fatal(err)
+			}
+			if phase == "release" && (!strings.Contains(err.Error(), "unsupported Alpine release") || ready != 0) {
+				t.Fatal("unsupported release proceeded", ready, err)
+			}
+			if phase == "install" && (!strings.Contains(err.Error(), "fixture APK failed") || ready != 0) {
+				t.Fatal("APK failure was lost", ready, err)
 			}
 			if len(instances) != 1 || instances["existing"] == nil || created != 2 || deleted != 2 {
 				t.Fatal("lifecycle invariant failed", created, deleted)

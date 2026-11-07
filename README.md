@@ -2,13 +2,15 @@
 
 Run masscan shards on temporary Vultr VPS workers, stream discoveries back to a
 local list file with CSV/JSONL exports, and watch each worker in a terminal UI. The controller is
-written in Go and needs no root privileges. Workers use Debian's packaged
+written in Go and needs no root privileges. Workers use Alpine's packaged
 masscan and root/password SSH.
 
 [V1 project description](https://github.com/st3fan/masscanr/issues/1) defines the
 scan engine and worker lifecycle. [V2 guidance](https://github.com/st3fan/masscanr/issues/21)
-specifies the Bubble Tea terminal interface. Work is tracked in sub-issues and
-small PRs ordered with `gh stack`.
+specifies the Bubble Tea terminal interface. [V3 guidance](https://github.com/st3fan/masscanr/issues/40)
+defines the Alpine worker platform. Work is tracked in native version sub-issues
+and small PRs ordered with `gh stack`. Selectable masscan/ZMap backends are
+planned for [V4](https://github.com/st3fan/masscanr/issues/33).
 
 ## Build and configure
 
@@ -225,8 +227,28 @@ Cleanup requires both the app label and the current run tag, verified with a
 fresh API lookup before deletion. Other infrastructure and workers from other
 runs are never selected. No IP denylist or account-wide deletion is used.
 
-The app installs masscan on Debian 13 x64, retrieves Vultr's generated root
-password, and connects directly as root. The API key stays on the controller;
+The app selects one unambiguous Vultr Alpine Linux x64 image, retrieves the
+generated root password, and connects directly as root. The public OS catalog
+does not advertise its patch release: after SSH readiness the app checks
+`/etc/alpine-release`, accepting stable 3.24.4 and later 3.24 patches. An earlier
+patch, another release series or an ambiguous catalog fails preparation/preflight
+and triggers normal cleanup where workers were already created.
+
+Preparation reads the image's APK repositories, requires stable v3.24 `main`,
+and derives a missing `community` URL from the configured main mirror. Active
+mixed-release, edge, tagged, local or credential-bearing repository entries are
+rejected. Installation passes only those validated sources explicitly to APK
+with its normal signature verification; ambient repository snippets are ignored
+and the image's repository files remain unchanged.
+
+`apk add --no-cache` installs `masscan~1.3.2` and GNU `coreutils`. The latter
+provides `stdbuf` and its musl-compatible preload library so discoveries arrive
+before scanner exit. No compiler toolchain or ZMap is installed. Version and
+package probes must succeed before scanning; each ready row records the actual
+Alpine release and installed package versions. Workers must agree on masscan's
+version before any shard starts.
+
+The API key stays on the controller;
 passwords are not logged, serialized, placed in command arguments, or persisted.
 SSH trusts the first host key for each newly created worker and pins it in
 memory for later connections in that run. V1 does not independently attest the
@@ -301,23 +323,39 @@ alternate-screen and theme-color restoration. It skips
 when pseudo-terminals are unavailable. These checks do not run the app or scan
 any network.
 
-CI also installs masscan and exercises native configuration and saved-result
-replay checks. These checks send no probes and require no cloud credentials.
+CI retains the host Go race/vet/build checks and runs native masscan checks in
+an Alpine 3.24.4 container pinned by digest. Build-time APK installation requires
+repository access; runtime checks use `--network none --cap-drop ALL`, with no
+cloud credentials or workers. To run the same checks locally with Docker:
 
-Optional Debian masscan compatibility checks run only `--echo`, without probes:
+```sh
+scripts/check-alpine.sh
+```
+
+This verifies Alpine/version/repository policy, native shard configuration,
+saved-result replay and a FIFO replay that emits a finding before input EOF.
+The last check proves incremental streaming on musl while masscan is still
+alive. The script creates a temporary test image/container and cleans them up.
+If Docker's default build network cannot reach the repositories, use
+`scripts/check-alpine.sh --network host` for build-time downloads; runtime
+networking remains disabled.
+
+Optional checks against a local compatible masscan binary run only `--echo`
+and saved-result replay, without probes:
 
 ```sh
 MASSCAN_TEST_BINARY=/path/to/masscan go test ./internal/integration \
-  -run TestDebianMasscanConfiguration -v
+  -run TestMasscanConfiguration -v
 ```
 
-Use `-run TestDebianMasscanListOutput` with the same variable to replay one
+Use `-run TestMasscanListOutput` with the same variable to replay one
 synthetic saved discovery and verify that stdout contains only native list
 records. This catches interactive-output flag regressions without a live scan.
 
 An explicitly enabled cloud smoke test creates **one temporary VM**, verifies
-Debian installation and root/password SSH, runs masscan `--echo` without scan
-traffic, and confirms deletion using an independent cleanup context:
+the actual Alpine release, root/password SSH and APK preparation, runs masscan
+`--echo` without scan traffic, and confirms deletion using an independent
+cleanup context. Run it only with separate user authorization:
 
 ```sh
 # Supply VULTR_API_KEY through the environment; tests do not load .env.
