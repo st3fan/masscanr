@@ -11,6 +11,8 @@ specifies the Bubble Tea terminal interface. [V3 guidance](https://github.com/st
 defines the Alpine worker platform. Work is tracked in native version sub-issues
 and small PRs ordered with `gh stack`. [V4 guidance](https://github.com/st3fan/masscanr/issues/33)
 defines selectable masscan/ZMap backends and their shared scan contract.
+[V5 guidance](https://github.com/st3fan/masscanr/issues/57) defines environment-only
+Vultr credentials.
 
 ## Build and configure
 
@@ -19,16 +21,28 @@ masscan or ZMap installation, SSH executable, SSH key, or privileged account is 
 
 ```sh
 go build -o masscanr ./cmd/masscanr
-cp .env.example .env
-# Edit .env and set VULTR_API_KEY, or supply it through the environment.
 ```
 
-`.env` is read from the current directory. Use `--env-file=/path/to/.env` for
-another location. An existing `VULTR_API_KEY` environment variable takes
-precedence. Simple unquoted, single-quoted, double-quoted, and `export` entries
-are supported; no shell commands or interpolation are evaluated.
+Set `VULTR_API_TOKEN` in the controller's environment before scanning. It must
+contain a non-empty Vultr API token. For example, with the
+[1Password CLI `op run` command](https://developer.1password.com/docs/cli/secrets-environment-variables/)
+installed and signed in:
 
-The key needs permissions to read OS/region availability and create, list,
+```sh
+VULTR_API_TOKEN='op://Company/Vultr/api-token' \
+  op run -- ./masscanr scan 192.0.2.0/24
+```
+
+Replace `op://Company/Vultr/api-token` with the secret reference for your vault,
+item, and token field, and replace the documentation CIDR with your authorized
+target range. `op run` resolves the reference and supplies the token to masscanr
+for the duration of the process; the shell only receives the secret reference.
+
+V5 no longer reads `.env` files, accepts `--env-file`, or uses `VULTR_API_KEY`.
+When upgrading, supply your existing token through `VULTR_API_TOKEN` instead.
+Keep the token on the controller and out of worker configuration and logs.
+
+The token needs permissions to read OS/region availability and create, list,
 inspect, and delete instances. The selected region must have capacity for the
 chosen plan. The app fails before provisioning if the plan/image is unavailable.
 
@@ -60,7 +74,6 @@ Scanning requires the `scan` subcommand; a bare CIDR is an unknown command.
 | `--ports`, `-p` | Nmap 7.95 top 100 TCP ports | Comma-separated ports, inclusive ranges, or mixed forms |
 | `--output` | Timestamped `masscanr-*.list` | New list file plus CSV/JSONL exports; `-` streams the list to stdout |
 | `--slug` | Empty | Text inserted before the timestamp in generated output filenames |
-| `--env-file` | `.env` | Local credentials file |
 | `--timeout` | `24h` | Maximum scanning time; cleanup follows |
 | `--cleanup-timeout` | `5m` | Separate deadline for worker deletion |
 | `--no-tui` | `false` | Lifecycle logs instead of the live table |
@@ -141,8 +154,8 @@ available in that region, ordered by ID. Columns include family, vCPU count,
 RAM in MB, disk count/capacity, storage type, CPU sharing and CPU vendor where
 Vultr provides them. Missing values are shown as `-`.
 
-These commands read the public catalog without loading `.env`, requiring an
-API key or managing workers. Catalog pages are fetched automatically. Use
+These commands read the public catalog without requiring `VULTR_API_TOKEN` or
+managing workers. Catalog pages are fetched automatically. Use
 `masscanr help <command>` or `<command> --help` for command-specific usage.
 
 The catalog includes plans that require block-storage boot. `scan` currently
@@ -422,7 +435,7 @@ the actual Alpine release, root/password SSH and APK preparation, runs masscan
 cleanup context. Run it only with separate user authorization:
 
 ```sh
-# Supply VULTR_API_KEY through the environment; tests do not load .env.
+# Supply VULTR_API_TOKEN through the environment.
 MASSCANR_LIVE_TEST=1 go test ./internal/integration \
   -run TestVultrWorkerSmoke -count=1 -v -timeout=20m
 ```

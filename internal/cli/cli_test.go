@@ -17,7 +17,12 @@ import (
 )
 
 func TestCLIFlagsAndResultsWithoutInfrastructure(t *testing.T) {
-	t.Setenv("VULTR_API_KEY", "fixture-key")
+	t.Chdir(t.TempDir())
+	t.Setenv("VULTR_API_KEY", "legacy-secret")
+	if err := os.WriteFile(".env", []byte("VULTR_API_TOKEN=file-secret\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("VULTR_API_TOKEN", "fixture-key")
 	path := filepath.Join(t.TempDir(), "scan.list")
 	var stdout, stderr bytes.Buffer
 	called := false
@@ -41,6 +46,9 @@ func TestCLIFlagsAndResultsWithoutInfrastructure(t *testing.T) {
 	err := execute(t.Context(), []string{"scan", "192.0.2.1/24", "--ports=22,80,443,8000-8100", "--output", path}, &stdout, &stderr, factory, nil)
 	if err != nil || !called {
 		t.Fatal(err, called)
+	}
+	if strings.Contains(stdout.String()+stderr.String(), "fixture-key") || strings.Contains(stdout.String()+stderr.String(), "file-secret") {
+		t.Fatal("credentials leaked to command output")
 	}
 	data, _ := os.ReadFile(path)
 	if !strings.HasPrefix(string(data), "open tcp") || stdout.Len() != 0 || !strings.Contains(stderr.String(), "192.0.2.0/24") {
@@ -76,7 +84,7 @@ func TestCLIValidationDoesNotBuildController(t *testing.T) {
 }
 
 func TestPartialOutputPreserved(t *testing.T) {
-	t.Setenv("VULTR_API_KEY", "fixture-key")
+	t.Setenv("VULTR_API_TOKEN", "fixture-key")
 	path := filepath.Join(t.TempDir(), "partial.list")
 	var stdout, stderr bytes.Buffer
 	build := func(string, controller.Timeouts, backend.Backend) runFunc {
@@ -99,27 +107,62 @@ func TestPartialOutputPreserved(t *testing.T) {
 	}
 }
 
-func TestDotenvKeyParsing(t *testing.T) {
-	previous, exists := os.LookupEnv("VULTR_API_KEY")
-	os.Unsetenv("VULTR_API_KEY")
-	t.Cleanup(func() {
-		if exists {
-			os.Setenv("VULTR_API_KEY", previous)
-		} else {
-			os.Unsetenv("VULTR_API_KEY")
-		}
-	})
-	for _, content := range []string{"VULTR_API_KEY=fixture-key # comment\n", "export VULTR_API_KEY='fixture-key'\n", "VULTR_API_KEY=\"fixture-key\" # comment\n"} {
-		path := filepath.Join(t.TempDir(), ".env")
-		os.WriteFile(path, []byte(content), 0600)
-		key, err := apiKey(path)
-		if err != nil || key != "fixture-key" {
-			t.Fatal("dotenv parsing failed", err)
-		}
+func TestScanRequiresEnvironmentTokenBeforeOutputOrController(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		token string
+		unset bool
+	}{
+		{name: "unset", unset: true},
+		{name: "empty"},
+		{name: "whitespace", token: " \t\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Chdir(t.TempDir())
+			t.Setenv("VULTR_API_TOKEN", tc.token)
+			if tc.unset {
+				if err := os.Unsetenv("VULTR_API_TOKEN"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			t.Setenv("VULTR_API_KEY", "legacy-secret")
+			if err := os.WriteFile(".env", []byte("VULTR_API_TOKEN=file-secret\nVULTR_API_KEY=legacy-secret\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			var stdout, stderr bytes.Buffer
+			build := func(string, controller.Timeouts, backend.Backend) runFunc {
+				t.Fatal("controller built without an environment token")
+				return nil
+			}
+			err := executeScan(t.Context(), []string{"192.0.2.0/24", "--output=scan.list"}, &stdout, &stderr, build)
+			if err == nil || err.Error() != "VULTR_API_TOKEN is required in the environment" {
+				t.Fatalf("unexpected credential error: %v", err)
+			}
+			if stdout.Len() != 0 || stderr.Len() != 0 {
+				t.Fatal("credential failure produced output")
+			}
+			if _, err := os.Stat("scan.list"); !errors.Is(err, os.ErrNotExist) {
+				t.Fatal("output created before credential validation", err)
+			}
+		})
 	}
-	t.Setenv("VULTR_API_KEY", "environment-key")
-	if key, err := apiKey("missing-file"); err != nil || key != "environment-key" {
+}
+
+func TestScanRejectsEnvFileFlag(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	err := executeScan(t.Context(), []string{"192.0.2.0/24", "--env-file=.env"}, &stdout, &stderr, noScanner(t))
+	if err == nil || !strings.Contains(err.Error(), "flag provided but not defined: -env-file") {
+		t.Fatal("accepted removed credentials option", err)
+	}
+}
+
+func TestScanHelpDocumentsEnvironmentToken(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if err := executeScan(t.Context(), []string{"--help"}, &stdout, &stderr, noScanner(t)); err != nil {
 		t.Fatal(err)
+	}
+	if !strings.Contains(stderr.String(), "VULTR_API_TOKEN") || strings.Contains(stderr.String(), "--env-file") {
+		t.Fatal(stderr.String())
 	}
 }
 
@@ -142,7 +185,7 @@ func TestSlugOutputSelectionWithFakeController(t *testing.T) {
 			t.Chdir(t.TempDir())
 			tempDir := t.TempDir()
 			t.Setenv("TMPDIR", tempDir)
-			t.Setenv("VULTR_API_KEY", "fixture-key")
+			t.Setenv("VULTR_API_TOKEN", "fixture-key")
 			var stdout, stderr bytes.Buffer
 			called := false
 			build := func(string, controller.Timeouts, backend.Backend) runFunc {
@@ -199,7 +242,7 @@ func TestSlugOutputSelectionWithFakeController(t *testing.T) {
 }
 
 func TestCLIExportFailurePreservesCompletedList(t *testing.T) {
-	t.Setenv("VULTR_API_KEY", "fixture-key")
+	t.Setenv("VULTR_API_TOKEN", "fixture-key")
 	path := filepath.Join(t.TempDir(), "scan.list")
 	paths := exportPaths(path)
 	if err := os.WriteFile(paths[1], []byte("existing"), 0600); err != nil {

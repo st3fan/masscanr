@@ -25,10 +25,9 @@ profile.cov
 go.work
 go.work.sum
 
-# env file
+# Protect legacy local credentials.
 .env
 .env.*
-!.env.example
 /masscanr
 *.list
 *.csv

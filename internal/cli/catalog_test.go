@@ -32,7 +32,7 @@ func noScanner(t *testing.T) factory {
 }
 
 func TestListRegionsWithoutScanCredentials(t *testing.T) {
-	t.Setenv("VULTR_API_KEY", "") // Calling scan credential loading would fail.
+	t.Setenv("VULTR_API_TOKEN", "") // Calling scan credential loading would fail.
 	calls := 0
 	catalog := fakeCatalog{regions: func(context.Context) ([]cloud.Region, error) {
 		calls++
@@ -55,7 +55,7 @@ func TestListRegionsWithoutScanCredentials(t *testing.T) {
 }
 
 func TestListInstanceTypesDefaultsAndRegionOverride(t *testing.T) {
-	t.Setenv("VULTR_API_KEY", "")
+	t.Setenv("VULTR_API_TOKEN", "")
 	for _, args := range [][]string{{"list-instance-types"}, {"list-instance-types", "--region=ewr"}, {"list-instance-types", "--region", "ewr"}} {
 		want := "atl"
 		if len(args) > 1 {

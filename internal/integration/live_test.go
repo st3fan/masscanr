@@ -26,11 +26,11 @@ import (
 // It does not invoke the masscanr app or send probes: masscan only runs --echo.
 func TestVultrWorkerSmoke(t *testing.T) {
 	if os.Getenv("MASSCANR_LIVE_TEST") != "1" {
-		t.Skip("explicitly opt in with MASSCANR_LIVE_TEST=1 and VULTR_API_KEY")
+		t.Skip("explicitly opt in with MASSCANR_LIVE_TEST=1 and VULTR_API_TOKEN")
 	}
-	key := os.Getenv("VULTR_API_KEY")
+	key := os.Getenv("VULTR_API_TOKEN")
 	if key == "" {
-		t.Fatal("VULTR_API_KEY is required")
+		t.Fatal("VULTR_API_TOKEN is required")
 	}
 	id := make([]byte, 16)
 	if _, err := rand.Read(id); err != nil {
