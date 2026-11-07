@@ -25,15 +25,18 @@ go build -o masscanr ./cmd/masscanr
 
 Set `VULTR_API_TOKEN` in the controller's environment before scanning. It must
 contain a non-empty Vultr API token. For example, with the
-[1Password CLI `op read` command](https://developer.1password.com/docs/cli/reference/commands/read/)
+[1Password CLI `op run` command](https://developer.1password.com/docs/cli/secrets-environment-variables/)
 installed and signed in:
 
 ```sh
-VULTR_API_TOKEN="$(op read 'op://Company/Vultr/api-token')" && export VULTR_API_TOKEN
+VULTR_API_TOKEN='op://Company/Vultr/api-token' \
+  op run -- ./masscanr scan 192.0.2.0/24
 ```
 
 Replace `op://Company/Vultr/api-token` with the secret reference for your vault,
-item, and token field. If `op read` fails, resolve the error before scanning.
+item, and token field, and replace the documentation CIDR with your authorized
+target range. `op run` resolves the reference and supplies the token to masscanr
+for the duration of the process; the shell only receives the secret reference.
 
 V5 no longer reads `.env` files, accepts `--env-file`, or uses `VULTR_API_KEY`.
 When upgrading, supply your existing token through `VULTR_API_TOKEN` instead.
