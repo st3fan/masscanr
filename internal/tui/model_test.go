@@ -134,3 +134,21 @@ func TestUnknownStaleAndCleanupFailureVisible(t *testing.T) {
 		}
 	}
 }
+
+func TestDiagnosticScrollDoesNotOvershootAndNarrowFooterShowsStop(t *testing.T) {
+	m := fixtureModel(1)
+	m.details = true
+	m.state.apply(controller.Event{Shard: 1, State: "failed", Detail: strings.Repeat("diagnostic ", 300)}, m.now)
+	for range 100 {
+		m, _ = key(m, tea.KeyPgDown, 0)
+	}
+	end := m.detailOffset
+	m, _ = key(m, tea.KeyPgUp, 0)
+	if m.detailOffset >= end {
+		t.Fatal("cannot scroll back from diagnostic end")
+	}
+	m.width = 40
+	if !strings.Contains(strings.Split(m.View().Content, "\n")[m.height-1], "^C stop") {
+		t.Fatal("stop hint clipped in narrow terminal")
+	}
+}

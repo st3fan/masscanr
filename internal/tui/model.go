@@ -106,6 +106,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	}
+	if m.details && len(m.state.rows) > 0 {
+		headerHeight := 6
+		if m.state.totals(m.now).Stale {
+			headerHeight++
+		}
+		detailHeight := m.detailHeight(max(0, m.height-headerHeight-2))
+		rows := m.state.sorted()
+		selected := min(m.selected, len(rows)-1)
+		m.detailOffset = min(m.detailOffset, max(0, len(m.detailLines(rows[selected]))-max(1, detailHeight-1)))
+	}
 	return m, nil
 }
 
@@ -133,6 +143,12 @@ func (m model) View() tea.View {
 	footer := "tab tabs  ↑↓ shard  enter details  pgup/pgdown scroll  ctrl+c stop"
 	if m.tab == 1 {
 		footer = "tab tabs  ↑↓ / pgup/pgdown scroll  ctrl+c stop"
+	}
+	if w < 76 {
+		footer = "^C stop · tab tabs · ↑↓ · enter"
+		if m.tab == 1 {
+			footer = "^C stop · tab tabs · ↑↓ scroll"
+		}
 	}
 	var body []string
 	if m.tab == 0 {
@@ -188,10 +204,7 @@ func (m model) overview(height int) []string {
 	if narrow {
 		rowHeight = 2
 	}
-	detailHeight := 0
-	if m.details && height >= 6 {
-		detailHeight = min(8, max(3, height/3))
-	}
+	detailHeight := m.detailHeight(height)
 	capacity := max(0, (height-1-detailHeight)/rowHeight)
 	selected := min(m.selected, max(0, len(rows)-1))
 	start := max(0, selected-capacity+1)
@@ -251,20 +264,30 @@ func (m model) overview(height int) []string {
 		}
 	}
 	if detailHeight > 0 && len(rows) > 0 {
-		r := rows[selected]
-		detail := fmt.Sprintf("Shard %d | Instance: %s | Address: %s\nScan: %s | Cleanup: %s\nETA: %s | Found: %d", r.Shard, r.ID, r.IP, r.State, r.Cleanup, shardETA(r, m.now), r.Progress.Found)
-		if r.Detail != "" {
-			detail += "\n" + r.Detail
-		}
-		if r.CleanupDetail != "" {
-			detail += "\nCleanup: " + r.CleanupDetail
-		}
-		wrapped := strings.Split(ansi.Wrap(detail, max(1, m.width), ""), "\n")
+		wrapped := m.detailLines(rows[selected])
 		offset := min(m.detailOffset, max(0, len(wrapped)-detailHeight+1))
 		lines = append(lines, fmt.Sprintf("── Details (%d/%d; pgup/pgdown) ──", offset+1, len(wrapped)))
 		lines = append(lines, wrapped[offset:min(len(wrapped), offset+detailHeight-1)]...)
 	}
 	return lines
+}
+
+func (m model) detailHeight(available int) int {
+	if !m.details || available < 6 {
+		return 0
+	}
+	return min(8, max(3, available/3))
+}
+
+func (m model) detailLines(r shardState) []string {
+	detail := fmt.Sprintf("Shard %d | Instance: %s | Address: %s\nScan: %s | Cleanup: %s\nETA: %s | Found: %d", r.Shard, r.ID, r.IP, r.State, r.Cleanup, shardETA(r, m.now), r.Progress.Found)
+	if r.Detail != "" {
+		detail += "\n" + r.Detail
+	}
+	if r.CleanupDetail != "" {
+		detail += "\nCleanup: " + r.CleanupDetail
+	}
+	return strings.Split(ansi.Wrap(detail, max(1, m.width), ""), "\n")
 }
 
 func shardLabel(r shardState) string {
