@@ -30,11 +30,11 @@ func TestConfigEffectiveSettingsAndScrolling(t *testing.T) {
 		}
 	}
 	seen := ""
-	for range len(m.configLines()) {
+	for range len(m.inner().configLines()) {
 		seen += m.View().Content + "\n"
 		m, _ = key(m, tea.KeyDown, 0)
 	}
-	for _, line := range m.configLines() {
+	for _, line := range m.inner().configLines() {
 		if !strings.Contains(seen, line) {
 			t.Fatalf("line is unreachable: %q", line)
 		}

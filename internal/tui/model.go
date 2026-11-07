@@ -127,7 +127,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		selected := min(m.selected, len(rows)-1)
 		m.detailOffset = min(m.detailOffset, max(0, len(canvas.detailLines(rows[selected]))-max(1, detailHeight-1)))
 	}
-	m.configOffset = min(m.configOffset, max(0, len(m.configLines())-max(1, m.height-5)))
+	canvas := m.inner()
+	canvas.tab = 1
+	m.configOffset = min(m.configOffset, max(0, len(canvas.configLines())-max(1, canvas.height-canvas.headerHeight()-2)))
 	return m, nil
 }
 
