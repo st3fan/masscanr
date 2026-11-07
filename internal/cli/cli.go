@@ -61,7 +61,7 @@ func execute(ctx context.Context, args []string, stdout, stderr io.Writer, build
 		if len(args) != 1 {
 			return fmt.Errorf("usage: masscanr --version")
 		}
-		_, err := fmt.Fprintln(stdout, "masscanr v1")
+		_, err := fmt.Fprintln(stdout, "masscanr v2")
 		return err
 	case "scan":
 		return executeScan(ctx, args[1:], stdout, stderr, build)
@@ -88,7 +88,21 @@ Use 'masscanr --version' to print the version.
 	return err
 }
 
-func executeScan(ctx context.Context, args []string, stdout, stderr io.Writer, build factory) (err error) {
+type scanView interface {
+	Configure(tui.RunConfig, func())
+	Start()
+	Finish(context.Context, controller.Summary, error)
+	Stop() error
+	Update(controller.Event)
+}
+
+type viewFactory func(io.Writer, bool, int) scanView
+
+func executeScan(ctx context.Context, args []string, stdout, stderr io.Writer, build factory) error {
+	return executeScanWithView(ctx, args, stdout, stderr, build, func(out io.Writer, terminal bool, shards int) scanView { return tui.New(out, terminal, shards) })
+}
+
+func executeScanWithView(ctx context.Context, args []string, stdout, stderr io.Writer, build factory, newView viewFactory) (err error) {
 	cfg := scan.Defaults()
 	fs := flag.NewFlagSet("masscanr scan", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -123,7 +137,7 @@ func executeScan(ctx context.Context, args []string, stdout, stderr io.Writer, b
 		return err
 	}
 	if version {
-		fmt.Fprintln(stdout, "masscanr v1")
+		fmt.Fprintln(stdout, "masscanr v2")
 		return nil
 	}
 	if strings.ContainsAny(slug, "/\\") || strings.IndexFunc(slug, unicode.IsControl) >= 0 {
@@ -182,26 +196,59 @@ func executeScan(ctx context.Context, args []string, stdout, stderr io.Writer, b
 	if f, ok := stderr.(*os.File); ok {
 		terminal = term.IsTerminal(int(f.Fd()))
 	}
-	view := tui.New(stderr, terminal && !noTUI, cfg.Shards)
+	runCtx, cancelScan := context.WithCancel(ctx)
+	defer cancelScan()
+	view := newView(stderr, terminal && !noTUI, cfg.Shards)
+	paths := exportPaths(exportOutput)
+	view.Configure(tui.NewRunConfig(cfg, timeouts, output, paths), cancelScan)
 	fmt.Fprintf(stderr, "Targets: %v | workers: %d | rate: %d pps/worker | output: %s\n", cfg.Targets, cfg.Shards, cfg.Rate, output)
 	view.Start()
-	var summary controller.Summary
-	summary, err = build(key, timeouts)(ctx, cfg, destination, view.Update)
-	view.Stop()
+	stopped := false
+	stopView := func() error {
+		if stopped {
+			return nil
+		}
+		stopped = true
+		return view.Stop()
+	}
+	defer func() { err = errors.Join(err, stopView()) }()
+	summary, scanErr := build(key, timeouts)(runCtx, cfg, destination, view.Update)
 	source := file.Name()
-	err = errors.Join(err, file.Sync(), file.Close())
+	scanErr = errors.Join(scanErr, file.Sync(), file.Close())
 	file = nil
-	if err != nil {
+	if len(summary.Undeleted) > 0 && scanErr == nil {
+		scanErr = fmt.Errorf("worker deletion unconfirmed")
+	}
+	var exportErr error
+	if scanErr == nil {
+		view.Update(controller.Event{State: "exporting"})
+		if exportErr = exportResults(source, exportOutput); exportErr != nil {
+			exportErr = fmt.Errorf("scan completed but CSV/JSONL export failed (native list output: %s): %w", output, exportErr)
+		}
+	}
+	view.Finish(ctx, summary, errors.Join(scanErr, exportErr))
+	uiErr := stopView()
+	if uiErr != nil {
+		uiErr = fmt.Errorf("terminal UI: %w", uiErr)
+	}
+	err = errors.Join(scanErr, exportErr, uiErr)
+	if scanErr != nil {
 		fmt.Fprintf(stderr, "Incomplete scan. Partial results: %s | run: %s | found: %d\n", output, summary.RunID, summary.Found)
-		return err
+	} else {
+		fmt.Fprintf(stderr, "Scan complete. Results: %s | run: %s | found: %d | workers deleted\n", output, summary.RunID, summary.Found)
+		if exportErr == nil {
+			fmt.Fprintf(stderr, "Exports: %s | %s\n", paths[0], paths[1])
+		}
 	}
-	fmt.Fprintf(stderr, "Scan complete. Results: %s | run: %s | found: %d | workers deleted\n", output, summary.RunID, summary.Found)
-	if err = exportResults(source, exportOutput); err != nil {
-		return fmt.Errorf("scan completed but CSV/JSONL export failed (native list output: %s): %w", output, err)
+	if len(summary.Undeleted) > 0 {
+		fmt.Fprintf(stderr, "VPS deletion unconfirmed: %s\n", strings.Join(summary.Undeleted, ", "))
 	}
-	paths := exportPaths(exportOutput)
-	fmt.Fprintf(stderr, "Exports: %s | %s\n", paths[0], paths[1])
-	return nil
+	if err != nil {
+		fmt.Fprintln(stderr, "Run failed; see error details.")
+	} else {
+		fmt.Fprintln(stderr, "Run complete.")
+	}
+	return err
 }
 
 func outputFilename(slug string, when time.Time) string {

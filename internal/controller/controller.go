@@ -21,6 +21,8 @@ type Event struct {
 	Shard                 int
 	ID, IP, State, Detail string
 	Progress              *remote.Progress
+	RunID                 string
+	Seed                  *uint64 // Present only on run-start metadata events.
 }
 
 type Summary struct {
@@ -81,6 +83,7 @@ func (c *Controller) Run(ctx context.Context, cfg scan.Config, out io.Writer, em
 			emit(e)
 		}
 	}
+	notify(Event{State: "validating", RunID: summary.RunID, Seed: &summary.Seed})
 	result := &results{out: out, cfg: cfg}
 	if err = result.line(fmt.Sprintf("#masscan\n# masscanr run=%s seed=%d targets=%v ports=%s rate=%d shards=%d", summary.RunID, summary.Seed, cfg.Targets, cfg.PortSpec(), cfg.Rate, cfg.Shards)); err != nil {
 		return summary, err
@@ -88,6 +91,11 @@ func (c *Controller) Run(ctx context.Context, cfg scan.Config, out io.Writer, em
 	var workers []tracked
 	attempted, ambiguous := false, false
 	defer func() {
+		cleanup := Event{State: "cleanup"}
+		if err != nil {
+			cleanup.Detail = err.Error()
+		}
+		notify(cleanup)
 		if attempted {
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), c.Timeouts.Cleanup)
 			defer cancel()
@@ -163,12 +171,15 @@ func (c *Controller) Run(ctx context.Context, cfg scan.Config, out io.Writer, em
 					notify(Event{Shard: item.shard, ID: w.ID, IP: w.IP, State: state, Progress: &p})
 				})
 			}
+			if runErr == nil {
+				notify(Event{Shard: item.shard, ID: w.ID, IP: w.IP, State: "collecting"})
+			}
 			runErr = errors.Join(runErr, output.finish(), scanCtx.Err())
 			if runErr != nil {
 				mu.Lock()
 				failure = errors.Join(failure, fmt.Errorf("shard %d: %w", item.shard, runErr))
 				mu.Unlock()
-				notify(Event{Shard: item.shard, ID: w.ID, IP: w.IP, State: "failed", Detail: runErr.Error()})
+				notify(Event{Shard: item.shard, ID: w.ID, IP: w.IP, State: failureState(runErr), Detail: runErr.Error()})
 				cancel()
 			} else {
 				notify(Event{Shard: item.shard, ID: w.ID, IP: w.IP, State: "completed"})
@@ -213,7 +224,7 @@ func (c *Controller) prepare(ctx context.Context, workers []tracked, runID strin
 				mu.Lock()
 				failure = errors.Join(failure, fmt.Errorf("prepare shard %d: %w", item.shard, err))
 				mu.Unlock()
-				notify(Event{Shard: item.shard, ID: item.worker.ID, State: "failed", Detail: err.Error()})
+				notify(Event{Shard: item.shard, ID: item.worker.ID, State: failureState(err), Detail: err.Error()})
 				cancel()
 			}
 		}()
@@ -358,4 +369,31 @@ func pause(ctx context.Context, d time.Duration) error {
 	case <-timer.C:
 		return nil
 	}
+}
+
+func failureState(err error) string {
+	if onlyCancelled(err) {
+		return "cancelled"
+	}
+	return "failed"
+}
+
+// A joined scan/output error must not disappear behind a concurrent cancellation.
+func onlyCancelled(err error) bool {
+	if err == context.Canceled {
+		return true
+	}
+	switch wrapped := err.(type) {
+	case interface{ Unwrap() []error }:
+		causes := wrapped.Unwrap()
+		for _, cause := range causes {
+			if !onlyCancelled(cause) {
+				return false
+			}
+		}
+		return len(causes) > 0
+	case interface{ Unwrap() error }:
+		return onlyCancelled(wrapped.Unwrap())
+	}
+	return false
 }
