@@ -62,7 +62,7 @@ func execute(ctx context.Context, args []string, stdout, stderr io.Writer, build
 		if len(args) != 1 {
 			return fmt.Errorf("usage: masscanr --version")
 		}
-		_, err := fmt.Fprintln(stdout, "masscanr v6")
+		_, err := fmt.Fprintln(stdout, "masscanr v7")
 		return err
 	case "inspect":
 		return inspectScan(ctx, args[1:], stdout, stderr)
@@ -110,6 +110,12 @@ func executeScan(ctx context.Context, args []string, stdout, stderr io.Writer, b
 }
 
 func executeScanWithView(ctx context.Context, args []string, stdout, stderr io.Writer, build factory, newView viewFactory) (err error) {
+	return executeScanWithConfirmation(ctx, args, stdout, stderr, build, newView, confirmLargeScan)
+}
+
+type confirmationFunc func(context.Context, scan.Config, scan.Workload, io.Writer, bool) error
+
+func executeScanWithConfirmation(ctx context.Context, args []string, stdout, stderr io.Writer, build factory, newView viewFactory, confirm confirmationFunc) (err error) {
 	cfg := scan.Defaults()
 	fs := flag.NewFlagSet("masscanr scan", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -130,7 +136,7 @@ func executeScanWithView(ctx context.Context, args []string, stdout, stderr io.W
 	fs.BoolVar(&noTUI, "no-tui", false, "print lifecycle logs instead of a live table")
 	fs.BoolVar(&version, "version", false, "print version and exit")
 	fs.Usage = func() {
-		fmt.Fprint(stderr, "Usage: masscanr scan [options] IPv4-CIDR [IPv4-CIDR ...]\n\nTemporary Vultr workers run the selected scanner as root. The local controller needs no root.\nDefault ports: Nmap 7.95 top 100 TCP. Rate is per worker.\nCredentials: VULTR_API_TOKEN must be set in the environment.\n\n")
+		fmt.Fprint(stderr, "Usage: masscanr scan [options] IPv4-CIDR [IPv4-CIDR ...]\n\nTemporary Vultr workers run the selected scanner as root. The local controller needs no root.\nDefault ports: Nmap 7.95 top 100 TCP. Rate is per worker.\nCredentials: VULTR_API_TOKEN must be set in the environment.\nMore than 1,000,000 planned probes (unique addresses x TCP ports) requires interactive confirmation.\nNo unattended bypass; stdin and stderr must be terminals for large scans.\n\n")
 		fs.PrintDefaults()
 	}
 	ordered, orderErr := interspersed(fs, args)
@@ -144,7 +150,7 @@ func executeScanWithView(ctx context.Context, args []string, stdout, stderr io.W
 		return err
 	}
 	if version {
-		fmt.Fprintln(stdout, "masscanr v6")
+		fmt.Fprintln(stdout, "masscanr v7")
 		return nil
 	}
 	if strings.ContainsAny(slug, "/\\") || strings.IndexFunc(slug, unicode.IsControl) >= 0 {
@@ -171,6 +177,18 @@ func executeScanWithView(ctx context.Context, args []string, stdout, stderr io.W
 	}
 	if timeouts.Scan <= 0 || timeouts.Cleanup <= 0 {
 		return fmt.Errorf("timeouts must be positive")
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	work, err := cfg.Intent().Workload()
+	if err != nil {
+		return err
+	}
+	if work.RequiresConfirmation() {
+		if err := confirm(ctx, cfg, work, stderr, noTUI); err != nil {
+			return err
+		}
 	}
 	if ctx.Err() != nil {
 		return ctx.Err()

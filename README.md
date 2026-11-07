@@ -14,6 +14,8 @@ defines selectable masscan/ZMap backends and their shared scan contract.
 [V5 guidance](https://github.com/st3fan/masscanr/issues/57) defines environment-only
 Vultr credentials. [V6 guidance](https://github.com/st3fan/masscanr/issues/60)
 defines self-contained text scan documents and offline inspection/export.
+[V7 guidance](https://github.com/st3fan/masscanr/issues/65) defines confirmation
+before large scans, measured by planned probes.
 
 ## Build and configure
 
@@ -100,6 +102,44 @@ unsupported settings fail before credentials, output creation or provisioning.
 
 Two default workers request a combined 1,000,000 packets/second. The UI shows
 observed rates; actual throughput depends on the VPS and network.
+
+## Large-scan confirmation
+
+V7 asks for confirmation when **planned probes exceed 1,000,000**:
+
+```text
+planned probes = unique requested IPv4 addresses × unique requested TCP ports
+```
+
+The count covers the union of all normalized CIDRs and deduplicated port ranges.
+Shards divide this work and do not multiply it. Both masscan and ZMap use the
+same requested-scope count, before any backend-specific exclusions. This is
+planned scan work, rather than a prediction of exact wire packets or duration;
+sending rate is a separate setting.
+
+For example, at the default 100 ports, a /19 means 819,200 probes and a /18
+means 1,638,400 probes. The latter requires confirmation. A /16 at 100 ports
+means 6,553,600 probes, while all 65,536 ports on just 16 addresses means
+1,048,576 probes. Exactly 1,000,000 probes does not trigger confirmation.
+
+The dialog leads with the probe count and shows the port/address factors,
+threshold, and normalized targets. **Cancel is selected by default**. Use Tab
+or Left/Right to select Continue and Enter to accept; Up/Down or Page Up/Down
+scroll the warning and targets. Escape, Ctrl-C, and Ctrl-D cancel. Resize very
+small terminals to at least 24 columns and 10 rows to review the dialog.
+
+With `--no-tui`, the same warning appears as a plain prompt; type `yes` and
+press Enter to proceed. Enter alone, another answer, Escape, Ctrl-C, Ctrl-D,
+EOF, or an input error prevents the scan. Confirmation finishes before output
+or spool creation, provider operations, or scanning. Prompts use stderr, keeping
+stdout scan results separate.
+
+Large scans require interactive terminals on **both stdin and stderr**.
+Redirecting either one fails clearly before starting a large scan; redirected
+stdout (`--output=-`) is supported when stdin and stderr remain interactive.
+V7 has no unattended bypass. Smaller scans retain their existing behavior.
+The threshold is an initial review checkpoint; targets must always be company
+networks authorized for scanning.
 
 ## Backend compatibility
 
