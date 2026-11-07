@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/st3fan/masscanr/internal/backend/masscan"
 	"github.com/st3fan/masscanr/internal/cloud"
 	"github.com/st3fan/masscanr/internal/cloud/vultr"
 	"github.com/st3fan/masscanr/internal/controller"
@@ -28,7 +29,7 @@ type factory func(string, controller.Timeouts) runFunc
 
 func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	return execute(ctx, args, stdout, stderr, func(key string, timeouts controller.Timeouts) runFunc {
-		c := &controller.Controller{Provider: vultr.New(key), Runner: remote.NewSSH(), Timeouts: timeouts}
+		c := &controller.Controller{Backend: masscan.Backend{}, Provider: vultr.New(key), Runner: remote.NewSSH(), Timeouts: timeouts}
 		return c.Run
 	}, vultr.New(""))
 }

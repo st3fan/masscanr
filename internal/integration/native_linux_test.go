@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/st3fan/masscanr/internal/alpine"
+	"github.com/st3fan/masscanr/internal/backend/masscan"
 	"github.com/st3fan/masscanr/internal/scan"
 	"golang.org/x/sys/unix"
 )
@@ -72,7 +73,7 @@ func TestMasscanStreamsBeforeInputEOF(t *testing.T) {
 	defer input.Close()
 	cfg := scan.Defaults()
 	cfg.Targets, _ = scan.ParseTargets([]string{"192.0.2.0/24"})
-	args, _ := cfg.Args(1, 42)
+	args, _ := masscan.Arguments(cfg.Intent(), scan.Shard{Index: 1, Total: cfg.Shards}, 42)
 	args = append(args, "--readscan", path)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()

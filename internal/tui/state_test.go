@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/st3fan/masscanr/internal/controller"
-	"github.com/st3fan/masscanr/internal/remote"
 	"github.com/st3fan/masscanr/internal/scan"
 )
 
@@ -19,7 +18,7 @@ func TestAggregateProgressAndOutcomes(t *testing.T) {
 		t.Fatalf("pending: %+v", total)
 	}
 	for i, percent := range []float64{100, 70, 66, 60} {
-		p := remote.Progress{Percent: percent, Rate: 470000, ETA: time.Duration(i+1) * time.Second, Found: 10}
+		p := scan.Progress{Percent: percent, Rate: 470000, ETA: time.Duration(i+1) * time.Second, Found: 10}
 		e := controller.Event{Shard: i + 1, ID: "worker", State: "scanning", Progress: &p}
 		s.apply(e, now)
 		s.apply(e, now) // Each progress event is cumulative, not incremental.
@@ -52,7 +51,7 @@ func TestWaitingAndReconciledWorkers(t *testing.T) {
 	cfg.Shards = 1
 	s := newState(NewRunConfig(cfg, controller.DefaultTimeouts(), "-", [2]string{}))
 	now := time.Now()
-	s.apply(controller.Event{Shard: 1, ID: "known", State: "waiting", Progress: &remote.Progress{Percent: 100, Rate: 1000, Waiting: true, ETA: 3 * time.Second}}, now)
+	s.apply(controller.Event{Shard: 1, ID: "known", State: "waiting", Progress: &scan.Progress{Percent: 100, Rate: 1000, Waiting: true, ETA: 3 * time.Second}}, now)
 	s.apply(controller.Event{ID: "reconciled", State: "deleting"}, now)
 	total := s.totals(now)
 	if total.Percent != 100 || total.Complete != 0 || total.VPSs != 2 || total.Rate != 0 || !total.ETAKnown {

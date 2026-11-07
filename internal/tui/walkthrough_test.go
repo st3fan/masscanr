@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/st3fan/masscanr/internal/controller"
-	"github.com/st3fan/masscanr/internal/remote"
 	"github.com/st3fan/masscanr/internal/scan"
 )
 
@@ -35,7 +34,7 @@ func TestV2RunWalkthrough(t *testing.T) {
 	for i, percent := range []float64{100, 70, 66, 60} {
 		found := []uint64{320, 341, 312, 311}[i]
 		rate := []float64{0, 480000, 470000, 470000}[i]
-		v.Update(controller.Event{Shard: i + 1, State: "scanning", Progress: &remote.Progress{Percent: percent, Rate: rate, Found: found, ETA: 12 * time.Second}})
+		v.Update(controller.Event{Shard: i + 1, State: "scanning", Progress: &scan.Progress{Percent: percent, Rate: rate, Found: found, ETA: 12 * time.Second}})
 	}
 	for _, phase := range []string{"collecting", "completed", "deleting", "shutdown"} {
 		v.Update(controller.Event{Shard: 1, State: phase})
@@ -56,7 +55,7 @@ func TestV2RunWalkthrough(t *testing.T) {
 		}
 	}
 	for i := 2; i <= 4; i++ {
-		v.Update(controller.Event{Shard: i, State: "waiting", Progress: &remote.Progress{Percent: 100, Waiting: true}})
+		v.Update(controller.Event{Shard: i, State: "waiting", Progress: &scan.Progress{Percent: 100, Waiting: true}})
 	}
 	if total := v.snapshot().totals(time.Now()); total.Percent != 100 || total.Complete != 1 || total.VPSs != 3 {
 		t.Fatal("100% prematurely finished run", total)

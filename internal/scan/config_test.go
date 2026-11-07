@@ -2,7 +2,6 @@ package scan
 
 import (
 	"reflect"
-	"strings"
 	"testing"
 )
 
@@ -43,29 +42,11 @@ func TestTargets(t *testing.T) {
 	}
 }
 
-func TestDefaultsAndNativeShards(t *testing.T) {
+func TestDefaults(t *testing.T) {
 	c := Defaults()
 	c.Targets, _ = ParseTargets([]string{"192.0.2.0/24"})
 	if len(c.Ports) != 100 || c.Shards != 2 || c.Rate != 500000 || c.Region != "atl" || c.InstanceType != "vc2-1c-1gb" {
 		t.Fatal(c)
-	}
-	for i := 1; i <= c.Shards; i++ {
-		args, err := c.Args(i, 1234)
-		if err != nil {
-			t.Fatal(err)
-		}
-		joined := strings.Join(args, " ")
-		for _, expected := range []string{"--seed 1234", "--rate 500000", "192.0.2.0/24", "--output-format list"} {
-			if !strings.Contains(joined, expected) {
-				t.Error(joined)
-			}
-		}
-		if args[9] != []string{"1/2", "2/2"}[i-1] {
-			t.Fatal(args)
-		}
-	}
-	if _, err := c.Args(0, 1); err == nil {
-		t.Fatal("accepted shard zero")
 	}
 	c.Shards = 0
 	if err := c.Validate(); err == nil {

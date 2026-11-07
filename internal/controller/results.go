@@ -1,12 +1,7 @@
 package controller
 
 import (
-	"bytes"
-	"fmt"
 	"io"
-	"net/netip"
-	"strconv"
-	"strings"
 	"sync"
 
 	"github.com/st3fan/masscanr/internal/scan"
@@ -31,68 +26,4 @@ func writeString(w io.Writer, s string) error {
 		err = io.ErrShortWrite
 	}
 	return err
-}
-
-type shardWriter struct {
-	target  *results
-	shard   int
-	pending []byte
-}
-
-func (w *shardWriter) Write(p []byte) (int, error) {
-	n := len(p)
-	for len(p) > 0 {
-		i := bytes.IndexByte(p, '\n')
-		if i < 0 {
-			if len(w.pending)+len(p) > 1<<20 {
-				return 0, fmt.Errorf("oversized masscan result")
-			}
-			w.pending = append(w.pending, p...)
-			return n, nil
-		}
-		if len(w.pending)+i > 1<<20 {
-			return 0, fmt.Errorf("oversized masscan result")
-		}
-		w.pending = append(w.pending, p[:i]...)
-		if err := w.record(string(w.pending)); err != nil {
-			return 0, err
-		}
-		w.pending = w.pending[:0]
-		p = p[i+1:]
-	}
-	return n, nil
-}
-
-func (w *shardWriter) finish() error {
-	if len(w.pending) == 0 {
-		return nil
-	}
-	err := w.record(string(w.pending))
-	w.pending = nil
-	return err
-}
-
-func (w *shardWriter) record(line string) error {
-	line = strings.TrimSpace(line)
-	if line == "" || strings.HasPrefix(line, "#") {
-		return nil
-	}
-	fields := strings.Fields(line)
-	if len(fields) != 5 || fields[0] != "open" || fields[1] != "tcp" {
-		return fmt.Errorf("invalid masscan list record from shard %d", w.shard)
-	}
-	port, err := strconv.ParseUint(fields[2], 10, 16)
-	if err != nil {
-		return fmt.Errorf("invalid result port from shard %d", w.shard)
-	}
-	ip, err := netip.ParseAddr(fields[3])
-	if err != nil {
-		return fmt.Errorf("invalid result address from shard %d", w.shard)
-	}
-
-	timestamp, err := strconv.ParseUint(fields[4], 10, 64)
-	if err != nil {
-		return fmt.Errorf("invalid result timestamp from shard %d", w.shard)
-	}
-	return w.target.accept(w.shard, scan.Finding{Address: ip, Port: uint16(port), Timestamp: timestamp, Protocol: fields[1], State: fields[0]})
 }

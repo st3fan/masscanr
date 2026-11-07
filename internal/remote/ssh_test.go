@@ -15,7 +15,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/st3fan/masscanr/internal/backend"
+	"github.com/st3fan/masscanr/internal/backend/masscan"
 	"github.com/st3fan/masscanr/internal/cloud"
+	"github.com/st3fan/masscanr/internal/scan"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -115,10 +118,12 @@ func alpinePreparationFixture(command string, ch ssh.Channel) (bool, uint32) {
 		if !strings.HasSuffix(command, "'add' 'masscan~1.3.2' 'coreutils' >&2") || !strings.Contains(command, "https://dl-cdn.alpinelinux.org/alpine/v3.24/community") {
 			return false, 1
 		}
-	case command == "stdbuf -oL masscan --version":
+	case command == "'sha256sum' '/usr/bin/masscan'":
+		fmt.Fprintln(ch, strings.Repeat("a", 64)+"  /usr/bin/masscan")
+	case command == "'stdbuf' '-oL' 'masscan' '--version'":
 		fmt.Fprintln(ch, "Masscan version 1.3.2 (fixture)")
 		return true, 1
-	case command == "apk --no-network info --installed -v masscan coreutils":
+	case command == "'apk' '--no-network' 'info' '--installed' '-v' 'masscan' 'coreutils'":
 		fmt.Fprint(ch, "masscan-1.3.2-r2\ncoreutils-9.11-r0\n")
 	default:
 		return false, 0
@@ -132,7 +137,7 @@ func TestRootPasswordPrepareAndSeparateStreams(t *testing.T) {
 			return status
 		}
 		switch {
-		case strings.HasPrefix(command, "exec stdbuf -oL masscan "):
+		case strings.HasPrefix(command, "exec 'stdbuf' '-oL' 'masscan' "):
 			if !strings.Contains(command, "'1/2'") {
 				t.Error(command)
 			}
@@ -147,13 +152,18 @@ func TestRootPasswordPrepareAndSeparateStreams(t *testing.T) {
 	})
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	version, err := runner.Prepare(ctx, worker)
-	if err != nil || version.Version != "1.3.2" || version.Release != "3.24.4" || version.Packages != "masscan-1.3.2-r2, coreutils-9.11-r0" {
+	version, err := runner.Prepare(ctx, worker, (masscan.Backend{}).Preparation())
+	if err != nil || version.Identity.Version != "1.3.2" || version.Release != "3.24.4" || version.Packages != "masscan-1.3.2-r2, coreutils-9.11-r0" {
 		t.Fatal(version, err)
 	}
 	var out bytes.Buffer
-	var updates []Progress
-	err = runner.Scan(ctx, worker, []string{"--shards", "1/2"}, &out, func(p Progress) { updates = append(updates, p) })
+	var updates []scan.Progress
+	plan := fixturePlan()
+	plan.Command.Args = append(plan.Command.Args, "--shards", "1/2")
+	err = runner.Scan(ctx, worker, plan, func(f scan.Finding) error {
+		_, err := fmt.Fprintf(&out, "open tcp %d %s %d\n", f.Port, f.Address, f.Timestamp)
+		return err
+	}, func(p scan.Progress) { updates = append(updates, p) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +175,7 @@ func TestRootPasswordPrepareAndSeparateStreams(t *testing.T) {
 func TestPrepareRejectsUnexpectedVersionFailure(t *testing.T) {
 	var versionChecked atomic.Bool
 	runner, worker := sshFixture(t, func(command string, ch ssh.Channel) uint32 {
-		if command == "stdbuf -oL masscan --version" {
+		if command == "'stdbuf' '-oL' 'masscan' '--version'" {
 			versionChecked.Store(true)
 			fmt.Fprintln(ch, "Masscan version 1.3.2")
 			return 2
@@ -176,7 +186,7 @@ func TestPrepareRejectsUnexpectedVersionFailure(t *testing.T) {
 		t.Error(command)
 		return 1
 	})
-	if _, err := runner.Prepare(t.Context(), worker); err == nil || !versionChecked.Load() {
+	if _, err := runner.Prepare(t.Context(), worker, (masscan.Backend{}).Preparation()); err == nil || !versionChecked.Load() {
 		t.Fatal("unexpected version-command exit status not checked", err)
 	}
 }
@@ -184,7 +194,7 @@ func TestPrepareRejectsUnexpectedVersionFailure(t *testing.T) {
 func TestRemoteExitAndCancellation(t *testing.T) {
 	t.Run("exit", func(t *testing.T) {
 		r, w := sshFixture(t, func(_ string, ch ssh.Channel) uint32 { fmt.Fprint(ch.Stderr(), "fixture error\n"); return 3 })
-		err := r.Scan(t.Context(), w, nil, io.Discard, nil)
+		err := r.Scan(t.Context(), w, fixturePlan(), func(scan.Finding) error { return nil }, nil)
 		if err == nil || !strings.Contains(err.Error(), "fixture error") {
 			t.Fatal(err)
 		}
@@ -194,7 +204,7 @@ func TestRemoteExitAndCancellation(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 		defer cancel()
 		start := time.Now()
-		err := r.Scan(ctx, w, nil, io.Discard, nil)
+		err := r.Scan(ctx, w, fixturePlan(), func(scan.Finding) error { return nil }, nil)
 		if err == nil || time.Since(start) > time.Second {
 			t.Fatal(err, time.Since(start))
 		}
@@ -217,11 +227,11 @@ func TestHostKeyPinning(t *testing.T) {
 
 func TestProgressRecordsAndShellQuoting(t *testing.T) {
 	var lines []string
-	err := Records(strings.NewReader("one\rtwo\r\nthree"), func(line string) { lines = append(lines, line) })
+	err := backend.Records(strings.NewReader("one\rtwo\r\nthree"), func(line string) error { lines = append(lines, line); return nil })
 	if err != nil || strings.Join(lines, ",") != "one,two,three" {
 		t.Fatal(lines, err)
 	}
-	if _, ok := ParseProgress("rate: nan-kpps, 10% done"); ok {
+	if _, ok := masscan.ParseProgress("rate: nan-kpps, 10% done"); ok {
 		t.Fatal("accepted invalid status")
 	}
 	if got := QuoteArgs([]string{"x'y", "$(reboot)"}); got != "'x'\\''y' '$(reboot)'" {
@@ -256,7 +266,7 @@ func TestPrepareRejectsPlatformDriftBeforeInstalling(t *testing.T) {
 				t.Error(command)
 				return 1
 			})
-			_, err := r.Prepare(t.Context(), w)
+			_, err := r.Prepare(t.Context(), w, (masscan.Backend{}).Preparation())
 			if err == nil || !strings.Contains(err.Error(), tc.want) || strings.Contains(err.Error(), "private-token") || installed.Load() {
 				t.Fatal("policy not enforced before installation", err, installed.Load())
 			}
@@ -272,11 +282,11 @@ func TestPrepareReportsAPKAndScannerFailures(t *testing.T) {
 					fmt.Fprint(ch.Stderr(), "fixture package unavailable")
 					return 2
 				}
-				if phase == "version" && command == "stdbuf -oL masscan --version" {
+				if phase == "version" && command == "'stdbuf' '-oL' 'masscan' '--version'" {
 					fmt.Fprintln(ch, "Masscan version 1.3.3")
 					return 1
 				}
-				if phase == "package-info" && command == "apk --no-network info --installed -v masscan coreutils" {
+				if phase == "package-info" && command == "'apk' '--no-network' 'info' '--installed' '-v' 'masscan' 'coreutils'" {
 					return 0
 				}
 				if handled, status := alpinePreparationFixture(command, ch); handled {
@@ -285,7 +295,7 @@ func TestPrepareReportsAPKAndScannerFailures(t *testing.T) {
 				t.Error(command)
 				return 1
 			})
-			_, err := r.Prepare(t.Context(), w)
+			_, err := r.Prepare(t.Context(), w, (masscan.Backend{}).Preparation())
 			if err == nil {
 				t.Fatal("accepted invalid preparation")
 			}
@@ -317,7 +327,7 @@ func TestPreparationCancellationDuringAPK(t *testing.T) {
 		return 1
 	})
 	done := make(chan error, 1)
-	go func() { _, err := r.Prepare(ctx, w); done <- err }()
+	go func() { _, err := r.Prepare(ctx, w, (masscan.Backend{}).Preparation()); done <- err }()
 	select {
 	case <-entered:
 	case <-time.After(2 * time.Second):
@@ -331,5 +341,57 @@ func TestPreparationCancellationDuringAPK(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("preparation did not cancel promptly")
+	}
+}
+
+func fixturePlan() backend.Plan {
+	cfg := scan.Defaults()
+	cfg.Targets, _ = scan.ParseTargets([]string{"192.0.2.0/24"})
+	plan, _ := (masscan.Backend{}).Build(cfg.Intent(), scan.Shard{Index: 1, Total: 2}, 42)
+	return plan
+}
+
+func TestDecoderAndSinkFailureCancelRemote(t *testing.T) {
+	for _, malformed := range []bool{false, true} {
+		t.Run(fmt.Sprint(malformed), func(t *testing.T) {
+			release := make(chan struct{})
+			defer close(release)
+			r, w := sshFixture(t, func(_ string, ch ssh.Channel) uint32 {
+				if malformed {
+					fmt.Fprintln(ch, "invalid result")
+				} else {
+					fmt.Fprintln(ch, "open tcp 80 192.0.2.1 1")
+				}
+				<-release
+				return 0
+			})
+			sentinel := errors.New("fixture sink error")
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			err := r.Scan(ctx, w, fixturePlan(), func(scan.Finding) error { return sentinel }, nil)
+			if err == nil || (!malformed && !errors.Is(err, sentinel)) || errors.Is(err, context.DeadlineExceeded) {
+				t.Fatal("lost decoder/sink failure", err)
+			}
+		})
+	}
+}
+
+type eofErrorDecoder struct{ backend.Decoder }
+
+var fixtureDecodeError = errors.New("fixture decoder error")
+
+func (d eofErrorDecoder) Results(r io.Reader, _ func(scan.Finding) error) error {
+	io.Copy(io.Discard, r)
+	return fixtureDecodeError
+}
+
+func TestDecoderFailurePreservesRemoteExitDiagnostics(t *testing.T) {
+	r, w := sshFixture(t, func(_ string, ch ssh.Channel) uint32 { fmt.Fprintln(ch.Stderr(), "fixture root cause"); return 3 })
+	plan := fixturePlan()
+	base := plan.NewDecoder
+	plan.NewDecoder = func() backend.Decoder { return eofErrorDecoder{base()} }
+	err := r.Scan(t.Context(), w, plan, func(scan.Finding) error { return nil }, nil)
+	if !errors.Is(err, fixtureDecodeError) || !strings.Contains(err.Error(), "fixture root cause") || !strings.Contains(err.Error(), "status 3") {
+		t.Fatal("lost remote cause", err)
 	}
 }

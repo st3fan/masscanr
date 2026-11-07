@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"github.com/st3fan/masscanr/internal/scan"
 	"io"
 	"strings"
 	"sync"
@@ -11,7 +12,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/st3fan/masscanr/internal/controller"
-	"github.com/st3fan/masscanr/internal/remote"
 )
 
 func TestRunMetadataAndInterruptedShards(t *testing.T) {
@@ -19,7 +19,7 @@ func TestRunMetadataAndInterruptedShards(t *testing.T) {
 	seed := uint64(42)
 	v.Update(controller.Event{State: "validating", RunID: "fixture", Seed: &seed})
 	seed = 99
-	v.Update(controller.Event{Shard: 1, ID: "w1", State: "scanning", Progress: &remote.Progress{Percent: 50}})
+	v.Update(controller.Event{Shard: 1, ID: "w1", State: "scanning", Progress: &scan.Progress{Percent: 50}})
 	v.Update(controller.Event{Shard: 2, ID: "w2", State: "failed", Detail: "scanner failed"})
 	v.Update(controller.Event{State: "cleanup", Detail: "run interrupted"})
 	v.Update(controller.Event{Shard: 1, State: "shutdown"})
@@ -68,7 +68,7 @@ func TestConcurrentUpdatesAndSnapshots(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for i := range 200 {
-				p := remote.Progress{Percent: float64(i) / 2, Found: uint64(i)}
+				p := scan.Progress{Percent: float64(i) / 2, Found: uint64(i)}
 				v.Update(controller.Event{Shard: shard, State: "scanning", Progress: &p})
 				_ = v.snapshot().totals(time.Now())
 			}

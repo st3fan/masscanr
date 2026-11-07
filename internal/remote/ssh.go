@@ -8,35 +8,22 @@ import (
 	"io"
 	"net"
 	"net/netip"
-	"regexp"
+	"path"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/st3fan/masscanr/internal/alpine"
+	"github.com/st3fan/masscanr/internal/backend"
 	"github.com/st3fan/masscanr/internal/cloud"
+	"github.com/st3fan/masscanr/internal/scan"
 	"golang.org/x/crypto/ssh"
 )
 
 type Runner interface {
-	Prepare(context.Context, cloud.Worker) (Prepared, error)
-	Scan(context.Context, cloud.Worker, []string, io.Writer, func(Progress)) error
-}
-
-// Prepared records the observed platform and scanner identity without secrets.
-type Prepared struct {
-	Version, Release, Packages string
-}
-
-func (p Prepared) String() string {
-	parts := []string{"masscan " + p.Version}
-	if p.Release != "" {
-		parts = append([]string{"Alpine " + p.Release}, parts...)
-	}
-	if p.Packages != "" {
-		parts = append(parts, p.Packages)
-	}
-	return strings.Join(parts, "; ")
+	Prepare(context.Context, cloud.Worker, backend.Preparation) (scan.Prepared, error)
+	Scan(context.Context, cloud.Worker, backend.Plan, func(scan.Finding) error, func(scan.Progress)) error
 }
 
 type SSH struct {
@@ -87,6 +74,10 @@ func (s *SSH) dial(ctx context.Context, w cloud.Worker) (*ssh.Client, error) {
 }
 
 func (s *SSH) command(ctx context.Context, w cloud.Worker, command string, out, diagnostics io.Writer) error {
+	return s.commandInput(ctx, w, command, nil, out, diagnostics)
+}
+
+func (s *SSH) commandInput(ctx context.Context, w cloud.Worker, command string, input io.Reader, out, diagnostics io.Writer) error {
 	client, err := s.dial(ctx, w)
 	if err != nil {
 		return err
@@ -99,6 +90,7 @@ func (s *SSH) command(ctx context.Context, w cloud.Worker, command string, out, 
 		return err
 	}
 	defer session.Close()
+	session.Stdin = input
 	session.Stdout = out
 	session.Stderr = diagnostics
 	err = session.Run(command)
@@ -108,10 +100,16 @@ func (s *SSH) command(ctx context.Context, w cloud.Worker, command string, out, 
 	return err
 }
 
-var versionPattern = regexp.MustCompile(`Masscan version ([^\s]+)`)
-
-func (s *SSH) Prepare(ctx context.Context, w cloud.Worker) (Prepared, error) {
-	var prepared Prepared
+func (s *SSH) Prepare(ctx context.Context, w cloud.Worker, preparation backend.Preparation) (scan.Prepared, error) {
+	var prepared scan.Prepared
+	if preparation.Verify == nil || len(preparation.Packages) == 0 || len(preparation.Probes) == 0 {
+		return prepared, fmt.Errorf("incomplete backend preparation")
+	}
+	for _, pkg := range preparation.Packages {
+		if len(strings.FieldsFunc(pkg, func(r rune) bool { return r == '~' || r == '=' || r == '<' || r == '>' })) == 0 {
+			return prepared, fmt.Errorf("invalid backend package constraint")
+		}
+	}
 	// A provisioned VM may still be booting or generating its host key.
 	for {
 		var uid limitedBuffer
@@ -151,47 +149,67 @@ func (s *SSH) Prepare(ctx context.Context, w cloud.Worker) (Prepared, error) {
 	for _, repository := range strings.Fields(repositories) {
 		args = append(args, "--repository", repository)
 	}
-	args = append(args, "add", "masscan~1.3.2", "coreutils")
+	args = append(append(args, "add"), preparation.Packages...)
 	var diagnostics limitedBuffer
 	if err := s.command(ctx, w, "exec "+QuoteArgs(args)+" >&2", io.Discard, &diagnostics); err != nil {
 		return prepared, fmt.Errorf("Alpine %s package installation failed: %w (%s)", prepared.Release, err, strings.TrimSpace(diagnostics.String()))
 	}
-	var out limitedBuffer
-	diagnostics = limitedBuffer{}
-	err = s.command(ctx, w, "stdbuf -oL masscan --version", &out, &diagnostics)
-	var exit *ssh.ExitError
-	// Packaged masscan 1.3.2 exits 1 after printing its version on Alpine too.
-	// Accept only that known status and still require recognized version text;
-	// installation failures and other version-command failures remain errors.
-	if err != nil && !(errors.As(err, &exit) && exit.ExitStatus() == 1) {
-		return prepared, fmt.Errorf("masscan version command failed: %w (%s)", err, strings.TrimSpace(diagnostics.String()))
+	outputs := make([]string, len(preparation.Probes))
+	for i, probe := range preparation.Probes {
+		var out textBuffer
+		diagnostics = limitedBuffer{}
+		err = s.command(ctx, w, QuoteArgs(probe.Command.Argv()), &out, &diagnostics)
+		code := 0
+		if err != nil {
+			var exit *ssh.ExitError
+			if !errors.As(err, &exit) {
+				return prepared, fmt.Errorf("backend probe failed: %w (%s)", err, strings.TrimSpace(diagnostics.String()))
+			}
+			code = exit.ExitStatus()
+		}
+		if !slices.Contains(probe.ExitCodes, code) {
+			return prepared, fmt.Errorf("backend probe exit %d: %w (%s)", code, err, strings.TrimSpace(diagnostics.String()))
+		}
+		if out.overflow {
+			return prepared, fmt.Errorf("backend probe exceeds 64 KiB")
+		}
+		outputs[i] = out.String()
 	}
-	m := versionPattern.FindStringSubmatch(out.String())
-	if m == nil {
-		return prepared, fmt.Errorf("masscan version not recognized")
+	names := make([]string, len(preparation.Packages))
+	for i, pkg := range preparation.Packages {
+		names[i] = strings.FieldsFunc(pkg, func(r rune) bool { return r == '~' || r == '=' || r == '<' || r == '>' })[0]
 	}
-	if m[1] != "1.3.2" {
-		return prepared, fmt.Errorf("unsupported masscan version %q on Alpine %s; require 1.3.2", m[1], prepared.Release)
-	}
-	prepared.Version = m[1]
-	packages, err := s.readText(ctx, w, "apk --no-network info --installed -v masscan coreutils")
+	info, err := s.readText(ctx, w, QuoteArgs(append([]string{"apk", "--no-network", "info", "--installed", "-v"}, names...)))
 	if err != nil {
 		return prepared, fmt.Errorf("read installed Alpine packages: %w", err)
 	}
-	var masscanPackage, coreutilsPackage string
-	fields := strings.Fields(packages)
-	for _, field := range fields {
-		if strings.HasPrefix(field, "masscan-1.3.2-r") {
-			masscanPackage = field
+	fields := strings.Fields(info)
+	if len(fields) != len(names) {
+		return prepared, fmt.Errorf("installed package identities were not recognized")
+	}
+	ordered := make([]string, len(names))
+	for i, name := range names {
+		for _, field := range fields {
+			if strings.HasPrefix(field, name+"-") {
+				if ordered[i] != "" {
+					return prepared, fmt.Errorf("duplicate installed package identity")
+				}
+				ordered[i] = field
+			}
 		}
-		if strings.HasPrefix(field, "coreutils-") {
-			coreutilsPackage = field
+		if ordered[i] == "" {
+			return prepared, fmt.Errorf("missing installed package identity for %s", name)
 		}
 	}
-	if len(fields) != 2 || masscanPackage == "" || coreutilsPackage == "" {
-		return prepared, fmt.Errorf("installed masscan/coreutils package identities were not recognized")
+	prepared.Packages = strings.Join(ordered, ", ")
+	prepared.Identity, err = preparation.Verify(outputs, prepared.Packages)
+	if err != nil {
+		return prepared, err
 	}
-	prepared.Packages = masscanPackage + ", " + coreutilsPackage
+	if !prepared.Identity.Valid() {
+		return prepared, fmt.Errorf("backend returned unknown identity")
+	}
+
 	return prepared, nil
 }
 
@@ -236,62 +254,105 @@ func QuoteArgs(args []string) string {
 	return strings.Join(quoted, " ")
 }
 
-func (s *SSH) Scan(ctx context.Context, w cloud.Worker, args []string, out io.Writer, progress func(Progress)) error {
+func (s *SSH) Scan(ctx context.Context, w cloud.Worker, plan backend.Plan, sink func(scan.Finding) error, progress func(scan.Progress)) (err error) {
+	if plan.NewDecoder == nil || sink == nil || plan.Command.Executable == "" {
+		return fmt.Errorf("incomplete backend execution plan")
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	output := &cancelWriter{writer: out, cancel: cancel}
-	reader, writer := io.Pipe()
-	parsed := make(chan error, 1)
+	command := "exec " + QuoteArgs(plan.Command.Argv())
+	if len(plan.Files) > 0 {
+		directory, createErr := s.readText(ctx, w, "mktemp -d /tmp/masscanr.XXXXXXXXXX")
+		if createErr != nil {
+			return createErr
+		}
+		directory = strings.TrimSpace(directory)
+		if !validDirectory(directory) {
+			return fmt.Errorf("invalid remote workspace")
+		}
+		defer func() {
+			cleanup, stop := context.WithTimeout(context.Background(), 10*time.Second)
+			defer stop()
+			args := []string{"rm", "-f"}
+			for _, file := range plan.Files {
+				if validFile(file.Name) {
+					args = append(args, directory+"/"+file.Name)
+				}
+			}
+			cleanupCommand := QuoteArgs(args) + "; " + QuoteArgs([]string{"rmdir", directory})
+			err = errors.Join(err, s.command(cleanup, w, cleanupCommand, io.Discard, io.Discard))
+		}()
+		for _, file := range plan.Files {
+			if !validFile(file.Name) {
+				return fmt.Errorf("invalid backend file name")
+			}
+			if err := s.commandInput(ctx, w, "umask 077; cat > "+QuoteArgs([]string{directory + "/" + file.Name}), strings.NewReader(file.Content), io.Discard, io.Discard); err != nil {
+				return fmt.Errorf("write backend file: %w", err)
+			}
+		}
+		command = "cd " + QuoteArgs([]string{directory}) + " && " + command
+	}
+	decoder := plan.NewDecoder()
+	stdout, outWriter := io.Pipe()
+	stderr, errWriter := io.Pipe()
+	defer stdout.Close()
+	defer stderr.Close()
+	resultDone, statusDone := make(chan error, 1), make(chan error, 1)
 	var tail limitedBuffer
 	go func() {
-		err := Records(reader, func(line string) {
-			if p, ok := ParseProgress(line); ok {
+		err := decoder.Results(stdout, sink)
+		stdout.CloseWithError(err)
+		if err != nil {
+			cancel()
+		}
+		resultDone <- err
+	}()
+	go func() {
+		err := backend.Records(stderr, func(line string) error {
+			p, ok, err := decoder.Status(line)
+			if err != nil {
+				return err
+			}
+			if ok {
 				if progress != nil {
 					progress(p)
 				}
 			} else {
 				tail.Write([]byte(line + "\n"))
 			}
+			return nil
 		})
-		reader.CloseWithError(err)
+		stderr.CloseWithError(err)
 		if err != nil {
 			cancel()
 		}
-		parsed <- err
+		statusDone <- err
 	}()
-	// GNU coreutils stdbuf is tested on Alpine/musl: findings must arrive before
-	// scanner exit rather than waiting for redirected-stdout buffers to flush.
-	err := s.command(ctx, w, "exec stdbuf -oL masscan "+QuoteArgs(args), output, writer)
-	writer.Close()
-	parseErr := <-parsed
-	if output.err != nil {
-		return fmt.Errorf("write scan results: %w", output.err)
+	runErr := s.command(ctx, w, command, outWriter, errWriter)
+	outWriter.Close()
+	errWriter.Close()
+	resultErr, statusErr := <-resultDone, <-statusDone
+	var commandErr error
+	if runErr != nil {
+		commandErr = fmt.Errorf("remote scanner: %w (%s)", runErr, strings.TrimSpace(tail.String()))
 	}
-	if parseErr != nil {
-		return fmt.Errorf("masscan progress stream: %w", parseErr)
-	}
-	if err != nil {
-		return fmt.Errorf("remote masscan: %w (%s)", err, strings.TrimSpace(tail.String()))
-	}
-	return nil
+	return errors.Join(resultErr, statusErr, commandErr)
 }
 
-type cancelWriter struct {
-	writer io.Writer
-	cancel context.CancelFunc
-	err    error
+func validFile(name string) bool {
+	return name != "" && name != "." && name != ".." && path.Base(name) == name && !strings.ContainsAny(name, "/\\\x00\r\n")
 }
-
-func (w *cancelWriter) Write(p []byte) (int, error) {
-	n, err := w.writer.Write(p)
-	if err == nil && n != len(p) {
-		err = io.ErrShortWrite
+func validDirectory(value string) bool {
+	const prefix = "/tmp/masscanr."
+	if !strings.HasPrefix(value, prefix) || len(value) != len(prefix)+10 {
+		return false
 	}
-	if err != nil {
-		w.err = err
-		w.cancel()
+	for _, r := range strings.TrimPrefix(value, prefix) {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9') {
+			return false
+		}
 	}
-	return n, err
+	return true
 }
 
 // Keep only a bounded diagnostic tail while continuing to drain the stream.

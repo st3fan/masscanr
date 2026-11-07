@@ -6,6 +6,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"github.com/st3fan/masscanr/internal/backend"
+	"io"
 	"os"
 	"os/signal"
 	"slices"
@@ -13,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/st3fan/masscanr/internal/backend/masscan"
 	"github.com/st3fan/masscanr/internal/cloud"
 	"github.com/st3fan/masscanr/internal/cloud/vultr"
 	"github.com/st3fan/masscanr/internal/remote"
@@ -105,17 +108,18 @@ func TestVultrWorkerSmoke(t *testing.T) {
 		}
 	}
 	runner := remote.NewSSH()
-	prepared, err := runner.Prepare(ctx, w)
+	prepared, err := runner.Prepare(ctx, w, (masscan.Backend{}).Preparation())
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Log("root/password SSH ready;", prepared.String())
 	cfg := scan.Defaults()
 	cfg.Targets, _ = scan.ParseTargets([]string{"192.0.2.0/30"})
-	args, _ := cfg.Args(1, 42)
+	args, _ := masscan.Arguments(cfg.Intent(), scan.Shard{Index: 1, Total: cfg.Shards}, 42)
 	args = append(args, "--echo")
 	var output bytes.Buffer
-	if err := runner.Scan(ctx, w, args, &output, nil); err != nil {
+	plan := backend.Plan{Command: backend.Command{Executable: "masscan", Args: args}, NewDecoder: func() backend.Decoder { return configCapture{out: &output} }}
+	if err := runner.Scan(ctx, w, plan, func(scan.Finding) error { return nil }, nil); err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Contains(output.Bytes(), []byte("seed = 42")) {
@@ -130,3 +134,11 @@ func workerIDs(workers map[string]cloud.Worker) []string {
 	}
 	return ids
 }
+
+type configCapture struct{ out io.Writer }
+
+func (c configCapture) Results(r io.Reader, _ func(scan.Finding) error) error {
+	_, err := io.Copy(c.out, r)
+	return err
+}
+func (configCapture) Status(string) (scan.Progress, bool, error) { return scan.Progress{}, false, nil }
