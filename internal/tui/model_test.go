@@ -114,7 +114,7 @@ func TestLongDiagnosticsAreSanitizedAndInspectable(t *testing.T) {
 		m, _ = key(m, tea.KeyPgDown, 0)
 	}
 	text := m.View().Content
-	if !strings.Contains(strings.ReplaceAll(text, "\n", ""), "END-DIAGNOSTIC") || strings.Contains(text, "\x1b") {
+	if !strings.Contains(strings.ReplaceAll(strings.ReplaceAll(text, "\n", ""), " ", ""), "END-DIAGNOSTIC") || strings.Contains(text, "\x1b") {
 		t.Fatal("diagnostic lost or unsanitized", text)
 	}
 }
@@ -148,7 +148,7 @@ func TestDiagnosticScrollDoesNotOvershootAndNarrowFooterShowsStop(t *testing.T) 
 		t.Fatal("cannot scroll back from diagnostic end")
 	}
 	m.width = 40
-	if !strings.Contains(strings.Split(m.View().Content, "\n")[m.height-1], "^C stop") {
+	if !strings.Contains(strings.Split(m.View().Content, "\n")[m.height-2], "^C stop") {
 		t.Fatal("stop hint clipped in narrow terminal")
 	}
 }
@@ -164,7 +164,7 @@ func TestCompletedRunStaysNavigableUntilExplicitQuit(t *testing.T) {
 			if cmd == nil {
 				t.Fatal("final snapshot must keep polling, not exit")
 			}
-			for _, want := range []string{outcome, "Found 123", "q / ctrl+c quit", "Run error"} {
+			for _, want := range []string{outcome, "Found 123", "q quit", "Run error"} {
 				if !strings.Contains(m.View().Content, want) {
 					t.Fatalf("missing %q:\n%s", want, m.View().Content)
 				}

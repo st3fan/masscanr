@@ -121,17 +121,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	if m.details && len(m.state.rows) > 0 {
-		headerHeight := 6
-		if m.state.totals(m.now).Stale {
-			headerHeight++
-		}
-		if m.state.Final != nil && m.state.Final.Detail != "" {
-			headerHeight++
-		}
-		detailHeight := m.detailHeight(max(0, m.height-headerHeight-2))
+		canvas := m.inner()
+		detailHeight := canvas.detailHeight(max(0, canvas.height-canvas.headerHeight()-2))
 		rows := m.state.sorted()
 		selected := min(m.selected, len(rows)-1)
-		m.detailOffset = min(m.detailOffset, max(0, len(m.detailLines(rows[selected]))-max(1, detailHeight-1)))
+		m.detailOffset = min(m.detailOffset, max(0, len(canvas.detailLines(rows[selected]))-max(1, detailHeight-1)))
 	}
 	return m, nil
 }
@@ -143,7 +137,51 @@ func (m model) paint(text, color string) string {
 	return lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Render(text)
 }
 
+func (m model) padding() (horizontal, vertical int) {
+	return min(2, max(0, (m.width-1)/2)), min(1, max(0, (m.height-1)/2))
+}
+
+func (m model) inner() model {
+	x, y := m.padding()
+	m.width, m.height = max(1, m.width-2*x), max(1, m.height-2*y)
+	return m
+}
+
+func (m model) headerHeight() int {
+	h := 5 // Title, tabs, blank, divider, blank.
+	if m.tab == 0 {
+		h += 3 // Overall progress, throughput, worker counts.
+		if m.state.totals(m.now).Stale {
+			h++
+		}
+		if m.state.Final != nil && m.state.Final.Detail != "" {
+			h++
+		}
+	}
+	return h
+}
+
 func (m model) View() tea.View {
+	x, y := m.padding()
+	canvas := m.inner()
+	lines := make([]string, y)
+	for _, line := range canvas.lines() {
+		lines = append(lines, strings.Repeat(" ", x)+line+strings.Repeat(" ", x))
+	}
+	lines = append(lines, make([]string, y)...)
+	content := strings.Join(lines, "\n")
+	if m.color {
+		content = lipgloss.NewStyle().Foreground(lipgloss.Color(terminalGreen)).Background(lipgloss.Color(terminalBlack)).Width(max(1, m.width)).Render(content)
+	}
+	v := tea.NewView(content)
+	if m.color {
+		v.ForegroundColor, v.BackgroundColor = lipgloss.Color(terminalGreen), lipgloss.Color(terminalBlack)
+	}
+	v.AltScreen = true
+	return v
+}
+
+func (m model) lines() []string {
 	w := max(1, m.width)
 	run := m.state.RunID
 	if run == "" {
@@ -158,12 +196,12 @@ func (m model) View() tea.View {
 	header := []string{fmt.Sprintf("masscanr  |  Run: %s  |  %s", run, phase)}
 	tabs := []string{"1 Overview", "2 Config"}
 	tabs[m.tab] = m.paint("["+tabs[m.tab]+"]", terminalYellow)
-	header = append(header, strings.Join(tabs, "   "), strings.Repeat("─", w))
+	header = append(header, strings.Join(tabs, "   "), "", strings.Repeat("─", w), "")
 	footer := "tab tabs  ↑↓ shard  enter details  pgup/pgdown scroll  ctrl+c stop"
 	if m.tab == 1 {
 		footer = "tab tabs  ↑↓ / pgup/pgdown scroll  ctrl+c stop"
 	}
-	if w < 76 {
+	if w < 80 {
 		footer = "^C stop · tab tabs · ↑↓ · enter"
 		if m.tab == 1 {
 			footer = "^C stop · tab tabs · ↑↓ scroll"
@@ -174,7 +212,7 @@ func (m model) View() tea.View {
 		if m.tab == 1 {
 			footer = "q / ctrl+c quit  tab tabs  ↑↓ / pgup/pgdown scroll"
 		}
-		if w < 76 {
+		if w < 80 {
 			footer = "q quit · tab tabs · ↑↓ · enter"
 		}
 	}
@@ -212,16 +250,7 @@ func (m model) View() tea.View {
 	for i, line := range lines {
 		lines[i] = ansi.Truncate(line, w, "")
 	}
-	content := strings.Join(lines, "\n")
-	if m.color {
-		content = lipgloss.NewStyle().Foreground(lipgloss.Color(terminalGreen)).Background(lipgloss.Color(terminalBlack)).Width(w).Render(content)
-	}
-	v := tea.NewView(content)
-	if m.color {
-		v.ForegroundColor, v.BackgroundColor = lipgloss.Color(terminalGreen), lipgloss.Color(terminalBlack)
-	}
-	v.AltScreen = true
-	return v
+	return lines
 }
 
 func (m model) overview(height int) []string {
@@ -229,7 +258,7 @@ func (m model) overview(height int) []string {
 		return nil
 	}
 	rows := m.state.sorted()
-	wide, narrow := m.width >= 110, m.width < 76
+	wide, narrow := m.width >= 110, m.width < 80
 	heading := "  SHARD  VPS ADDRESS      STATE                      PROGRESS            RATE"
 	if wide {
 		heading += "       ETA       FOUND"
