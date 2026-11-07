@@ -2,11 +2,11 @@ package tui
 
 import (
 	"bytes"
+	"github.com/st3fan/masscanr/internal/scan"
 	"strings"
 	"testing"
 
 	"github.com/st3fan/masscanr/internal/controller"
-	"github.com/st3fan/masscanr/internal/remote"
 )
 
 func TestRedirectedLogsAndFinalState(t *testing.T) {
@@ -14,8 +14,8 @@ func TestRedirectedLogsAndFinalState(t *testing.T) {
 	v := New(&out, false, 2)
 	v.Start()
 	defer v.Stop()
-	v.Update(controller.Event{Shard: 1, State: "scanning", Progress: &remote.Progress{Percent: 50, Rate: 500000}})
-	v.Update(controller.Event{Shard: 1, State: "scanning", Progress: &remote.Progress{Percent: 90}})
+	v.Update(controller.Event{Shard: 1, State: "scanning", Progress: &scan.Progress{Percent: 50, Rate: 500000}})
+	v.Update(controller.Event{Shard: 1, State: "scanning", Progress: &scan.Progress{Percent: 90}})
 	v.Update(controller.Event{Shard: 1, State: "failed", Detail: "remote\x1b[31m\nerror"})
 	v.Update(controller.Event{Shard: 1, State: "shutdown"})
 	if strings.Contains(out.String(), "\x1b") || strings.Count(out.String(), "scanning") != 1 {
@@ -31,12 +31,12 @@ func TestCompletedWorkerShowsShutdownWhilePeerScans(t *testing.T) {
 	v := New(&out, false, 2)
 	v.Start()
 	defer v.Stop()
-	v.Update(controller.Event{Shard: 1, State: "waiting", Progress: &remote.Progress{Percent: 100, Found: 12}})
+	v.Update(controller.Event{Shard: 1, State: "waiting", Progress: &scan.Progress{Percent: 100, Found: 12}})
 	v.Update(controller.Event{Shard: 1, State: "completed"})
 	v.Update(controller.Event{Shard: 1, State: "deleting"})
 	v.Update(controller.Event{Shard: 1, State: "shutdown"})
 	v.Update(controller.Event{Shard: 1, State: "shutdown"})
-	v.Update(controller.Event{Shard: 2, State: "scanning", Progress: &remote.Progress{Percent: 25, Found: 3}})
+	v.Update(controller.Event{Shard: 2, State: "scanning", Progress: &scan.Progress{Percent: 25, Found: 3}})
 	if v.rows["1"].Cleanup != "shutdown" || v.rows["2"].State != "scanning" {
 		t.Fatal(v.rows)
 	}

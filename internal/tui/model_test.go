@@ -9,7 +9,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/st3fan/masscanr/internal/controller"
-	"github.com/st3fan/masscanr/internal/remote"
 	"github.com/st3fan/masscanr/internal/scan"
 )
 
@@ -32,7 +31,7 @@ func key(m model, code rune, mod tea.KeyMod) (model, tea.Cmd) {
 func TestOverviewSelectionResizeAndDetails(t *testing.T) {
 	m := fixtureModel(30)
 	for i := 1; i <= 30; i++ {
-		m.state.apply(controller.Event{Shard: i, ID: fmt.Sprintf("instance-%d", i), IP: "203.0.113.10", State: "scanning", Progress: &remote.Progress{Percent: 50, Rate: 500000, Found: 10}}, m.now)
+		m.state.apply(controller.Event{Shard: i, ID: fmt.Sprintf("instance-%d", i), IP: "203.0.113.10", State: "scanning", Progress: &scan.Progress{Percent: 50, Rate: 500000, Found: 10}}, m.now)
 	}
 	for range 29 {
 		m, _ = key(m, tea.KeyDown, 0)
@@ -124,7 +123,7 @@ func TestUnknownStaleAndCleanupFailureVisible(t *testing.T) {
 	if strings.Count(m.View().Content, "0.0%") != 1 {
 		t.Fatal("invented worker progress")
 	}
-	m.state.apply(controller.Event{Shard: 1, State: "scanning", Progress: &remote.Progress{Percent: 90, Rate: 500000}}, m.now.Add(-staleAfter))
+	m.state.apply(controller.Event{Shard: 1, State: "scanning", Progress: &scan.Progress{Percent: 90, Rate: 500000}}, m.now.Add(-staleAfter))
 	m.state.apply(controller.Event{Shard: 2, State: "completed"}, m.now)
 	m.state.apply(controller.Event{Shard: 2, State: "cleanup failed", Detail: "provider unavailable"}, m.now)
 	text := m.View().Content

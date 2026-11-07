@@ -12,8 +12,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/st3fan/masscanr/internal/backend"
+	"github.com/st3fan/masscanr/internal/backend/masscan"
 	"github.com/st3fan/masscanr/internal/cloud"
-	"github.com/st3fan/masscanr/internal/remote"
 	"github.com/st3fan/masscanr/internal/scan"
 )
 
@@ -117,19 +118,27 @@ func (p *fakeProvider) Delete(ctx context.Context, w cloud.Worker, run string) e
 type fakeRunner struct {
 	prepareFail, scanFail, versionMismatch bool
 	block                                  bool
-	scan                                   func(context.Context, cloud.Worker, []string, io.Writer, func(remote.Progress)) error
+	scan                                   func(context.Context, cloud.Worker, []string, io.Writer, func(scan.Progress)) error
 }
 
-func (r fakeRunner) Prepare(ctx context.Context, w cloud.Worker) (remote.Prepared, error) {
+func (r fakeRunner) Prepare(ctx context.Context, w cloud.Worker, _ backend.Preparation) (scan.Prepared, error) {
 	if r.prepareFail {
-		return remote.Prepared{}, errors.New("prepare error")
+		return scan.Prepared{}, errors.New("prepare error")
 	}
 	if r.versionMismatch && w.ID == "w2" {
-		return remote.Prepared{Version: "other"}, nil
+		return scan.Prepared{Identity: scan.Identity{Name: "masscan", Version: "other", Build: "fixture"}}, nil
 	}
-	return remote.Prepared{Version: "1.3.2", Release: "3.24.4"}, nil
+	return scan.Prepared{Identity: scan.Identity{Name: "masscan", Version: "1.3.2", Build: "fixture"}, Release: "3.24.4"}, nil
 }
-func (r fakeRunner) Scan(ctx context.Context, w cloud.Worker, args []string, out io.Writer, progress func(remote.Progress)) error {
+func (r fakeRunner) Scan(ctx context.Context, w cloud.Worker, plan backend.Plan, sink func(scan.Finding) error, progress func(scan.Progress)) error {
+	reader, writer := io.Pipe()
+	done := make(chan error, 1)
+	go func() { err := plan.NewDecoder().Results(reader, sink); reader.CloseWithError(err); done <- err }()
+	err := r.legacyScan(ctx, w, plan.Command.Args, writer, progress)
+	writer.Close()
+	return errors.Join(err, <-done)
+}
+func (r fakeRunner) legacyScan(ctx context.Context, w cloud.Worker, args []string, out io.Writer, progress func(scan.Progress)) error {
 	if r.scan != nil {
 		return r.scan(ctx, w, args, out, progress)
 	}
@@ -146,7 +155,7 @@ func (r fakeRunner) Scan(ctx context.Context, w cloud.Worker, args []string, out
 	if _, err := fmt.Fprint(out, "1700000000\n# end\n"); err != nil {
 		return err
 	}
-	progress(remote.Progress{Percent: 100, Waiting: true, Found: 1})
+	progress(scan.Progress{Percent: 100, Waiting: true, Found: 1})
 	if r.scanFail {
 		return errors.New("scan error")
 	}
@@ -161,7 +170,7 @@ func TestCompletedWorkerShutsDownBeforeOtherShardFinishes(t *testing.T) {
 			slowStarted := make(chan struct{})
 			releaseSlow := make(chan struct{})
 			earlyShutdown := make(chan struct{}, 1)
-			r := fakeRunner{scan: func(ctx context.Context, w cloud.Worker, args []string, out io.Writer, progress func(remote.Progress)) error {
+			r := fakeRunner{scan: func(ctx context.Context, w cloud.Worker, args []string, out io.Writer, progress func(scan.Progress)) error {
 				if w.ID == "w2" {
 					close(slowStarted)
 					select {
@@ -170,7 +179,7 @@ func TestCompletedWorkerShutsDownBeforeOtherShardFinishes(t *testing.T) {
 						return ctx.Err()
 					}
 				}
-				return (fakeRunner{}).Scan(ctx, w, args, out, progress)
+				return (fakeRunner{}).legacyScan(ctx, w, args, out, progress)
 			}}
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
@@ -258,7 +267,7 @@ func TestImmediateShutdownFailureRetriesAtFinalCleanup(t *testing.T) {
 	p.deleteFailures["w1"] = 1
 	releaseSlow := make(chan struct{})
 	failedShutdown := make(chan struct{}, 1)
-	r := fakeRunner{scan: func(ctx context.Context, w cloud.Worker, args []string, out io.Writer, progress func(remote.Progress)) error {
+	r := fakeRunner{scan: func(ctx context.Context, w cloud.Worker, args []string, out io.Writer, progress func(scan.Progress)) error {
 		if w.ID == "w2" {
 			select {
 			case <-releaseSlow:
@@ -266,7 +275,7 @@ func TestImmediateShutdownFailureRetriesAtFinalCleanup(t *testing.T) {
 				return ctx.Err()
 			}
 		}
-		return (fakeRunner{}).Scan(ctx, w, args, out, progress)
+		return (fakeRunner{}).legacyScan(ctx, w, args, out, progress)
 	}}
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
@@ -381,7 +390,7 @@ func testConfig() scan.Config {
 func testController(p *fakeProvider, r fakeRunner) *Controller {
 	timeouts := DefaultTimeouts()
 	timeouts.Poll = time.Millisecond
-	return &Controller{Provider: p, Runner: r, Timeouts: timeouts}
+	return &Controller{Backend: masscan.Backend{}, Provider: p, Runner: r, Timeouts: timeouts}
 }
 
 func TestLifecycleAndFailureCleanup(t *testing.T) {
@@ -471,25 +480,6 @@ func TestOutputAndDeletionFailure(t *testing.T) {
 	summary, err := testController(p, fakeRunner{}).Run(t.Context(), testConfig(), io.Discard, nil)
 	if err == nil || !slices.Equal(summary.Undeleted, []string{"w1", "w2"}) || !strings.Contains(err.Error(), "undeleted instance") {
 		t.Fatal(summary, err)
-	}
-}
-
-func TestResultBoundariesAndValidation(t *testing.T) {
-	var out bytes.Buffer
-	r := &results{out: &out, cfg: testConfig()}
-	w1 := &shardWriter{target: r, shard: 1}
-	w2 := &shardWriter{target: r, shard: 2}
-	w1.Write([]byte("open tcp 80 192.0.2."))
-	w2.Write([]byte("open tcp 80 192.0.2.2 1700000001\n"))
-	w1.Write([]byte("1 1700000000\n"))
-	if strings.Count(out.String(), "open tcp") != 2 || r.count != 2 {
-		t.Fatal(out.String())
-	}
-	for _, bad := range []string{"open tcp 80 198.51.100.1 1\n", "open tcp 65535 192.0.2.1 1\n", "malformed\n"} {
-		writer := &shardWriter{target: r, shard: 1}
-		if _, err := writer.Write([]byte(bad)); err == nil {
-			t.Error("accepted", bad)
-		}
 	}
 }
 

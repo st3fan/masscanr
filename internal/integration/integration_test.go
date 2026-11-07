@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/st3fan/masscanr/internal/backend/masscan"
 	"github.com/st3fan/masscanr/internal/cloud/vultr"
 	"github.com/st3fan/masscanr/internal/controller"
 	"github.com/st3fan/masscanr/internal/remote"
@@ -51,9 +52,11 @@ func TestHTTPSSHController(t *testing.T) {
 						fmt.Fprint(ch.Stderr(), "fixture APK failed")
 						return 2
 					}
-				case command == "apk --no-network info --installed -v masscan coreutils":
+				case command == "'apk' '--no-network' 'info' '--installed' '-v' 'masscan' 'coreutils'":
 					fmt.Fprint(ch, "masscan-1.3.2-r2\ncoreutils-9.11-r0\n")
-				case command == "stdbuf -oL masscan --version":
+				case command == "'sha256sum' '/usr/bin/masscan'":
+					fmt.Fprintln(ch, strings.Repeat("a", 64)+"  /usr/bin/masscan")
+				case command == "'stdbuf' '-oL' 'masscan' '--version'":
 					fmt.Fprintln(ch, "Masscan version 1.3.2 (fixture)")
 					return 1
 				default:
@@ -128,7 +131,7 @@ func TestHTTPSSHController(t *testing.T) {
 			provider.HTTP = api.Client()
 			runner := remote.NewSSH()
 			runner.Port = port
-			c := controller.Controller{Provider: provider, Runner: runner, Timeouts: controller.DefaultTimeouts()}
+			c := controller.Controller{Backend: masscan.Backend{}, Provider: provider, Runner: runner, Timeouts: controller.DefaultTimeouts()}
 			cfg := scan.Defaults()
 			cfg.Targets, _ = scan.ParseTargets([]string{"192.0.2.0/24"})
 			var output bytes.Buffer
@@ -253,7 +256,7 @@ func TestMasscanConfiguration(t *testing.T) {
 	cfg.Ports, _ = scan.ParsePorts("22,80,443,8000-8100")
 	cfg.Targets, _ = scan.ParseTargets([]string{"192.0.2.0/24"})
 	for shard := 1; shard <= cfg.Shards; shard++ {
-		args, _ := cfg.Args(shard, 42)
+		args, _ := masscan.Arguments(cfg.Intent(), scan.Shard{Index: shard, Total: cfg.Shards}, 42)
 		args = append(args, "--echo")
 		data, err := exec.CommandContext(t.Context(), binary, args...).CombinedOutput()
 		if err != nil {
@@ -294,7 +297,7 @@ func TestMasscanListOutput(t *testing.T) {
 	}
 	cfg := scan.Defaults()
 	cfg.Targets, _ = scan.ParseTargets([]string{"192.0.2.0/24"})
-	args, _ := cfg.Args(1, 42)
+	args, _ := masscan.Arguments(cfg.Intent(), scan.Shard{Index: 1, Total: cfg.Shards}, 42)
 	args = append(args, "--readscan", path)
 	var output, diagnostics bytes.Buffer
 	command := exec.CommandContext(t.Context(), program, args...)

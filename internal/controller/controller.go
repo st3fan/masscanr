@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/st3fan/masscanr/internal/backend"
 	"github.com/st3fan/masscanr/internal/cloud"
 	"github.com/st3fan/masscanr/internal/remote"
 	"github.com/st3fan/masscanr/internal/scan"
@@ -41,6 +42,7 @@ func DefaultTimeouts() Timeouts {
 }
 
 type Controller struct {
+	Backend  backend.Backend
 	Provider cloud.Provider
 	Runner   remote.Runner
 	Timeouts Timeouts
@@ -59,8 +61,11 @@ func (c *Controller) Run(ctx context.Context, cfg scan.Config, out io.Writer, em
 	if ctx.Err() != nil {
 		return summary, ctx.Err()
 	}
-	if c.Provider == nil || c.Runner == nil || out == nil {
-		return summary, fmt.Errorf("provider, runner and output are required")
+	if c.Backend == nil || c.Provider == nil || c.Runner == nil || out == nil {
+		return summary, fmt.Errorf("backend, provider, runner and output are required")
+	}
+	if err = c.Backend.Validate(cfg.Intent(), cfg.Shards); err != nil {
+		return summary, err
 	}
 	for _, d := range []time.Duration{c.Timeouts.Create, c.Timeouts.Ready, c.Timeouts.Prepare, c.Timeouts.Scan, c.Timeouts.Cleanup, c.Timeouts.Delete, c.Timeouts.Poll} {
 		if d <= 0 {
@@ -142,7 +147,7 @@ func (c *Controller) Run(ctx context.Context, cfg scan.Config, out io.Writer, em
 			return summary, fmt.Errorf("create shard %d: %w", shard, createErr)
 		}
 	}
-	// Prepare all workers before scanning, so incompatible masscan versions
+	// Prepare all workers before scanning, so incompatible backend builds
 	// cannot silently use different shard permutations.
 	if err = c.prepare(ctx, workers, summary.RunID, notify); err != nil {
 		return summary, err
@@ -159,11 +164,10 @@ func (c *Controller) Run(ctx context.Context, cfg scan.Config, out io.Writer, em
 			defer wg.Done()
 			w := item.worker
 			notify(Event{Shard: item.shard, ID: w.ID, IP: w.IP, State: "scanning"})
-			args, argErr := cfg.Args(item.shard, summary.Seed)
-			output := &shardWriter{target: result, shard: item.shard}
-			runErr := argErr
+			plan, planErr := c.Backend.Build(cfg.Intent(), scan.Shard{Index: item.shard, Total: cfg.Shards}, summary.Seed)
+			runErr := planErr
 			if runErr == nil {
-				runErr = c.Runner.Scan(scanCtx, w, args, output, func(p scan.Progress) {
+				runErr = c.Runner.Scan(scanCtx, w, plan, func(f scan.Finding) error { return result.accept(item.shard, f) }, func(p scan.Progress) {
 					state := "scanning"
 					if p.Waiting {
 						state = "waiting"
@@ -171,10 +175,11 @@ func (c *Controller) Run(ctx context.Context, cfg scan.Config, out io.Writer, em
 					notify(Event{Shard: item.shard, ID: w.ID, IP: w.IP, State: state, Progress: &p})
 				})
 			}
+
 			if runErr == nil {
 				notify(Event{Shard: item.shard, ID: w.ID, IP: w.IP, State: "collecting"})
 			}
-			runErr = errors.Join(runErr, output.finish(), scanCtx.Err())
+			runErr = errors.Join(runErr, scanCtx.Err())
 			if runErr != nil {
 				mu.Lock()
 				failure = errors.Join(failure, fmt.Errorf("shard %d: %w", item.shard, runErr))
@@ -204,7 +209,7 @@ func (c *Controller) prepare(ctx context.Context, workers []tracked, runID strin
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var failure error
-	versions := make([]string, len(workers))
+	versions := make([]scan.Identity, len(workers))
 	for index := range workers {
 		wg.Add(1)
 		go func() {
@@ -217,9 +222,9 @@ func (c *Controller) prepare(ctx context.Context, workers []tracked, runID strin
 				item.worker = w
 				notify(Event{Shard: item.shard, ID: w.ID, IP: w.IP, State: "preparing"})
 				prepCtx, stop := context.WithTimeout(ctx, c.Timeouts.Prepare)
-				var prepared remote.Prepared
-				prepared, err = c.Runner.Prepare(prepCtx, w)
-				versions[index] = prepared.Version
+				var prepared scan.Prepared
+				prepared, err = c.Runner.Prepare(prepCtx, w, c.Backend.Preparation())
+				versions[index] = prepared.Identity
 				stop()
 				if err == nil {
 					notify(Event{Shard: item.shard, ID: w.ID, IP: w.IP, State: "ready", Detail: prepared.String()})
@@ -239,8 +244,8 @@ func (c *Controller) prepare(ctx context.Context, workers []tracked, runID strin
 		return failure
 	}
 	for _, version := range versions {
-		if version == "" || version != versions[0] {
-			return fmt.Errorf("workers have different or unknown masscan versions")
+		if !version.Valid() || version.Name != c.Backend.Name() || version != versions[0] {
+			return fmt.Errorf("workers have different or unknown backend builds")
 		}
 	}
 	return ctx.Err()
