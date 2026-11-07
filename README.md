@@ -124,7 +124,8 @@ The Bubble Tea TUI runs on stderr and has two tabs:
 | Up / Down | Select a shard on Overview; scroll on Config |
 | Enter | Expand/collapse selected-shard details |
 | Page Up / Page Down | Scroll details when expanded, otherwise move through shards; scroll Config |
-| Ctrl-C | Stop scans and continue displaying cleanup until it finishes |
+| Ctrl-C | During a run, stop scans and wait for cleanup; after the run settles, quit |
+| q | Quit after the run settles; ignored while scanning or cleaning up |
 
 Native shards have approximately equal shares of scan work; overall progress
 uses equal weights and includes pending/failed shards in the denominator.
@@ -139,11 +140,16 @@ export and cleanup time.
 
 Reaching 100% still permits response waiting, result collection and VPS cleanup.
 Scan outcome and deletion outcome are retained separately, so deletion cannot
-hide a scan failure. The UI remains active through export and restores the
-terminal before printing a durable run summary. SIGTERM also cancels scans and
-starts cleanup. Narrow terminals use two lines per worker; long tables scroll
-with selection. Set `NO_COLOR=1` to disable color. State labels remain readable
-without color.
+hide a scan failure. The UI remains open after cleanup and export finish,
+including failed or cancelled runs. Inspect the final outcome, errors, shard
+details and Config, then press `q` or Ctrl-C to quit. The terminal is restored
+before printing a durable run summary. SIGTERM cancels active scans and starts
+cleanup; it can also dismiss the settled interface.
+
+The theme uses bright green on black, yellow for selection/waiting and bright
+red for failures. Progress bars use ASCII, for example `[========>...........]`.
+Narrow terminals use two lines per worker; long tables scroll with selection.
+Set `NO_COLOR=1` to disable color. State labels remain readable without color.
 
 `--no-tui` selects plain lifecycle logs. Redirecting stderr selects this mode
 automatically. Native results on stdout (`--output=-`) remain separate from the
@@ -290,7 +296,8 @@ fixtures through the controller.
 V2 UI checks use synthetic lifecycle events for aggregation, navigation, long
 CIDR/port lists, resizing, stale telemetry, cancellation and cleanup failures.
 A Linux pseudo-terminal test runs only the UI with fixture events and verifies
-raw-mode and alternate-screen restoration after Ctrl-C and cleanup. It skips
+the completed screen staying open until explicit quit, then raw-mode,
+alternate-screen and theme-color restoration. It skips
 when pseudo-terminals are unavailable. These checks do not run the app or scan
 any network.
 
