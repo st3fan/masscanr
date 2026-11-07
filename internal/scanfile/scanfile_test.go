@@ -16,7 +16,7 @@ func testHeader() Header {
 	return Header{Format: Format, Schema: Schema, RunID: "fixture", CreatedAt: time.Now().UTC(), ControllerVersion: "v6", Label: "masscanr", OwnershipTag: "masscanr-run-fixture", Config: Config{Targets: []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24")}, Ports: "80,443", Backend: "masscan", Seed: "18446744073709551615", Shards: 1, Rate: 500000, Provider: "vultr", Region: "atl", InstanceType: "vc2-1c-1gb", Output: "fixture.scan", Timeouts: map[string]string{"create": "1s", "ready": "1s", "prepare": "1s", "scan": "1s", "cleanup": "1s", "delete": "1s", "poll": "1s"}}}
 }
 
-func prepared(t *testing.T, w *Writer) {
+func prepared(t testing.TB, w *Writer) {
 	t.Helper()
 	for _, phase := range []string{"provisioning", "booting", "preparing"} {
 		id := "instance"
@@ -41,7 +41,7 @@ func sampleFinding() Finding {
 	return Finding{Shard: 1, IP: netip.MustParseAddr("192.0.2.1"), Port: 443, Protocol: "tcp", State: "open", Timestamp: math.MaxUint64}
 }
 
-func complete(t *testing.T, w *Writer) {
+func complete(t testing.TB, w *Writer) {
 	t.Helper()
 	for _, phase := range []string{"collecting", "completed"} {
 		if err := w.Worker(1, "instance", "", phase, "", ""); err != nil {
