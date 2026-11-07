@@ -4,38 +4,43 @@ package tui
 import (
 	"fmt"
 	"io"
-	"sort"
 	"strings"
 	"sync"
 	"time"
 	"unicode"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/st3fan/masscanr/internal/controller"
-	"github.com/st3fan/masscanr/internal/remote"
-	"golang.org/x/term"
+	"github.com/st3fan/masscanr/internal/scan"
 )
 
-type row struct {
-	Shard                          int
-	ID, IP, State, Cleanup, Detail string
-	CleanupDetail                  string
-	Progress                       remote.Progress
-}
-
+// View is the bridge between controller callbacks and the interactive model.
+// Callbacks only update in-memory state; terminal I/O happens on a separate loop.
+// Configure, Start, and Stop are called by the CLI in that order.
 type View struct {
-	mu         sync.Mutex
+	mu sync.Mutex
+	state
 	out        io.Writer
 	terminal   bool
-	rows       map[string]row
+	cancel     func()
 	stop, done chan struct{}
+	stopOnce   sync.Once
+	err        error
 }
 
 func New(out io.Writer, terminal bool, shards int) *View {
-	v := &View{out: out, terminal: terminal, rows: make(map[string]row), stop: make(chan struct{}), done: make(chan struct{})}
-	for i := 1; i <= shards; i++ {
-		v.rows[fmt.Sprint(i)] = row{Shard: i, State: "pending"}
-	}
-	return v
+	return &View{out: out, terminal: terminal, state: newState(RunConfig{Scan: scan.Config{Shards: shards}}), stop: make(chan struct{}), done: make(chan struct{})}
+}
+
+func (v *View) Configure(cfg RunConfig, cancel func()) {
+	v.Config = NewRunConfig(cfg.Scan, controller.Timeouts{Scan: cfg.ScanTimeout, Cleanup: cfg.CleanupTimeout}, cfg.Output, cfg.Exports)
+	v.cancel = cancel
+}
+
+func (v *View) snapshot() state {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.state.copy()
 }
 
 func (v *View) Start() {
@@ -43,159 +48,49 @@ func (v *View) Start() {
 		close(v.done)
 		return
 	}
-	fmt.Fprint(v.out, "\x1b[?25l")
+	m := newModel(v.snapshot(), v.snapshot, v.stop, v.cancel)
+	p := tea.NewProgram(m, tea.WithOutput(v.out), tea.WithoutSignalHandler())
 	go func() {
 		defer close(v.done)
-		ticker := time.NewTicker(200 * time.Millisecond)
-		defer ticker.Stop()
-		lines := 0
-		redraw := func() {
-			v.mu.Lock()
-			if lines > 0 {
-				fmt.Fprintf(v.out, "\x1b[%dA", lines)
-			}
-			text := v.render()
-			fmt.Fprint(v.out, "\r\x1b[J")
-			for _, line := range strings.Split(strings.TrimSuffix(text, "\n"), "\n") {
-				fmt.Fprint(v.out, "\r\x1b[2K", line, "\n")
-			}
-			lines = strings.Count(text, "\n")
-			v.mu.Unlock()
-		}
-		redraw()
-		for {
-			select {
-			case <-v.stop:
-				redraw()
-				return
-			case <-ticker.C:
-				redraw()
-			}
+		_, err := p.Run()
+		v.mu.Lock()
+		v.err = err
+		v.mu.Unlock()
+		if err != nil && v.cancel != nil {
+			v.cancel() // UI failure must still follow the controller's cleanup path.
 		}
 	}()
 }
 
-func (v *View) Stop() {
-	if v.terminal {
-		close(v.stop)
-		<-v.done
-		v.mu.Lock()
-		defer v.mu.Unlock()
-		// The final state is emitted by the CLI summary. Always restore cursor.
-		fmt.Fprint(v.out, "\x1b[?25h")
-	}
+// Stop waits for terminal restoration before the CLI writes its final summary.
+func (v *View) Stop() error {
+	v.stopOnce.Do(func() { close(v.stop) })
+	<-v.done
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.err
 }
 
 func (v *View) Update(e controller.Event) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
+	if !v.state.apply(e, time.Now()) || v.terminal {
+		return
+	}
 	key := fmt.Sprint(e.Shard)
 	if e.Shard == 0 {
-		key = e.ID
+		key = "instance:" + e.ID
 	}
 	r := v.rows[key]
-	r.Shard = e.Shard
-	if e.ID != "" {
-		r.ID = e.ID
+	fmt.Fprintf(v.out, "shard %d %-14s id=%s ip=%s", e.Shard, clean(e.State), r.ID, r.IP)
+	if e.Detail != "" {
+		fmt.Fprintf(v.out, " %s", clean(e.Detail))
 	}
-	if e.IP != "" {
-		r.IP = e.IP
-	}
-	cleanup := e.State == "deleting" || e.State == "shutdown" || e.State == "cleanup failed"
-	changed := false
-	if cleanup {
-		changed = r.Cleanup != e.State
-		r.Cleanup = e.State
-		if e.State == "shutdown" {
-			r.CleanupDetail = ""
-		} else if e.Detail != "" {
-			r.CleanupDetail = clean(e.Detail)
-		}
-	} else {
-		changed = r.State != e.State
-		r.State = e.State
-		if e.Detail != "" {
-			r.Detail = clean(e.Detail)
-		}
-	}
-	if e.Progress != nil {
-		r.Progress = *e.Progress
-	}
-	v.rows[key] = r
-	if !v.terminal && changed {
-		fmt.Fprintf(v.out, "shard %d %-14s id=%s ip=%s", e.Shard, e.State, clean(r.ID), clean(r.IP))
-		if e.Detail != "" {
-			fmt.Fprintf(v.out, " %s", clean(e.Detail))
-		}
-		fmt.Fprintln(v.out)
-	}
-}
-
-func (v *View) render() string {
-	var b strings.Builder
-	width := 80
-	if f, ok := v.out.(interface{ Fd() uintptr }); ok {
-		if columns, _, err := term.GetSize(int(f.Fd())); err == nil {
-			width = columns
-		}
-	}
-	compact := width < 130
-	fmt.Fprintln(&b, "masscanr  |  distributed IPv4 scan  |  Ctrl-C stops scans and deletes workers")
-	if compact {
-		fmt.Fprintln(&b, "SHARD  INSTANCE       ADDRESS          STATE")
-	} else {
-		fmt.Fprintln(&b, "SHARD  INSTANCE       ADDRESS          STATE                      PROGRESS           RATE       ETA       FOUND")
-	}
-	rows := make([]row, 0, len(v.rows))
-	for _, r := range v.rows {
-		rows = append(rows, r)
-	}
-	sort.Slice(rows, func(i, j int) bool {
-		if rows[i].Shard != rows[j].Shard {
-			return rows[i].Shard < rows[j].Shard
-		}
-		return rows[i].ID < rows[j].ID
-	})
-	for _, r := range rows {
-		state := r.State
-		if r.Cleanup == "shutdown" && r.State != "failed" {
-			state = "shutdown"
-		} else if r.Cleanup != "" {
-			state += " / " + r.Cleanup
-		}
-		filled := min(10, max(0, int(r.Progress.Percent/10)))
-		bar := strings.Repeat("=", filled) + strings.Repeat(".", 10-filled)
-		id := clean(r.ID)
-		if len(id) > 12 {
-			id = id[:12]
-		}
-		fmt.Fprintf(&b, "%5d  %-12s   %-15s  %-25s", r.Shard, id, clean(r.IP), state)
-		if compact {
-			fmt.Fprint(&b, "\n       ")
-		}
-		fmt.Fprintf(&b, "  [%s] %5.1f%%  %7.1fk pps  ETA %-8s  found %d\n", bar, r.Progress.Percent, r.Progress.Rate/1000, r.Progress.ETA.Round(time.Second), r.Progress.Found)
-		if r.Detail != "" {
-			fmt.Fprintf(&b, "       %s\n", r.Detail)
-		}
-		if r.CleanupDetail != "" {
-			fmt.Fprintf(&b, "       %s\n", r.CleanupDetail)
-		}
-	}
-	// Prevent line wrapping from invalidating cursor positioning on narrow
-	// terminals. Wider views use one row; normal terminals use two.
-	var clipped strings.Builder
-	for _, line := range strings.Split(strings.TrimSuffix(b.String(), "\n"), "\n") {
-		runes := []rune(line)
-		if len(runes) > width && width > 0 {
-			runes = runes[:width]
-		}
-		clipped.WriteString(string(runes))
-		clipped.WriteByte('\n')
-	}
-	return clipped.String()
+	fmt.Fprintln(v.out)
 }
 
 // Remote diagnostics must not inject terminal escape sequences or new rows.
+// Keep all printable text so a long diagnostic remains inspectable by scrolling.
 func clean(s string) string {
 	var b strings.Builder
 	for _, r := range s {
@@ -203,9 +98,6 @@ func clean(s string) string {
 			b.WriteRune(r)
 		} else {
 			b.WriteByte(' ')
-		}
-		if b.Len() >= 200 {
-			break
 		}
 	}
 	return b.String()

@@ -21,8 +21,8 @@ func TestRedirectedLogsAndFinalState(t *testing.T) {
 	if strings.Contains(out.String(), "\x1b") || strings.Count(out.String(), "scanning") != 1 {
 		t.Fatal(out.String())
 	}
-	if text := v.render(); !strings.Contains(text, "failed / shutdown") || !strings.Contains(text, "90.0%") {
-		t.Fatal(text)
+	if r := v.rows["1"]; r.State != "failed" || r.Cleanup != "shutdown" || r.Progress.Percent != 90 {
+		t.Fatal(r)
 	}
 }
 
@@ -37,9 +37,8 @@ func TestCompletedWorkerShowsShutdownWhilePeerScans(t *testing.T) {
 	v.Update(controller.Event{Shard: 1, State: "shutdown"})
 	v.Update(controller.Event{Shard: 1, State: "shutdown"})
 	v.Update(controller.Event{Shard: 2, State: "scanning", Progress: &remote.Progress{Percent: 25, Found: 3}})
-	text := v.render()
-	if !strings.Contains(text, "shutdown") || strings.Contains(text, "completed") || !strings.Contains(text, "scanning") {
-		t.Fatal(text)
+	if v.rows["1"].Cleanup != "shutdown" || v.rows["2"].State != "scanning" {
+		t.Fatal(v.rows)
 	}
 	if v.rows["1"].Progress.Percent != 100 || v.rows["1"].Progress.Found != 12 || v.rows["2"].Progress.Percent != 25 {
 		t.Fatal(v.rows)
@@ -54,16 +53,15 @@ func TestShutdownClearsResolvedCleanupErrorAndKeepsScanFailure(t *testing.T) {
 	v := New(&out, false, 1)
 	v.Update(controller.Event{Shard: 1, State: "failed", Detail: "scan error"})
 	v.Update(controller.Event{Shard: 1, State: "cleanup failed", Detail: "temporary deletion error"})
-	if text := v.render(); !strings.Contains(text, "scan error") || !strings.Contains(text, "temporary deletion error") {
-		t.Fatal(text)
+	if r := v.rows["1"]; r.Detail != "scan error" || r.CleanupDetail != "temporary deletion error" {
+		t.Fatal(r)
 	}
 	v.Update(controller.Event{Shard: 1, State: "deleting"})
-	if !strings.Contains(v.render(), "temporary deletion error") {
+	if v.rows["1"].CleanupDetail != "temporary deletion error" {
 		t.Fatal("cleared unconfirmed cleanup failure")
 	}
 	v.Update(controller.Event{Shard: 1, State: "shutdown"})
-	text := v.render()
-	if !strings.Contains(text, "failed / shutdown") || !strings.Contains(text, "scan error") || strings.Contains(text, "temporary deletion error") {
-		t.Fatal(text)
+	if r := v.rows["1"]; r.State != "failed" || r.Cleanup != "shutdown" || r.Detail != "scan error" || r.CleanupDetail != "" {
+		t.Fatal(r)
 	}
 }
