@@ -66,9 +66,6 @@ func (c *Controller) Run(ctx context.Context, cfg scan.Config, out io.Writer, em
 	if err = cfg.Validate(); err != nil {
 		return summary, err
 	}
-	if ctx.Err() != nil {
-		return summary, ctx.Err()
-	}
 	if c.Backend == nil || c.Provider == nil || c.Runner == nil || out == nil {
 		return summary, fmt.Errorf("backend, provider, runner and output are required")
 	}
@@ -146,6 +143,9 @@ func (c *Controller) Run(ctx context.Context, cfg scan.Config, out io.Writer, em
 		}
 		err = errors.Join(err, journal.Finish(summary.ScanOutcome, summary.ReconciliationUnresolved, detail))
 	}()
+	if err = ctx.Err(); err != nil {
+		return summary, err
+	}
 	spec := cloud.Spec{RunID: summary.RunID, Region: cfg.Region, InstanceType: cfg.InstanceType}
 	validateCtx, stop := context.WithTimeout(ctx, c.Timeouts.Ready)
 	err = c.Provider.Validate(validateCtx, spec)

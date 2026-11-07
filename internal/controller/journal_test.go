@@ -19,6 +19,18 @@ type syncOutput struct {
 	syncs, failAt int
 }
 
+func TestImmediateCancellationStillProducesAValidDocument(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	p := newProvider()
+	var out bytes.Buffer
+	_, err := testController(p, fakeRunner{}).Run(ctx, testConfig(), &out, nil)
+	s, replayErr := scanfile.Replay(&out, nil)
+	if !errors.Is(err, context.Canceled) || replayErr != nil || s.Finished == nil || s.Finished.ScanOutcome != "cancelled" || p.created != 0 {
+		t.Fatal(err, replayErr, p.created)
+	}
+}
+
 func (s *syncOutput) Sync() error {
 	s.syncs++
 	if s.syncs == s.failAt {
