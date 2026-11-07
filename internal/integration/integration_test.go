@@ -37,8 +37,14 @@ func TestHTTPSSHController(t *testing.T) {
 				switch {
 				case command == "id -u":
 					fmt.Fprintln(ch, "0")
-				case strings.Contains(command, "apt-get"):
-				case command == "masscan --version":
+				case command == "cat /etc/alpine-release":
+					fmt.Fprintln(ch, "3.24.4")
+				case command == "cat /etc/apk/repositories":
+					fmt.Fprint(ch, "https://dl-cdn.alpinelinux.org/alpine/v3.24/main\nhttps://dl-cdn.alpinelinux.org/alpine/v3.24/community\n")
+				case strings.HasPrefix(command, "exec 'apk'"):
+				case command == "apk --no-network info --installed -v masscan coreutils":
+					fmt.Fprint(ch, "masscan-1.3.2-r2\ncoreutils-9.11-r0\n")
+				case command == "stdbuf -oL masscan --version":
 					fmt.Fprintln(ch, "Masscan version 1.3.2 (fixture)")
 					return 1
 				default:

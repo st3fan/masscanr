@@ -120,14 +120,14 @@ type fakeRunner struct {
 	scan                                   func(context.Context, cloud.Worker, []string, io.Writer, func(remote.Progress)) error
 }
 
-func (r fakeRunner) Prepare(ctx context.Context, w cloud.Worker) (string, error) {
+func (r fakeRunner) Prepare(ctx context.Context, w cloud.Worker) (remote.Prepared, error) {
 	if r.prepareFail {
-		return "", errors.New("prepare error")
+		return remote.Prepared{}, errors.New("prepare error")
 	}
 	if r.versionMismatch && w.ID == "w2" {
-		return "other", nil
+		return remote.Prepared{Version: "other"}, nil
 	}
-	return "1.3.2", nil
+	return remote.Prepared{Version: "1.3.2", Release: "3.24.4"}, nil
 }
 func (r fakeRunner) Scan(ctx context.Context, w cloud.Worker, args []string, out io.Writer, progress func(remote.Progress)) error {
 	if r.scan != nil {

@@ -13,13 +13,30 @@ import (
 	"sync"
 	"time"
 
+	"github.com/st3fan/masscanr/internal/alpine"
 	"github.com/st3fan/masscanr/internal/cloud"
 	"golang.org/x/crypto/ssh"
 )
 
 type Runner interface {
-	Prepare(context.Context, cloud.Worker) (string, error)
+	Prepare(context.Context, cloud.Worker) (Prepared, error)
 	Scan(context.Context, cloud.Worker, []string, io.Writer, func(Progress)) error
+}
+
+// Prepared records the observed platform and scanner identity without secrets.
+type Prepared struct {
+	Version, Release, Packages string
+}
+
+func (p Prepared) String() string {
+	parts := []string{"masscan " + p.Version}
+	if p.Release != "" {
+		parts = append([]string{"Alpine " + p.Release}, parts...)
+	}
+	if p.Packages != "" {
+		parts = append(parts, p.Packages)
+	}
+	return strings.Join(parts, "; ")
 }
 
 type SSH struct {
@@ -93,14 +110,15 @@ func (s *SSH) command(ctx context.Context, w cloud.Worker, command string, out, 
 
 var versionPattern = regexp.MustCompile(`Masscan version ([^\s]+)`)
 
-func (s *SSH) Prepare(ctx context.Context, w cloud.Worker) (string, error) {
+func (s *SSH) Prepare(ctx context.Context, w cloud.Worker) (Prepared, error) {
+	var prepared Prepared
 	// A provisioned VM may still be booting or generating its host key.
 	for {
 		var uid limitedBuffer
 		err := s.command(ctx, w, "id -u", &uid, io.Discard)
 		if err == nil {
 			if strings.TrimSpace(uid.String()) != "0" {
-				return "", fmt.Errorf("worker login is not root")
+				return prepared, fmt.Errorf("worker login is not root")
 			}
 			break
 		}
@@ -108,30 +126,105 @@ func (s *SSH) Prepare(ctx context.Context, w cloud.Worker) (string, error) {
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return "", fmt.Errorf("SSH readiness: %w", ctx.Err())
+			return prepared, fmt.Errorf("SSH readiness: %w", ctx.Err())
 		case <-timer.C:
 		}
 	}
-	var out, diagnostics limitedBuffer
-	const bootstrap = "export DEBIAN_FRONTEND=noninteractive; apt-get -o DPkg::Lock::Timeout=120 update >&2 && apt-get -o DPkg::Lock::Timeout=120 install -y --no-install-recommends masscan >&2"
-	if err := s.command(ctx, w, bootstrap, &out, &diagnostics); err != nil {
-		return "", fmt.Errorf("masscan installation failed: %w (%s)", err, strings.TrimSpace(diagnostics.String()))
+	release, err := s.readText(ctx, w, "cat /etc/alpine-release")
+	if err != nil {
+		return prepared, fmt.Errorf("read Alpine release: %w", err)
 	}
-	out = limitedBuffer{}
+	if prepared.Release, err = alpine.Release(release); err != nil {
+		return prepared, err
+	}
+	repositories, err := s.readText(ctx, w, "cat /etc/apk/repositories")
+	if err != nil {
+		return prepared, fmt.Errorf("read APK repositories: %w", err)
+	}
+	repositories, err = alpine.Repositories(repositories)
+	if err != nil {
+		return prepared, err
+	}
+	// Explicit sources exclude ambient repository snippets. The image's files
+	// stay untouched, and APK retains its normal package-signature verification.
+	args := []string{"apk", "--repositories-file", "/dev/null", "--no-cache"}
+	for _, repository := range strings.Fields(repositories) {
+		args = append(args, "--repository", repository)
+	}
+	args = append(args, "add", "masscan~1.3.2", "coreutils")
+	var diagnostics limitedBuffer
+	if err := s.command(ctx, w, "exec "+QuoteArgs(args)+" >&2", io.Discard, &diagnostics); err != nil {
+		return prepared, fmt.Errorf("Alpine %s package installation failed: %w (%s)", prepared.Release, err, strings.TrimSpace(diagnostics.String()))
+	}
+	var out limitedBuffer
 	diagnostics = limitedBuffer{}
-	err := s.command(ctx, w, "masscan --version", &out, &diagnostics)
+	err = s.command(ctx, w, "stdbuf -oL masscan --version", &out, &diagnostics)
 	var exit *ssh.ExitError
-	// Debian masscan 1.3.2 deliberately exits 1 after printing its version.
+	// Packaged masscan 1.3.2 exits 1 after printing its version on Alpine too.
 	// Accept only that known status and still require recognized version text;
 	// installation failures and other version-command failures remain errors.
 	if err != nil && !(errors.As(err, &exit) && exit.ExitStatus() == 1) {
-		return "", fmt.Errorf("masscan version command failed: %w", err)
+		return prepared, fmt.Errorf("masscan version command failed: %w (%s)", err, strings.TrimSpace(diagnostics.String()))
 	}
 	m := versionPattern.FindStringSubmatch(out.String())
 	if m == nil {
-		return "", fmt.Errorf("masscan version not recognized")
+		return prepared, fmt.Errorf("masscan version not recognized")
 	}
-	return m[1], nil
+	if m[1] != "1.3.2" {
+		return prepared, fmt.Errorf("unsupported masscan version %q on Alpine %s; require 1.3.2", m[1], prepared.Release)
+	}
+	prepared.Version = m[1]
+	packages, err := s.readText(ctx, w, "apk --no-network info --installed -v masscan coreutils")
+	if err != nil {
+		return prepared, fmt.Errorf("read installed Alpine packages: %w", err)
+	}
+	var masscanPackage, coreutilsPackage string
+	fields := strings.Fields(packages)
+	for _, field := range fields {
+		if strings.HasPrefix(field, "masscan-1.3.2-r") {
+			masscanPackage = field
+		}
+		if strings.HasPrefix(field, "coreutils-") {
+			coreutilsPackage = field
+		}
+	}
+	if len(fields) != 2 || masscanPackage == "" || coreutilsPackage == "" {
+		return prepared, fmt.Errorf("installed masscan/coreutils package identities were not recognized")
+	}
+	prepared.Packages = masscanPackage + ", " + coreutilsPackage
+	return prepared, nil
+}
+
+// Preparation policy must inspect complete input, never a truncated diagnostic
+// tail that could hide an earlier edge/mixed-release repository entry.
+func (s *SSH) readText(ctx context.Context, w cloud.Worker, command string) (string, error) {
+	var out textBuffer
+	var diagnostics limitedBuffer
+	if err := s.command(ctx, w, command, &out, &diagnostics); err != nil {
+		return "", err
+	}
+	if out.overflow {
+		return "", fmt.Errorf("worker configuration exceeds 64 KiB")
+	}
+	return out.String(), nil
+}
+
+type textBuffer struct {
+	buffer   bytes.Buffer
+	overflow bool
+}
+
+func (b *textBuffer) String() string { return b.buffer.String() }
+
+func (b *textBuffer) Write(p []byte) (int, error) {
+	n := len(p)
+	remaining := max(0, (64<<10)-b.buffer.Len())
+	if n > remaining {
+		b.overflow = true
+		p = p[:remaining]
+	}
+	b.buffer.Write(p)
+	return n, nil // Drain the complete SSH stream with bounded memory.
 }
 
 // QuoteArgs prevents shell interpretation even if future flags accept text.
@@ -166,8 +259,8 @@ func (s *SSH) Scan(ctx context.Context, w cloud.Worker, args []string, out io.Wr
 		}
 		parsed <- err
 	}()
-	// Debian's coreutils stdbuf makes list output arrive line by line over
-	// SSH instead of waiting for libc's redirected-stdout buffer to fill.
+	// GNU coreutils stdbuf is tested on Alpine/musl: findings must arrive before
+	// scanner exit rather than waiting for redirected-stdout buffers to flush.
 	err := s.command(ctx, w, "exec stdbuf -oL masscan "+QuoteArgs(args), output, writer)
 	writer.Close()
 	parseErr := <-parsed
