@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/st3fan/masscanr/internal/backend"
 	"github.com/st3fan/masscanr/internal/controller"
 	"github.com/st3fan/masscanr/internal/scan"
 	"github.com/st3fan/masscanr/internal/tui"
@@ -75,7 +76,7 @@ func TestUIConfigAndExportLifecycle(t *testing.T) {
 		}
 		return nil
 	}
-	build := func(string, controller.Timeouts) runFunc {
+	build := func(string, controller.Timeouts, backend.Backend) runFunc {
 		return func(_ context.Context, cfg scan.Config, out io.Writer, emit func(controller.Event)) (controller.Summary, error) {
 			if v.config.Scan.Targets[0].String() != "192.0.2.0/24" || len(v.config.Scan.Targets) != 1 || v.config.Output != path || v.config.Scan.PortSpec() != "22,443" || v.config.Exports != exportPaths(path) {
 				t.Fatal(v.config)
@@ -107,7 +108,7 @@ func TestUICancellationPreservesResultsAndReportsUndeleted(t *testing.T) {
 		}
 	}
 	v.stop = func() error { return errors.New("fixture UI error") }
-	build := func(string, controller.Timeouts) runFunc {
+	build := func(string, controller.Timeouts, backend.Backend) runFunc {
 		return func(ctx context.Context, _ scan.Config, out io.Writer, emit func(controller.Event)) (controller.Summary, error) {
 			if !errors.Is(ctx.Err(), context.Canceled) {
 				t.Fatal("UI cancellation did not reach controller")
@@ -136,7 +137,7 @@ func TestNoTUIAndRedirectedStderrRemainPlain(t *testing.T) {
 		if flag != "" {
 			args = append(args, flag)
 		}
-		build := func(string, controller.Timeouts) runFunc {
+		build := func(string, controller.Timeouts, backend.Backend) runFunc {
 			return func(_ context.Context, _ scan.Config, out io.Writer, emit func(controller.Event)) (controller.Summary, error) {
 				emit(controller.Event{Shard: 1, State: "scanning"})
 				_, err := io.WriteString(out, exportFixture)

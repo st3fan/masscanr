@@ -117,6 +117,7 @@ func (p *fakeProvider) Delete(ctx context.Context, w cloud.Worker, run string) e
 
 type fakeRunner struct {
 	prepareFail, scanFail, versionMismatch bool
+	buildMismatch, backendMismatch         bool
 	block                                  bool
 	scan                                   func(context.Context, cloud.Worker, []string, io.Writer, func(scan.Progress)) error
 }
@@ -128,7 +129,14 @@ func (r fakeRunner) Prepare(ctx context.Context, w cloud.Worker, _ backend.Prepa
 	if r.versionMismatch && w.ID == "w2" {
 		return scan.Prepared{Identity: scan.Identity{Name: "masscan", Version: "other", Build: "fixture"}}, nil
 	}
-	return scan.Prepared{Identity: scan.Identity{Name: "masscan", Version: "1.3.2", Build: "fixture"}, Release: "3.24.4"}, nil
+	identity := scan.Identity{Name: "masscan", Version: "1.3.2", Build: "fixture"}
+	if r.buildMismatch && w.ID == "w2" {
+		identity.Build = "different"
+	}
+	if r.backendMismatch && w.ID == "w2" {
+		identity.Name = "zmap"
+	}
+	return scan.Prepared{Identity: identity, Release: "3.24.4"}, nil
 }
 func (r fakeRunner) Scan(ctx context.Context, w cloud.Worker, plan backend.Plan, sink func(scan.Finding) error, progress func(scan.Progress)) error {
 	reader, writer := io.Pipe()
@@ -155,7 +163,7 @@ func (r fakeRunner) legacyScan(ctx context.Context, w cloud.Worker, args []strin
 	if _, err := fmt.Fprint(out, "1700000000\n# end\n"); err != nil {
 		return err
 	}
-	progress(scan.Progress{Percent: 100, Waiting: true, Found: 1})
+	progress(scan.Progress{Percent: 100, Waiting: true, Found: 9999})
 	if r.scanFail {
 		return errors.New("scan error")
 	}
@@ -402,6 +410,8 @@ func TestLifecycleAndFailureCleanup(t *testing.T) {
 		{"success", func(*fakeProvider, *fakeRunner) {}, false},
 		{"prepare", func(_ *fakeProvider, r *fakeRunner) { r.prepareFail = true }, true},
 		{"versions", func(_ *fakeProvider, r *fakeRunner) { r.versionMismatch = true }, true},
+		{"builds", func(_ *fakeProvider, r *fakeRunner) { r.buildMismatch = true }, true},
+		{"backends", func(_ *fakeProvider, r *fakeRunner) { r.backendMismatch = true }, true},
 		{"scan", func(_ *fakeProvider, r *fakeRunner) { r.scanFail = true }, true},
 		{"partial-create", func(p *fakeProvider, _ *fakeRunner) { p.createFail = 2 }, true},
 		{"ambiguous-create", func(p *fakeProvider, _ *fakeRunner) { p.createFail = 2; p.ambiguous = true }, true},
@@ -418,6 +428,13 @@ func TestLifecycleAndFailureCleanup(t *testing.T) {
 			}
 			if len(p.workers) != 1 || p.workers["existing"].IP != "144.202.29.87" || p.deleted != p.created {
 				t.Fatal("left workers or touched existing VM", p.created, p.deleted)
+			}
+			if tc.name == "versions" || tc.name == "builds" || tc.name == "backends" {
+				for _, event := range events {
+					if event.State == "scanning" {
+						t.Fatal("scanner started before identity agreement")
+					}
+				}
 			}
 			if len(events) == 0 || len(summary.Undeleted) > 0 {
 				t.Fatal(summary)
@@ -526,5 +543,18 @@ func TestFailureStatePreservesErrorsJoinedWithCancellation(t *testing.T) {
 		if got := failureState(tc.err); got != tc.want {
 			t.Fatalf("%v: %s", tc.err, got)
 		}
+	}
+}
+
+func TestAcceptedFindingCountsOverrideNativePackets(t *testing.T) {
+	summary, err := testController(newProvider(), fakeRunner{}).Run(t.Context(), testConfig(), io.Discard, func(e Event) {
+		// Separate native streams can race: telemetry may arrive before the
+		// result decoder accepts its first finding. Zero is honest then.
+		if e.Progress != nil && e.Progress.Found > 1 {
+			t.Fatal("native packet count reached progress", e.Progress.Found)
+		}
+	})
+	if err != nil || summary.Found != 2 {
+		t.Fatal(summary, err)
 	}
 }

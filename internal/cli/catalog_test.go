@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/st3fan/masscanr/internal/backend"
 	"github.com/st3fan/masscanr/internal/cloud"
 	"github.com/st3fan/masscanr/internal/controller"
 )
@@ -24,7 +25,7 @@ func (c fakeCatalog) InstanceTypes(ctx context.Context, region string) ([]cloud.
 
 func noScanner(t *testing.T) factory {
 	t.Helper()
-	return func(string, controller.Timeouts) runFunc {
+	return func(string, controller.Timeouts, backend.Backend) runFunc {
 		t.Fatal("catalog command constructed a scanner")
 		return nil
 	}

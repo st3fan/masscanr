@@ -30,3 +30,14 @@ func TestIntentHasNoPlacement(t *testing.T) {
 		t.Fatal("accepted zero-based common shard")
 	}
 }
+
+func TestSeedWithinBackendLimits(t *testing.T) {
+	for _, max := range []uint64{0, 1, 9223372036854775807, 18446744073709551615} {
+		for range 16 {
+			seed, err := NewSeedWithin(max)
+			if err != nil || seed > max {
+				t.Fatal(seed, max, err)
+			}
+		}
+	}
+}

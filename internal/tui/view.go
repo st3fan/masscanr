@@ -80,6 +80,9 @@ func (v *View) Finish(ctx context.Context, summary controller.Summary, runErr er
 	}
 	v.mu.Lock()
 	v.Final, v.Phase = final, final.Status
+	if summary.Identity.Name != "" {
+		v.Identity = summary.Identity
+	}
 	if summary.RunID != "" {
 		v.RunID = clean(summary.RunID)
 	}

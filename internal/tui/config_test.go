@@ -68,3 +68,20 @@ func TestConfigFullIPv4AndLongValues(t *testing.T) {
 		t.Fatal("default ports not identified")
 	}
 }
+
+func TestBackendIdentityAndUnknownRendering(t *testing.T) {
+	m := fixtureModel(1)
+	m.state.Config.Scan.Backend = "zmap"
+	m.state.Identity = scan.Identity{Name: "zmap", Version: "4.3.4", Build: "zmap-4.3.4-r0 sha256:fixture"}
+	m.state.apply(controller.Event{Shard: 1, State: "scanning", Progress: &scan.Progress{PercentUnknown: true, ETAUnknown: true, RateUnknown: true}}, m.now)
+	text := strings.Join(m.lines(), "\n")
+	if !strings.Contains(text, "zmap 4.3.4") || !strings.Contains(text, "unknown") || strings.Contains(text, "0.0%") {
+		t.Fatal(text)
+	}
+	all := strings.Join(m.configLines(), "\n")
+	for _, want := range []string{"Backend               zmap", "Scanner version       4.3.4", "zmap-4.3.4-r0"} {
+		if !strings.Contains(all, want) {
+			t.Fatal(all)
+		}
+	}
+}

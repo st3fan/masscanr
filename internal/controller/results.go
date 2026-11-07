@@ -8,10 +8,11 @@ import (
 )
 
 type results struct {
-	mu    sync.Mutex
-	out   io.Writer
-	cfg   scan.Config
-	count uint64
+	mu     sync.Mutex
+	out    io.Writer
+	cfg    scan.Config
+	count  uint64
+	counts map[int]uint64
 }
 
 func (r *results) line(line string) error {
@@ -26,4 +27,10 @@ func writeString(w io.Writer, s string) error {
 		err = io.ErrShortWrite
 	}
 	return err
+}
+
+func (r *results) countFor(shard int) uint64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.counts[shard]
 }

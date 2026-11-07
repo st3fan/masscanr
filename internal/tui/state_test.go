@@ -74,3 +74,28 @@ func TestConfigSnapshotOwnsSlices(t *testing.T) {
 		t.Fatal("snapshot aliases caller's configuration")
 	}
 }
+
+func TestBackendUnknownProgressAndAcceptedCounts(t *testing.T) {
+	cfg := scan.Defaults()
+	cfg.Backend = "zmap"
+	cfg.Shards = 1
+	s := newState(NewRunConfig(cfg, controller.DefaultTimeouts(), "-", [2]string{}))
+	now := time.Now()
+	s.apply(controller.Event{Shard: 1, State: "scanning"}, now)
+	count := uint64(2)
+	s.apply(controller.Event{Shard: 1, State: "finding", Found: &count}, now)
+	p := scan.Progress{PercentUnknown: true, Rate: 100, ETA: 3 * time.Second}
+	s.apply(controller.Event{Shard: 1, State: "scanning", Progress: &p}, now)
+	total := s.totals(now)
+	if !total.PercentUnknown || total.Found != 2 || total.Rate != 100 || s.rows["1"].State != "scanning" {
+		t.Fatal(total, s.rows["1"])
+	}
+	s.apply(controller.Event{Shard: 1, State: "waiting", Progress: &scan.Progress{Percent: 100, Waiting: true, ETA: 2 * time.Second}}, now)
+	if total := s.totals(now); total.PercentUnknown || total.Percent != 100 || total.Complete != 0 || total.Found != 2 {
+		t.Fatal(total)
+	}
+	s.apply(controller.Event{Shard: 1, State: "completed"}, now)
+	if total := s.totals(now); total.Complete != 1 || total.Percent != 100 {
+		t.Fatal(total)
+	}
+}
