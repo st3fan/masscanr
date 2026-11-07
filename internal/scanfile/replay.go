@@ -103,7 +103,7 @@ func (s *State) Apply(r Record) error {
 	switch {
 	case r.Type == "backend" && r.Backend != nil:
 		b := *r.Backend
-		if !validShard(b.Shard) || b.Name != s.Header.Config.Backend || b.Version == "" || b.Build == "" {
+		if !validShard(b.Shard) || (b.Name != "masscan" && b.Name != "zmap") || b.Version == "" || b.Build == "" {
 			return fmt.Errorf("invalid backend identity")
 		}
 		if _, ok := s.Backends[b.Shard]; ok {
@@ -152,7 +152,7 @@ func (s *State) Apply(r Record) error {
 				if i == 1 {
 					identity = b
 				}
-				if b.Name != identity.Name || b.Version != identity.Version || b.Build != identity.Build {
+				if b.Name != s.Header.Config.Backend || b.Name != identity.Name || b.Version != identity.Version || b.Build != identity.Build {
 					return fmt.Errorf("incompatible worker builds")
 				}
 			}
