@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/st3fan/masscanr/internal/alpine"
 	"github.com/st3fan/masscanr/internal/cloud"
 )
 
@@ -59,9 +60,11 @@ func owned(w cloud.Worker, tag string) bool {
 	return w.Label == cloud.Label && slices.Contains(w.Tags, tag)
 }
 
-// Validate selects one explicit Debian release and verifies regional plan
-// availability before any instance is created. It is called once per run.
+// Validate selects an unambiguous Alpine x64 image and verifies regional plan
+// availability before creation. The runner verifies the installed release,
+// because Vultr's generic Alpine catalog entry omits its patch version.
 func (c *Client) Validate(ctx context.Context, spec cloud.Spec) error {
+	c.osID = 0
 	if strings.TrimSpace(c.key) == "" {
 		return fmt.Errorf("VULTR_API_KEY is required")
 	}
@@ -92,24 +95,52 @@ func (c *Client) Validate(ctx context.Context, spec cloud.Spec) error {
 	if plans[selected].DiskGB < 1 {
 		return fmt.Errorf("instance type %s has no local boot disk; block-storage boot is not supported", spec.InstanceType)
 	}
-	var systems struct {
-		OS []struct {
-			ID     int    `json:"id"`
-			Name   string `json:"name"`
-			Arch   string `json:"arch"`
-			Family string `json:"family"`
-		} `json:"os"`
-	}
-	if err := c.request(ctx, "GET", "/os?per_page=500", nil, &systems); err != nil {
-		return err
-	}
-	for _, os := range systems.OS {
-		if os.Family == "debian" && os.Arch == "x64" && strings.HasPrefix(os.Name, "Debian 13 ") {
-			c.osID = os.ID
-			return nil
+	c.osID, err = c.alpineImage(ctx)
+	return err
+}
+
+func (c *Client) alpineImage(ctx context.Context) (int, error) {
+	path := "/os?per_page=500"
+	candidates := make(map[int]bool)
+	for pages := 0; pages < 1000; pages++ {
+		var systems struct {
+			OS []struct {
+				ID     int    `json:"id"`
+				Arch   string `json:"arch"`
+				Family string `json:"family"`
+			} `json:"os"`
+			Meta pageMeta `json:"meta"`
 		}
+		if err := c.request(ctx, "GET", path, nil, &systems); err != nil {
+			return 0, err
+		}
+		for _, image := range systems.OS {
+			if image.Family == alpine.Family && image.Arch == alpine.Architecture {
+				if image.ID <= 0 {
+					return 0, fmt.Errorf("Vultr returned an invalid Alpine Linux x64 image ID")
+				}
+				candidates[image.ID] = true
+			}
+		}
+		next, err := nextPage(path, systems.Meta.Links.Next)
+		if err != nil {
+			return 0, err
+		}
+		if next == "" {
+			switch len(candidates) {
+			case 0:
+				return 0, fmt.Errorf("Alpine Linux x64 image is unavailable")
+			case 1:
+				for id := range candidates {
+					return id, nil
+				}
+			default:
+				return 0, fmt.Errorf("Vultr returned multiple Alpine Linux x64 images; refusing ambiguous image selection")
+			}
+		}
+		path = next
 	}
-	return fmt.Errorf("Debian 13 x64 image is unavailable")
+	return 0, fmt.Errorf("Vultr OS pagination limit exceeded")
 }
 
 func (c *Client) Create(ctx context.Context, spec cloud.Spec) (cloud.Worker, error) {
