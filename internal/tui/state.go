@@ -53,7 +53,14 @@ type state struct {
 	Seed      uint64
 	SeedKnown bool
 	Phase     string
+	Final     *completion
 	rows      map[string]shardState
+}
+
+// completion is immutable once published; render snapshots may safely share it.
+type completion struct {
+	Status, Detail string
+	Found          uint64
 }
 
 func newState(cfg RunConfig) state {
@@ -173,6 +180,9 @@ func (s state) totals(now time.Time) totals {
 		} else {
 			t.ETAKnown = false
 		}
+	}
+	if s.Final != nil {
+		t.Rate, t.Found, t.ETAKnown, t.Stale = 0, s.Final.Found, false, false
 	}
 	return t
 }
