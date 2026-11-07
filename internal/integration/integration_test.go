@@ -211,10 +211,10 @@ func localSSH(t *testing.T, handle func(string, ssh.Channel) uint32) string {
 	return port
 }
 
-func TestDebianMasscanConfiguration(t *testing.T) {
+func TestMasscanConfiguration(t *testing.T) {
 	binary := os.Getenv("MASSCAN_TEST_BINARY")
 	if binary == "" {
-		t.Skip("set MASSCAN_TEST_BINARY to validate against Debian masscan --echo")
+		t.Skip("set MASSCAN_TEST_BINARY to validate against native masscan --echo")
 	}
 	cfg := scan.Defaults()
 	cfg.Shards = 3
@@ -235,7 +235,7 @@ func TestDebianMasscanConfiguration(t *testing.T) {
 	}
 }
 
-func TestDebianMasscanListOutput(t *testing.T) {
+func TestMasscanListOutput(t *testing.T) {
 	program := os.Getenv("MASSCAN_TEST_BINARY")
 	if program == "" {
 		t.Skip("set MASSCAN_TEST_BINARY for a non-network native result round trip")
