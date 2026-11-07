@@ -18,6 +18,14 @@ type redactor struct {
 	external func(string) string
 }
 
+type sanitizedError struct {
+	cause   error
+	message string
+}
+
+func (e sanitizedError) Error() string { return e.message }
+func (e sanitizedError) Unwrap() error { return e.cause }
+
 func (r *redactor) remember(secret string) {
 	if secret != "" {
 		r.mu.Lock()
@@ -109,6 +117,7 @@ func journalEvents(w *scanfile.Writer, r *redactor, emit func(Event)) func(Event
 				}
 			}
 		}
+		e.Detail = r.clean(e.Detail)
 		if emit != nil {
 			emit(e)
 		}

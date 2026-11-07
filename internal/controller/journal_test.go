@@ -64,10 +64,14 @@ func TestJournalRedactsWorkerPasswordAndPreservesUnknownTelemetry(t *testing.T) 
 		progress(scan.Progress{PercentUnknown: true, RateUnknown: true, ETAUnknown: true})
 		return errors.New("failure containing " + w.Password)
 	}}
-	_, err := testController(newProvider(), r).Run(t.Context(), testConfig(), &out, nil)
+	_, err := testController(newProvider(), r).Run(t.Context(), testConfig(), &out, func(e Event) {
+		if strings.Contains(e.Detail, "secret") {
+			t.Error("password leaked through lifecycle event")
+		}
+	})
 	data := out.String()
 	s, replayErr := scanfile.Replay(strings.NewReader(data), nil)
-	if err == nil || replayErr != nil || s.Finished == nil || strings.Contains(data, "secret") || !strings.Contains(data, "[REDACTED]") {
+	if err == nil || strings.Contains(err.Error(), "secret") || replayErr != nil || s.Finished == nil || strings.Contains(data, "secret") || !strings.Contains(data, "[REDACTED]") {
 		t.Fatal(err, replayErr, data)
 	}
 	for _, p := range s.Progress {

@@ -99,7 +99,12 @@ func (c *Controller) Run(ctx context.Context, cfg scan.Config, out io.Writer, em
 	if journalErr != nil {
 		return summary, journalErr
 	}
-	defer func() { err = errors.Join(err, journal.Close()) }()
+	defer func() {
+		err = errors.Join(err, journal.Close())
+		if err != nil {
+			err = sanitizedError{cause: err, message: redact.clean(err.Error())}
+		}
+	}()
 	notify := journalEvents(journal, redact, emit)
 	plans := make([]backend.Plan, cfg.Shards)
 	for i := range plans {
@@ -206,7 +211,7 @@ func (c *Controller) Run(ctx context.Context, cfg scan.Config, out io.Writer, em
 			w := item.worker
 			notify(Event{Shard: item.shard, ID: w.ID, IP: w.IP, State: "scanning"})
 			plan := plans[item.shard-1]
-			var runErr error
+			runErr := journal.Err()
 			if runErr == nil {
 				runErr = c.Runner.Scan(scanCtx, w, plan, func(f scan.Finding) error {
 					if err := result.accept(item.shard, f); err != nil {
