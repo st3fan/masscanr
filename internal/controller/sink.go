@@ -33,9 +33,13 @@ func (r *results) accept(shard int, f scan.Finding) error {
 	if !inScope {
 		return fmt.Errorf("out-of-scope result from shard %d", shard)
 	}
+	target, prefix, matched := r.attribution.Lookup(f.Address)
+	if !matched {
+		return fmt.Errorf("finding has no requested target from shard %d", shard)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if err := r.journal.Append(scanfile.Record{Type: "finding", Finding: &scanfile.Finding{Shard: shard, IP: f.Address, Port: f.Port, Protocol: f.Protocol, State: f.State, Timestamp: f.Timestamp}}, false); err != nil {
+	if err := r.journal.Append(scanfile.Record{Type: "finding", Finding: &scanfile.Finding{Shard: shard, IP: f.Address, Port: f.Port, Protocol: f.Protocol, State: f.State, Timestamp: f.Timestamp, Target: target, Prefix: prefix}}, false); err != nil {
 		return err
 	}
 

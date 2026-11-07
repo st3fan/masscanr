@@ -36,7 +36,7 @@ func TestFindingSink(t *testing.T) {
 		}
 	}
 	notify(Event{Shard: 1, State: "scanning"})
-	r := &results{cfg: cfg, journal: journal}
+	r := newResults(journal, cfg)
 	for i := 0; i < 2; i++ {
 		if err := r.accept(1, valid); err != nil {
 			t.Fatal(err)

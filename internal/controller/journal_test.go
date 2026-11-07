@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/netip"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/st3fan/masscanr/internal/cloud"
 	"github.com/st3fan/masscanr/internal/scan"
@@ -89,6 +91,41 @@ func TestJournalRedactsWorkerPasswordAndPreservesUnknownTelemetry(t *testing.T) 
 	for _, p := range s.Progress {
 		if p.Percent != nil || p.Rate != nil || p.ETASeconds != nil {
 			t.Fatal("unknown telemetry became zero", p)
+		}
+	}
+}
+
+func TestControllerAssignsFrozenTargetProvenance(t *testing.T) {
+	for _, directFirst := range []bool{false, true} {
+		cfg := testConfig()
+		args := []string{"AS1234", "192.0.2.0/24"}
+		if directFirst {
+			args[0], args[1] = args[1], args[0]
+		}
+		cfg.RequestedTargets, _ = scan.ParseRequestedTargets(args)
+		for i := range cfg.RequestedTargets {
+			if cfg.RequestedTargets[i].IsAS() {
+				cfg.RequestedTargets[i].Prefixes = []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24"), netip.MustParsePrefix("192.0.2.0/25")}
+				cfg.RequestedTargets[i].Resolution = &scan.Resolution{Source: scan.RIPEEndpoint, FetchedAt: time.Unix(100, 0), SnapshotAt: time.Unix(90, 0)}
+			}
+		}
+		p := newProvider()
+		p.onCreate = func() { cfg.RequestedTargets[0].Target = "changed" }
+		var out bytes.Buffer
+		summary, err := testController(p, fakeRunner{}).Run(t.Context(), cfg, &out, nil)
+		var findings []scanfile.Finding
+		_, replayErr := scanfile.Replay(&out, func(f scanfile.Finding) error { findings = append(findings, f); return nil })
+		if err != nil || replayErr != nil || summary.Found != 2 || len(findings) != 2 {
+			t.Fatal(summary, err, replayErr, findings)
+		}
+		for _, f := range findings {
+			wantTarget, wantPrefix := "AS1234", "192.0.2.0/25"
+			if directFirst {
+				wantTarget, wantPrefix = "192.0.2.0/24", ""
+			}
+			if f.Target != wantTarget || f.Prefix != wantPrefix {
+				t.Fatal(f)
+			}
 		}
 	}
 }

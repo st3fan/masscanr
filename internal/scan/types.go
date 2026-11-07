@@ -23,15 +23,13 @@ func (s Spec) Validate() error {
 	if len(s.Targets) == 0 {
 		return fmt.Errorf("provide at least one IPv4 CIDR")
 	}
-	for i, p := range s.Targets {
+	for _, p := range s.Targets {
 		if !p.IsValid() || !p.Addr().Is4() || p != p.Masked() {
 			return fmt.Errorf("targets must be normalized IPv4 CIDRs")
 		}
-		for _, prior := range s.Targets[:i] {
-			if prior.Contains(p.Addr()) || p.Contains(prior.Addr()) {
-				return fmt.Errorf("targets must not overlap")
-			}
-		}
+	}
+	if len(PrefixUnion(s.Targets)) != len(s.Targets) {
+		return fmt.Errorf("targets must not overlap")
 	}
 	if len(s.Ports) == 0 {
 		return fmt.Errorf("provide at least one TCP port")

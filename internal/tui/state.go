@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"slices"
 	"sort"
 	"time"
 
@@ -23,8 +22,7 @@ func NewRunConfig(cfg scan.Config, timeouts controller.Timeouts, output string, 
 	if cfg.Backend == "" {
 		cfg.Backend = "masscan"
 	}
-	cfg.Targets = slices.Clone(cfg.Targets)
-	cfg.Ports = slices.Clone(cfg.Ports)
+	cfg = cfg.Clone()
 	return RunConfig{Scan: cfg, ScanTimeout: timeouts.Scan, CleanupTimeout: timeouts.Cleanup, Output: output, Exports: exports}
 }
 

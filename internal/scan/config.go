@@ -104,6 +104,11 @@ func (c Config) Validate() error {
 			return err
 		}
 	}
+	return c.ValidateOptions()
+}
+
+// ValidateOptions checks local settings before any target resolution.
+func (c Config) ValidateOptions() error {
 	if len(c.Ports) == 0 {
 		return fmt.Errorf("provide at least one TCP port")
 	}

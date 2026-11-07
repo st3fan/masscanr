@@ -61,8 +61,10 @@ type tracked struct {
 }
 
 func (c *Controller) Run(ctx context.Context, cfg scan.Config, out io.Writer, emit func(Event)) (summary Summary, err error) {
-	cfg.Targets = slices.Clone(cfg.Targets)
-	cfg.Ports = slices.Clone(cfg.Ports)
+	cfg = cfg.Clone()
+	if len(cfg.RequestedTargets) == 0 {
+		cfg.RequestedTargets = scan.DirectTargets(cfg.Targets)
+	}
 	if err = cfg.Validate(); err != nil {
 		return summary, err
 	}
@@ -111,7 +113,7 @@ func (c *Controller) Run(ctx context.Context, cfg scan.Config, out io.Writer, em
 		}
 	}
 	notify(Event{State: "validating", RunID: summary.RunID, Seed: &summary.Seed, Identity: &summary.Identity})
-	result := &results{journal: journal, cfg: cfg}
+	result := newResults(journal, cfg)
 	var workers []tracked
 	attempted, ambiguous := false, false
 	defer func() {
