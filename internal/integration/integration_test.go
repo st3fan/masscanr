@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -21,6 +22,8 @@ import (
 	"time"
 
 	"github.com/st3fan/masscanr/internal/backend/masscan"
+	"github.com/st3fan/masscanr/internal/backend/registry"
+	"github.com/st3fan/masscanr/internal/backend/zmap"
 	"github.com/st3fan/masscanr/internal/cloud/vultr"
 	"github.com/st3fan/masscanr/internal/controller"
 	"github.com/st3fan/masscanr/internal/remote"
@@ -31,146 +34,213 @@ import (
 // Exercise HTTP provisioning -> root/password SSH -> both streams -> merged
 // output -> confirmed deletion with actual protocol clients and no cloud VMs.
 func TestHTTPSSHController(t *testing.T) {
-	for _, phase := range []string{"", "scan", "release", "install"} {
-		failScan := phase != ""
-		t.Run(fmt.Sprintf("failure=%s", phase), func(t *testing.T) {
-			var seeds sync.Map
-			port := localSSH(t, func(command string, ch ssh.Channel) uint32 {
-				switch {
-				case command == "id -u":
-					fmt.Fprintln(ch, "0")
-				case command == "cat /etc/alpine-release":
-					if phase == "release" {
-						fmt.Fprintln(ch, "3.25.4")
-					} else {
-						fmt.Fprintln(ch, "3.24.4")
-					}
-				case command == "cat /etc/apk/repositories":
-					fmt.Fprint(ch, "https://dl-cdn.alpinelinux.org/alpine/v3.24/main\nhttps://dl-cdn.alpinelinux.org/alpine/v3.24/community\n")
-				case strings.HasPrefix(command, "exec 'apk'"):
-					if phase == "install" {
-						fmt.Fprint(ch.Stderr(), "fixture APK failed")
-						return 2
-					}
-				case command == "'apk' '--no-network' 'info' '--installed' '-v' 'masscan' 'coreutils'":
-					fmt.Fprint(ch, "masscan-1.3.2-r2\ncoreutils-9.11-r0\n")
-				case command == "'sha256sum' '/usr/bin/masscan'":
-					fmt.Fprintln(ch, strings.Repeat("a", 64)+"  /usr/bin/masscan")
-				case command == "'stdbuf' '-oL' 'masscan' '--version'":
-					fmt.Fprintln(ch, "Masscan version 1.3.2 (fixture)")
-					return 1
-				default:
-					shard := regexp.MustCompile(`'--shards' '([12])/2'`).FindStringSubmatch(command)
-					seed := regexp.MustCompile(`'--seed' '(\d+)'`).FindStringSubmatch(command)
-					if len(shard) != 2 || len(seed) != 2 {
-						t.Error(command)
-						return 2
-					}
-					seeds.Store(shard[1], seed[1])
-					fmt.Fprintf(ch, "#masscan\nopen tcp 80 192.0.2.%s 1700000000\n# end\n", shard[1])
-					fmt.Fprint(ch.Stderr(), "rate:500.00-kpps, 100.00% done, waiting 0-secs, found=1\r")
-					if phase == "scan" && shard[1] == "2" {
-						return 3
-					}
-				}
-				return 0
-			})
-			var mu sync.Mutex
-			instances := map[string]map[string]any{"existing": {"id": "existing", "main_ip": "144.202.29.87", "label": "production"}}
-			created, deleted := 0, 0
-			api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				mu.Lock()
-				defer mu.Unlock()
-				switch {
-				case strings.HasPrefix(r.URL.Path, "/regions/"):
-					fmt.Fprint(w, `{"available_plans":["vc2-1c-1gb"]}`)
-				case r.URL.Path == "/os":
-					fmt.Fprint(w, `{"os":[{"id":999,"name":"Alpine Linux x64","arch":"x64","family":"alpinelinux"}]}`)
-				case r.URL.Path == "/plans":
-					fmt.Fprint(w, `{"plans":[{"id":"vc2-1c-1gb","type":"vc2","disk":25}]}`)
-				case r.URL.Path == "/instances" && r.Method == "POST":
-					var input map[string]any
-					json.NewDecoder(r.Body).Decode(&input)
-					created++
-					id := fmt.Sprintf("worker-%d", created)
-					instance := map[string]any{"id": id, "main_ip": "127.0.0.1", "default_password": "fixture-password", "label": input["label"], "tags": input["tags"], "status": "active", "power_status": "running", "server_status": "ok"}
-					instances[id] = instance
-					json.NewEncoder(w).Encode(map[string]any{"instance": instance})
-				case r.URL.Path == "/instances":
-					var owned []map[string]any
-					for id, instance := range instances {
-						if id != "existing" {
-							owned = append(owned, instance)
+	for _, name := range []string{"masscan", "zmap"} {
+		for _, phase := range []string{"", "scan", "release", "install", "result", "cancel", "status"} {
+			if phase == "status" && name == "masscan" {
+				continue
+			}
+			failScan := phase != ""
+			t.Run(fmt.Sprintf("%s/failure=%s", name, phase), func(t *testing.T) {
+				var seeds sync.Map
+				var uploaded sync.Map
+				port := localSSH(t, func(command string, ch ssh.Channel) uint32 {
+					switch {
+					case command == "id -u":
+						fmt.Fprintln(ch, "0")
+					case command == "cat /etc/alpine-release":
+						if phase == "release" {
+							fmt.Fprintln(ch, "3.25.4")
+						} else {
+							fmt.Fprintln(ch, "3.24.4")
+						}
+					case command == "cat /etc/apk/repositories":
+						fmt.Fprint(ch, "https://dl-cdn.alpinelinux.org/alpine/v3.24/main\nhttps://dl-cdn.alpinelinux.org/alpine/v3.24/community\n")
+					case strings.HasPrefix(command, "exec 'apk'"):
+						if name == "zmap" && (!strings.Contains(command, "'zmap=4.3.4-r0'") || strings.Contains(command, "masscan") || strings.Contains(command, "coreutils")) {
+							t.Error("incorrect ZMap packages", command)
+						}
+						if phase == "install" {
+							fmt.Fprint(ch.Stderr(), "fixture APK failed")
+							return 2
+						}
+					case command == "'apk' '--no-network' 'info' '--installed' '-v' 'masscan' 'coreutils'":
+						fmt.Fprint(ch, "masscan-1.3.2-r2\ncoreutils-9.11-r0\n")
+					case command == "'apk' '--no-network' 'info' '--installed' '-v' 'zmap'":
+						fmt.Fprintln(ch, "zmap-4.3.4-r0")
+					case command == "'sha256sum' '/usr/sbin/zmap'":
+						fmt.Fprintln(ch, zmap.BinarySHA256+"  /usr/sbin/zmap")
+					case command == "'zmap' '--config' '/dev/null' '--disable-syslog' '--version'":
+						fmt.Fprintln(ch, "zmap v4.3.4")
+					case strings.Contains(command, "'--list-output-fields'"):
+						fmt.Fprint(ch, "saddr string: address\nsport int: port\ntimestamp_ts int: epoch\nsuccess bool: success\nclassification string: result\nrepeat bool: duplicate\n")
+					case command == "mktemp -d /tmp/masscanr.XXXXXXXXXX":
+						fmt.Fprintln(ch, "/tmp/masscanr.0123456789")
+					case strings.HasPrefix(command, "umask 077; cat > "):
+						data, _ := io.ReadAll(ch)
+						uploaded.Store("scope", string(data))
+					case strings.HasPrefix(command, "'rm' '-f'"):
+						// Only the fixture's private scope file is selected by remote cleanup.
+						if !strings.Contains(command, "'/tmp/masscanr.0123456789/targets.txt'") {
+							t.Error(command)
+						}
+					case command == "'sha256sum' '/usr/bin/masscan'":
+						fmt.Fprintln(ch, strings.Repeat("a", 64)+"  /usr/bin/masscan")
+					case command == "'stdbuf' '-oL' 'masscan' '--version'":
+						fmt.Fprintln(ch, "Masscan version 1.3.2 (fixture)")
+						return 1
+					default:
+						shard := regexp.MustCompile(`'--shards' '([12])/2'`).FindStringSubmatch(command)
+						if name == "zmap" {
+							shard = regexp.MustCompile(`'--shard' '([01])'`).FindStringSubmatch(command)
+							if len(shard) == 2 {
+								if shard[1] == "0" {
+									shard[1] = "1"
+								} else {
+									shard[1] = "2"
+								}
+							}
+							scope, _ := uploaded.Load("scope")
+							if scope != "192.0.2.0/24\n" {
+								t.Error("missing exact scope", scope)
+							}
+						}
+						seed := regexp.MustCompile(`'--seed' '(\d+)'`).FindStringSubmatch(command)
+						if len(shard) != 2 || len(seed) != 2 {
+							t.Error(command)
+							return 2
+						}
+						seeds.Store(shard[1], seed[1])
+						address := "192.0.2." + shard[1]
+						if phase == "result" {
+							address = "198.51.100.1"
+						}
+						if name == "masscan" {
+							fmt.Fprintf(ch, "#masscan\nopen tcp 80 %s 1700000000\n# end\n", address)
+							fmt.Fprint(ch.Stderr(), "rate:500.00-kpps, 100.00% done, waiting 0-secs, found=999\r")
+						} else {
+							fmt.Fprintf(ch, "%s\n%s,80,1700000000,1,synack,0\n%s,443,1700000001,1,synack,0\n", zmap.Fields, address, address)
+							fmt.Fprintln(ch.Stderr(), zmap.StatusHeader)
+							if phase == "status" {
+								fmt.Fprintln(ch.Stderr(), "2026-11-07 03:00:00,malformed")
+							} else {
+								fmt.Fprintln(ch.Stderr(), "2026-11-07 03:00:00,1,3,25.000000,0.000000,0,100,0,100,999,999,999,999,999,999,0,0,0,0,,0,0")
+							}
+						}
+						if phase == "scan" && shard[1] == "2" {
+							return 3
 						}
 					}
-					json.NewEncoder(w).Encode(map[string]any{"instances": owned})
-				case strings.HasPrefix(r.URL.Path, "/instances/"):
-					id := strings.TrimPrefix(r.URL.Path, "/instances/")
-					instance, ok := instances[id]
-					if !ok {
+					return 0
+				})
+				var mu sync.Mutex
+				instances := map[string]map[string]any{"existing": {"id": "existing", "main_ip": "144.202.29.87", "label": "production"}}
+				created, deleted := 0, 0
+				api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					mu.Lock()
+					defer mu.Unlock()
+					switch {
+					case strings.HasPrefix(r.URL.Path, "/regions/"):
+						fmt.Fprint(w, `{"available_plans":["vc2-1c-1gb"]}`)
+					case r.URL.Path == "/os":
+						fmt.Fprint(w, `{"os":[{"id":999,"name":"Alpine Linux x64","arch":"x64","family":"alpinelinux"}]}`)
+					case r.URL.Path == "/plans":
+						fmt.Fprint(w, `{"plans":[{"id":"vc2-1c-1gb","type":"vc2","disk":25}]}`)
+					case r.URL.Path == "/instances" && r.Method == "POST":
+						var input map[string]any
+						json.NewDecoder(r.Body).Decode(&input)
+						created++
+						id := fmt.Sprintf("worker-%d", created)
+						instance := map[string]any{"id": id, "main_ip": "127.0.0.1", "default_password": "fixture-password", "label": input["label"], "tags": input["tags"], "status": "active", "power_status": "running", "server_status": "ok"}
+						instances[id] = instance
+						json.NewEncoder(w).Encode(map[string]any{"instance": instance})
+					case r.URL.Path == "/instances":
+						var owned []map[string]any
+						for id, instance := range instances {
+							if id != "existing" {
+								owned = append(owned, instance)
+							}
+						}
+						json.NewEncoder(w).Encode(map[string]any{"instances": owned})
+					case strings.HasPrefix(r.URL.Path, "/instances/"):
+						id := strings.TrimPrefix(r.URL.Path, "/instances/")
+						instance, ok := instances[id]
+						if !ok {
+							http.NotFound(w, r)
+							return
+						}
+						if r.Method == "DELETE" {
+							if id == "existing" {
+								t.Error("attempted unrelated deletion")
+							}
+							delete(instances, id)
+							deleted++
+							w.WriteHeader(204)
+							return
+						}
+						json.NewEncoder(w).Encode(map[string]any{"instance": instance})
+					default:
 						http.NotFound(w, r)
-						return
 					}
-					if r.Method == "DELETE" {
-						if id == "existing" {
-							t.Error("attempted unrelated deletion")
+				}))
+				defer api.Close()
+				provider := vultr.New("fixture-key")
+				provider.BaseURL = api.URL
+				provider.HTTP = api.Client()
+				runner := remote.NewSSH()
+				runner.Port = port
+				engine, _ := registry.Resolve(name)
+				c := controller.Controller{Backend: engine, Provider: provider, Runner: runner, Timeouts: controller.DefaultTimeouts()}
+				cfg := scan.Defaults()
+				cfg.Backend = name
+				cfg.Targets, _ = scan.ParseTargets([]string{"192.0.2.0/24"})
+				var output bytes.Buffer
+				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+				defer cancel()
+				ready := 0
+				summary, err := c.Run(ctx, cfg, &output, func(event controller.Event) {
+					if phase == "cancel" && event.State == "finding" {
+						cancel()
+					}
+					if event.State == "ready" {
+						ready++
+						if !strings.Contains(event.Detail, "Alpine 3.24.4") || !(strings.Contains(event.Detail, "masscan-1.3.2-r2") || strings.Contains(event.Detail, "zmap-4.3.4-r0")) {
+							t.Error("missing observed preparation identity", event.Detail)
 						}
-						delete(instances, id)
-						deleted++
-						w.WriteHeader(204)
-						return
 					}
-					json.NewEncoder(w).Encode(map[string]any{"instance": instance})
-				default:
-					http.NotFound(w, r)
-				}
-			}))
-			defer api.Close()
-			provider := vultr.New("fixture-key")
-			provider.BaseURL = api.URL
-			provider.HTTP = api.Client()
-			runner := remote.NewSSH()
-			runner.Port = port
-			c := controller.Controller{Backend: masscan.Backend{}, Provider: provider, Runner: runner, Timeouts: controller.DefaultTimeouts()}
-			cfg := scan.Defaults()
-			cfg.Targets, _ = scan.ParseTargets([]string{"192.0.2.0/24"})
-			var output bytes.Buffer
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-			defer cancel()
-			ready := 0
-			summary, err := c.Run(ctx, cfg, &output, func(event controller.Event) {
-				if event.State == "ready" {
-					ready++
-					if !strings.Contains(event.Detail, "Alpine 3.24.4") || !strings.Contains(event.Detail, "masscan-1.3.2-r2") {
-						t.Error("missing observed preparation identity", event.Detail)
+					if event.State == "scanning" && ready != 2 {
+						t.Error("scanner started before all workers were prepared")
 					}
+				})
+				if (err != nil) != failScan {
+					t.Fatal(err)
 				}
-				if event.State == "scanning" && ready != 2 {
-					t.Error("scanner started before all workers were prepared")
+				if phase == "release" && (!strings.Contains(err.Error(), "unsupported Alpine release") || ready != 0) {
+					t.Fatal("unsupported release proceeded", ready, err)
+				}
+				if phase == "install" && (!strings.Contains(err.Error(), "fixture APK failed") || ready != 0) {
+					t.Fatal("APK failure was lost", ready, err)
+				}
+				if len(instances) != 1 || instances["existing"] == nil || created != 2 || deleted != 2 {
+					t.Fatal("lifecycle invariant failed", created, deleted)
+				}
+				if !failScan {
+					a, _ := seeds.Load("1")
+					b, _ := seeds.Load("2")
+					expected := uint64(2)
+					if name == "zmap" {
+						expected = 4
+					}
+					if !strings.Contains(output.String(), "backend="+name) || summary.Identity.Name != name {
+						t.Error("backend identity missing", summary, output.String())
+					}
+					if a == nil || a != b || summary.Found != expected || !strings.Contains(output.String(), "# status complete") {
+						t.Fatal(output.String(), summary)
+					}
+				} else if !strings.Contains(output.String(), "# status incomplete") {
+					t.Fatal(output.String())
 				}
 			})
-			if (err != nil) != failScan {
-				t.Fatal(err)
-			}
-			if phase == "release" && (!strings.Contains(err.Error(), "unsupported Alpine release") || ready != 0) {
-				t.Fatal("unsupported release proceeded", ready, err)
-			}
-			if phase == "install" && (!strings.Contains(err.Error(), "fixture APK failed") || ready != 0) {
-				t.Fatal("APK failure was lost", ready, err)
-			}
-			if len(instances) != 1 || instances["existing"] == nil || created != 2 || deleted != 2 {
-				t.Fatal("lifecycle invariant failed", created, deleted)
-			}
-			if !failScan {
-				a, _ := seeds.Load("1")
-				b, _ := seeds.Load("2")
-				if a == nil || a != b || summary.Found != 2 || !strings.Contains(output.String(), "# status complete") {
-					t.Fatal(output.String(), summary)
-				}
-			} else if !strings.Contains(output.String(), "# status incomplete") {
-				t.Fatal(output.String())
-			}
-		})
+		}
 	}
 }
 

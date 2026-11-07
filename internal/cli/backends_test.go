@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -66,6 +67,41 @@ func TestBackendPreflightBeforeOutputOrCredentials(t *testing.T) {
 		}
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatal("output created before preflight", err)
+		}
+	}
+}
+
+func TestBothBackendsStdoutAndPlainOutput(t *testing.T) {
+	for _, name := range []string{"masscan", "zmap"} {
+		for _, noTUI := range []bool{false, true} {
+			t.Run(name+"/plain="+strconv.FormatBool(noTUI), func(t *testing.T) {
+				t.Chdir(t.TempDir())
+				t.Setenv("VULTR_API_KEY", "fixture")
+				args := []string{"192.0.2.0/24", "--backend", name, "--output=-", "--slug=backend"}
+				if noTUI {
+					args = append(args, "--no-tui")
+				}
+				build := func(_ string, _ controller.Timeouts, engine backend.Backend) runFunc {
+					return func(_ context.Context, _ scan.Config, out io.Writer, emit func(controller.Event)) (controller.Summary, error) {
+						emit(controller.Event{Shard: 1, State: "scanning"})
+						_, err := io.WriteString(out, "# backend="+engine.Name()+"\n"+exportFixture)
+						return controller.Summary{Identity: scan.Identity{Name: engine.Name()}}, err
+					}
+				}
+				var out, errout bytes.Buffer
+				if err := executeScan(t.Context(), args, &out, &errout, build); err != nil {
+					t.Fatal(err)
+				}
+				if strings.Contains(out.String(), "scanning") || strings.Contains(out.String(), "synack") || !strings.Contains(out.String(), "open tcp") || strings.Contains(errout.String(), "\x1b") || !strings.Contains(errout.String(), "Backend: "+name) {
+					t.Fatal(out.String(), errout.String())
+				}
+				for _, ext := range []string{"csv", "jsonl"} {
+					files, _ := filepath.Glob("*." + ext)
+					if len(files) != 1 {
+						t.Fatal(files)
+					}
+				}
+			})
 		}
 	}
 }

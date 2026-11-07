@@ -86,3 +86,29 @@ func TestZMapPrivateScopeAndStreams(t *testing.T) {
 		})
 	}
 }
+
+func TestZMapFindingArrivesBeforeRemoteExit(t *testing.T) {
+	received := make(chan struct{})
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	runner, w := sshFixture(t, func(_ string, ch ssh.Channel) uint32 {
+		fmt.Fprintln(ch, zmap.Fields)
+		fmt.Fprintln(ch, "192.0.2.1,443,1700000000,1,synack,0")
+		select {
+		case <-received:
+			return 0
+		case <-ctx.Done():
+			return 1
+		}
+	})
+	cfg := scan.Defaults()
+	cfg.Targets, _ = scan.ParseTargets([]string{"192.0.2.0/24"})
+	plan, _ := (zmap.Backend{}).Build(cfg.Intent(), scan.Shard{Index: 1, Total: 1}, 42)
+	// This fixture tests the result stream alone; private-file transport has its
+	// own success/failure coverage above.
+	plan.Files = nil
+	err := runner.Scan(ctx, w, plan, func(scan.Finding) error { close(received); return nil }, nil)
+	if err != nil {
+		t.Fatal("finding waited for remote exit", err)
+	}
+}

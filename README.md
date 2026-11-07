@@ -1,21 +1,21 @@
 # masscanr
 
-Run masscan shards on temporary Vultr VPS workers, stream discoveries back to a
+Run masscan or ZMap shards on temporary Vultr VPS workers, stream discoveries back to a
 local list file with CSV/JSONL exports, and watch each worker in a terminal UI. The controller is
-written in Go and needs no root privileges. Workers use Alpine's packaged
-masscan and root/password SSH.
+written in Go and needs no root privileges. Masscan is the default; select
+ZMap with `--backend zmap`. Workers use Alpine packages and root/password SSH.
 
 [V1 project description](https://github.com/st3fan/masscanr/issues/1) defines the
 scan engine and worker lifecycle. [V2 guidance](https://github.com/st3fan/masscanr/issues/21)
 specifies the Bubble Tea terminal interface. [V3 guidance](https://github.com/st3fan/masscanr/issues/40)
 defines the Alpine worker platform. Work is tracked in native version sub-issues
-and small PRs ordered with `gh stack`. Selectable masscan/ZMap backends are
-planned for [V4](https://github.com/st3fan/masscanr/issues/33).
+and small PRs ordered with `gh stack`. [V4 guidance](https://github.com/st3fan/masscanr/issues/33)
+defines selectable masscan/ZMap backends and their shared scan contract.
 
 ## Build and configure
 
 Requires Go 1.26 or newer and outbound HTTPS/SSH from the controller. No local
-masscan, SSH executable, SSH key, or privileged account is required.
+masscan or ZMap installation, SSH executable, SSH key, or privileged account is required.
 
 ```sh
 go build -o masscanr ./cmd/masscanr
@@ -43,6 +43,7 @@ addresses; replace them with your authorized target ranges:
   --instance-type=vc2-1c-1gb --output=inventory.list 192.0.2.0/24
 ./masscanr scan --ports=22,80,443,8000-8100 192.0.2.0/24
 ./masscanr scan --slug=epag 192.0.2.0/24
+./masscanr scan --backend zmap --shards=4 --ports=22,80,443 192.0.2.0/24
 ```
 
 Scan options work before or after CIDRs, following `scan`. Use
@@ -51,6 +52,7 @@ Scanning requires the `scan` subcommand; a bare CIDR is an unknown command.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
+| `--backend` | `masscan` | Scan engine: exactly `masscan` or `zmap` |
 | `--shards` | `2` | Number of temporary workers |
 | `--rate` | `500000` | Requested packets/second **per worker** |
 | `--region` | `atl` | Vultr region (Atlanta) |
@@ -77,10 +79,53 @@ service names and protocol-prefixed port syntax are outside V1.
 CIDRs are masked and duplicate/contained ranges are removed. The normalized
 target list is displayed before provisioning: for example, `192.0.2.42/24`
 means `192.0.2.0/24`. All workers use the same targets, ports, randomization seed
-and masscan version, with distinct native `--shards i/N` assignments.
+and backend/build. Controller shard IDs are one-based: masscan receives
+`--shards i/N`; ZMap receives `--shards N --shard i-1`. The shared effective
+seed is retained in metadata without truncation. Unknown backends and known
+unsupported settings fail before credentials, output creation or provisioning.
 
 Two default workers request a combined 1,000,000 packets/second. The UI shows
 observed rates; actual throughput depends on the VPS and network.
+
+## Backend compatibility
+
+Omitting `--backend` and passing `--backend masscan` select the same Alpine
+masscan 1.3.2 path. Both engines support the top-100 default and TCP port
+lists/ranges, including ports 0 and 65535, with the configured packet rate
+applied per worker across the whole port set.
+
+ZMap support is deliberately pinned to Alpine's x64 `zmap-4.3.4-r0` build.
+Preparation verifies its package, executable checksum and output schema;
+unsupported versions/builds fail without falling back to masscan. Known limits:
+
+- Rate: 1..2147483647 packets/second per worker.
+- Seed: 0..9223372036854775807, generated once within that range.
+- Shards: 1..65535, no more than the eligible IP/port pair count. Small scopes
+  using ZMap's smallest permutation group require fewer than 256 shards.
+- One sender thread and one probe per IP/port pair; 10-second response cooldown.
+
+ZMap uses a private per-run allowlist containing exactly the normalized CIDRs,
+`--config /dev/null`, and an explicit empty blocklist. Distribution defaults
+therefore cannot silently exclude private/company networks. Upstream always
+excludes `0.0.0.0`, which is removed from the eligible-work count; a scope
+containing only that address fails preflight. The common finding sink validates
+requested CIDRs and ports independently of native filtering.
+
+ZMap accepts only successful TCP SYN-ACK responses and uses a one-million-entry
+IP/port repeat window. Multiple ports on the same IP survive. Window eviction
+can admit late duplicates, and accepted duplicates remain in the output.
+Different engines can discover different endpoints; identical results are not
+promised. Sending failures produce an incomplete run.
+
+ZMap's native percentage estimates elapsed time including cooldown, so it is
+not displayed as a measured sending percentage. During sending, percent is
+unknown while measured rate and estimated remaining time are shown. Zero active
+sender threads marks response waiting (sending at 100%); successful process
+exit and drained streams establish completion. Missing/stale telemetry never
+proves completion.
+
+The [compatibility contract](docs/zmap-compatibility.md) records the pinned
+source evidence, schemas, exclusions, seed/port/shard limits and offline proof.
 
 ## Discover regions and instance types
 
@@ -109,13 +154,13 @@ including local-disk High Frequency and High Performance plans.
 
 The Bubble Tea TUI runs on stderr and has two tabs:
 
-- **Overview** shows total scan progress, observed packets/second, discoveries,
+- **Overview** identifies the selected backend and shows total scan progress, observed packets/second, discoveries,
   scan ETA, completed shards and VPSs whose deletion is not yet confirmed. The
   table retains each shard's address, lifecycle, progress and observed rate;
   wide terminals also show ETA and discoveries. Enter expands the selected
   shard's full instance ID, scan/cleanup outcomes and diagnostic details.
 - **Config** shows every normalized CIDR with address counts, the exact TCP port
-  selection, per-worker and aggregate requested rates, worker settings, shared
+  selection, backend/version/build identity, per-worker and aggregate requested rates, worker settings, shared
   seed, timeouts and output destinations. These are the effective settings for
   the current run and are read-only. Long lists and paths wrap and scroll.
 
@@ -131,9 +176,12 @@ The Bubble Tea TUI runs on stderr and has two tabs:
 
 Native shards have approximately equal shares of scan work; overall progress
 uses equal weights and includes pending/failed shards in the denominator.
-Unknown per-shard percentages show `—`. Failure retains the last percentage.
-Discoveries sum the latest cumulative shard counters and do not represent a
-count of unique hosts. Rates are observed throughput, distinct from Config's
+Missing telemetry shows `—`; a known update with unavailable sending percentage
+shows `unknown`. Overall percentage remains unknown if an active shard cannot
+measure it. Confirmed scanner exit establishes that shard at 100%. Failure
+retains the last known percentage. Discoveries count only accepted findings
+from the shared scope/port validator, including duplicates, rather than native
+packet counters; they do not represent a count of unique hosts. Rates are observed throughput, distinct from Config's
 requested limits. Telemetry becomes stale after five seconds without progress;
 its last percentage remains visible, but its rate is excluded from totals.
 Scan ETA is the slowest remaining shard's estimate, shown only when every
@@ -159,16 +207,17 @@ UI. A terminal UI failure requests scan cancellation and cleanup, and returns
 an error.
 
 Each worker is deleted as soon as its scanner finishes and its output is
-collected, including masscan's response-wait phase. Its status becomes
+collected, including the selected engine's response-wait phase. Its status becomes
 `shutdown` after deletion is confirmed, while other shards continue scanning.
 The row keeps its scan statistics and any scan failure.
 
-Results stream independently into one local masscan list file. Files are
+Both engines stream into one local masscan-compatible list file. Files are
 created with mode `0600`, and existing files are never overwritten. Example:
 
 ```text
 #masscan
-# masscanr run=... seed=... targets=... ports=... rate=... shards=...
+# masscanr backend=zmap run=... seed=... targets=... ports=... rate=... shards=...
+# backend=zmap version=4.3.4 build=zmap-4.3.4-r0 sha256:...
 # shard 1
 open tcp 80 192.0.2.1 1700000000
 # shard 2
@@ -177,7 +226,11 @@ open tcp 443 192.0.2.2 1700000001
 ```
 
 Comment lines record configuration, shard attribution, and completion status.
-Discoveries use native list format: state, protocol, port, address, timestamp.
+Discoveries use the same list format for either engine: state, protocol, port,
+address, timestamp. ZMap CSV headers never enter this stream; the adapter uses
+the response TCP source port as the target port and the capture observation
+timestamp in Unix seconds, with no local-clock fallback. Metadata comments and
+the durable stderr summary identify the backend and observed version/build.
 Response-wait completion and the remote exit status are checked before a shard
 is complete. Results are checked against the requested addresses and ports.
 
@@ -241,12 +294,13 @@ rejected. Installation passes only those validated sources explicitly to APK
 with its normal signature verification; ambient repository snippets are ignored
 and the image's repository files remain unchanged.
 
-`apk add --no-cache` installs `masscan~1.3.2` and GNU `coreutils`. The latter
-provides `stdbuf` and its musl-compatible preload library so discoveries arrive
-before scanner exit. No compiler toolchain or ZMap is installed. Version and
-package probes must succeed before scanning; each ready row records the actual
-Alpine release and installed package versions. Workers must agree on masscan's
-version before any shard starts.
+For masscan, `apk add --no-cache` installs `masscan~1.3.2` and GNU `coreutils`.
+The latter provides `stdbuf` and its musl-compatible preload library so findings
+arrive before scanner exit. For ZMap, install only `zmap=4.3.4-r0`; its CSV
+module flushes each record and needs no buffering helper. Neither path installs
+a compiler toolchain or the unused scanner. Each ready row records the actual
+Alpine release, packages and executable checksum. All workers must agree on the
+selected backend, version and build before any shard starts.
 
 The API key stays on the controller;
 passwords are not logged, serialized, placed in command arguments, or persisted.
@@ -323,13 +377,14 @@ alternate-screen and theme-color restoration. It skips
 when pseudo-terminals are unavailable. These checks do not run the app or scan
 any network.
 
-CI retains the host Go race/vet/build checks and runs native masscan checks in
-an Alpine 3.24.4 container pinned by digest. Build-time APK installation requires
+CI retains the host Go race/vet/build checks and runs separate native masscan
+and ZMap checks in Alpine 3.24.4 containers pinned by digest. Build-time APK installation requires
 repository access; runtime checks use `--network none --cap-drop ALL`, with no
 cloud credentials or workers. To run the same checks locally with Docker:
 
 ```sh
 scripts/check-alpine.sh
+scripts/check-zmap.sh
 ```
 
 This verifies Alpine/version/repository policy, native shard configuration,
@@ -338,7 +393,16 @@ The last check proves incremental streaming on musl while masscan is still
 alive. The script creates a temporary test image/container and cleans them up.
 If Docker's default build network cannot reach the repositories, use
 `scripts/check-alpine.sh --network host` for build-time downloads; runtime
-networking remains disabled.
+networking remains disabled. The ZMap script accepts the same build option.
+
+ZMap checks the actual preparation probes and command plans against its package
+and compares native shard unions/intersections with expected IP/port products.
+The dryrun sender prints packet descriptions, with explicit synthetic network
+metadata to avoid ARP/discovery. Tests cover tiny/disjoint scopes, uneven and
+empty shards, non-power-of-two port counts, boundary ports/seeds and native
+rejection of too many workers. No scanner traffic leaves these containers.
+Local HTTP/SSH fixtures cover both adapters, package/release/schema failures,
+accepted findings, prompt delivery, cancellation and owned-worker cleanup.
 
 Optional checks against a local compatible masscan binary run only `--echo`
 and saved-result replay, without probes:
