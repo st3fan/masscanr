@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/netip"
 	"os"
 	"strings"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"github.com/st3fan/masscanr/internal/cloud/vultr"
 	"github.com/st3fan/masscanr/internal/controller"
 	"github.com/st3fan/masscanr/internal/remote"
+	"github.com/st3fan/masscanr/internal/ripe"
 	"github.com/st3fan/masscanr/internal/scan"
 	"github.com/st3fan/masscanr/internal/scanfile"
 	"github.com/st3fan/masscanr/internal/tui"
@@ -116,6 +118,12 @@ func executeScanWithView(ctx context.Context, args []string, stdout, stderr io.W
 type confirmationFunc func(context.Context, scan.Config, scan.Workload, io.Writer, bool) error
 
 func executeScanWithConfirmation(ctx context.Context, args []string, stdout, stderr io.Writer, build factory, newView viewFactory, confirm confirmationFunc) (err error) {
+	return executeScanWithResolver(ctx, args, stdout, stderr, build, newView, confirm, ripe.New().Resolve)
+}
+
+type targetResolver func(context.Context, []scan.Target) ([]scan.Target, error)
+
+func executeScanWithResolver(ctx context.Context, args []string, stdout, stderr io.Writer, build factory, newView viewFactory, confirm confirmationFunc, resolve targetResolver) (err error) {
 	cfg := scan.Defaults()
 	fs := flag.NewFlagSet("masscanr scan", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -156,7 +164,8 @@ func executeScanWithConfirmation(ctx context.Context, args []string, stdout, std
 	if strings.ContainsAny(slug, "/\\") || strings.IndexFunc(slug, unicode.IsControl) >= 0 {
 		return fmt.Errorf("--slug must not contain path separators or control characters")
 	}
-	if cfg.Targets, err = scan.ParseTargets(fs.Args()); err != nil {
+	requested, err := scan.ParseRequestedTargets(fs.Args())
+	if err != nil {
 		return err
 	}
 	if cfg.Ports, err = scan.ParsePorts(ports); err != nil {
@@ -165,14 +174,18 @@ func executeScanWithConfirmation(ctx context.Context, args []string, stdout, std
 	if cfg.Shards > scanfile.MaxShards {
 		return fmt.Errorf("scan documents support at most %d shards", scanfile.MaxShards)
 	}
-	if err = cfg.Validate(); err != nil {
+	if err = cfg.ValidateOptions(); err != nil {
 		return err
 	}
 	engine, err := registry.Resolve(cfg.Backend)
 	if err != nil {
 		return err
 	}
-	if err = engine.Validate(cfg.Intent(), cfg.Shards); err != nil {
+	// A full IPv4 scope checks backend option limits without treating a small
+	// unresolved AS as empty. Actual scope constraints are checked after lookup.
+	settings := cfg.Intent()
+	settings.Targets = []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0")}
+	if err = engine.Validate(settings, cfg.Shards); err != nil {
 		return err
 	}
 	if timeouts.Scan <= 0 || timeouts.Cleanup <= 0 {
@@ -181,12 +194,26 @@ func executeScanWithConfirmation(ctx context.Context, args []string, stdout, std
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
+	if cfg.RequestedTargets, err = resolve(ctx, requested); err != nil {
+		return err
+	}
+	cfg = cfg.Clone()
+	cfg.Targets = scan.TargetUnion(cfg.RequestedTargets)
+	if err = cfg.Validate(); err != nil {
+		return err
+	}
+	if err = engine.Validate(cfg.Intent(), cfg.Shards); err != nil {
+		return err
+	}
 	work, err := cfg.Intent().Workload()
 	if err != nil {
 		return err
 	}
 	if work.RequiresConfirmation() {
-		if err := confirm(ctx, cfg, work, stderr, noTUI); err != nil {
+		if err := describeTargets(stderr, cfg, work); err != nil {
+			return err
+		}
+		if err := confirm(ctx, cfg.Clone(), work, stderr, noTUI); err != nil {
 			return err
 		}
 	}
@@ -196,6 +223,11 @@ func executeScanWithConfirmation(ctx context.Context, args []string, stdout, std
 	token, err := apiToken()
 	if err != nil {
 		return err
+	}
+	if !work.RequiresConfirmation() {
+		if err := describeTargets(stderr, cfg, work); err != nil {
+			return err
+		}
 	}
 	var file *os.File
 	exportOutput := output

@@ -51,6 +51,14 @@ func warningLines(cfg scan.Config, work scan.Workload, width int) []string {
 		Count(work.Ports), Count(work.Addresses), Count(work.Probes), Count(scan.ConfirmationProbeThreshold))
 	var b strings.Builder
 	b.WriteString(text)
+	for _, t := range cfg.RequestedTargets {
+		b.WriteString(t.Target)
+		if t.Resolution != nil {
+			b.WriteString(" (RIPE snapshot " + t.Resolution.SnapshotAt.Format("2006-01-02T15:04:05Z") + ")")
+		}
+		b.WriteByte('\n')
+	}
+	b.WriteString("Effective IPv4 scope:\n")
 	for _, p := range cfg.Targets {
 		b.WriteString(p.String())
 		b.WriteByte('\n')

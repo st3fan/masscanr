@@ -104,6 +104,8 @@ type Progress struct {
 }
 
 type Finding struct {
+	Target    string     `json:"target,omitempty"`
+	Prefix    string     `json:"prefix,omitempty"`
 	Shard     int        `json:"shard"`
 	IP        netip.Addr `json:"ip"`
 	Port      uint16     `json:"port"`
