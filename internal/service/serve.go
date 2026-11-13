@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
@@ -12,7 +13,7 @@ import (
 	"time"
 )
 
-func Serve(ctx context.Context, args []string, out io.Writer) error {
+func Serve(ctx context.Context, args []string, out io.Writer) (result error) {
 	fs := flag.NewFlagSet("masscanr serve", flag.ContinueOnError)
 	fs.SetOutput(out)
 	listen := fs.String("listen", "127.0.0.1:8080", "HTTP listen address")
@@ -61,10 +62,15 @@ func Serve(ctx context.Context, args []string, out io.Writer) error {
 		return fmt.Errorf("workflow launch failed")
 	}
 	defer dbos.Shutdown(dc, 30*time.Second)
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
+		result = errors.Join(result, manager.Shutdown(cleanup))
+	}()
 	if e = manager.ResumeReserved(recovery); e != nil {
 		return fmt.Errorf("workflow recovery failed")
 	}
-	api := &API{Store: s}
+	api := &API{Store: s, Ready: func() bool { manager.mu.Lock(); defer manager.mu.Unlock(); return !manager.closing }}
 	api.Extra = func(m *http.ServeMux) { manager.Routes(api, m) }
 	srv := &http.Server{Handler: api.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second}
 	ln, e := net.Listen("tcp", *listen)
@@ -77,14 +83,12 @@ func Serve(ctx context.Context, args []string, out io.Writer) error {
 	select {
 	case e = <-done:
 	case <-ctx.Done():
+		manager.mu.Lock()
+		manager.closing = true
+		manager.mu.Unlock()
 		stop, c := context.WithTimeout(context.Background(), 30*time.Second)
 		defer c()
 		e = srv.Shutdown(stop)
-		cleanup, stopCleanup := context.WithTimeout(context.Background(), 30*time.Minute)
-		defer stopCleanup()
-		if err := manager.Shutdown(cleanup); err != nil {
-			return err
-		}
 	}
 	if e == http.ErrServerClosed {
 		return nil
