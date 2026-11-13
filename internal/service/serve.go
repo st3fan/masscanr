@@ -42,11 +42,13 @@ func Serve(ctx context.Context, args []string, out io.Writer) error {
 	if e != nil {
 		return fmt.Errorf("workflow initialization failed")
 	}
+	manager := NewManager(s, dc, *dir)
 	if e = dbos.Launch(dc); e != nil {
 		return fmt.Errorf("workflow launch failed")
 	}
 	defer dbos.Shutdown(dc, 30*time.Second)
 	api := &API{Store: s}
+	api.Extra = func(m *http.ServeMux) { manager.Routes(api, m) }
 	srv := &http.Server{Handler: api.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second}
 	ln, e := net.Listen("tcp", *listen)
 	if e != nil {
