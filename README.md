@@ -8,6 +8,66 @@ service backed by PostgreSQL and DBOS. Start with `masscanr serve`; the interact
 for database setup, request examples, recovery semantics, and local test commands.
 [V9 planning issue](https://github.com/st3fan/masscanr/issues/86) tracks this iteration.
 
+### Running locally with Docker Compose
+
+Requires Docker Engine/Desktop with Docker Compose v2 or newer. Compose builds
+the Go service and starts PostgreSQL 17, so no local Go or PostgreSQL installation
+is needed. From the repository root, initialize a database password in the ignored
+`.env` file (this command leaves an existing `.env` untouched):
+
+```sh
+test -e .env || (umask 077; printf 'MASSCANR_POSTGRES_PASSWORD=%s\n' "$(openssl rand -hex 24)" > .env)
+docker compose up --build -d --wait
+curl --fail-with-body http://127.0.0.1:8080/healthz
+```
+
+If `.env` already exists, add `MASSCANR_POSTGRES_PASSWORD` to it before starting;
+[.env.example](.env.example) lists the available settings with placeholders.
+Compose reads `.env` and passes configuration to the service as environment
+variables. Set `VULTR_API_TOKEN` in `.env` or the launching shell to enable scan
+starts; it can be empty for CRUD and preflight. Recreate the service after changing
+runtime variables: `docker compose up -d --force-recreate masscanr`. Never commit
+real tokens or passwords, and avoid printing resolved Compose configuration.
+
+The API is available at `http://127.0.0.1:8080`; use the [Manage a scan](#manage-a-scan)
+examples below. PostgreSQL is accessible only within the Compose network. Both
+database state and `/data` scan artifacts use persistent named volumes. The image
+runs the service as a non-root user, with no local scanner/root privileges needed.
+
+```sh
+# Check readiness and follow service logs.
+docker compose ps
+docker compose logs -f masscanr
+
+# Copy retained artifacts to the host (also works with a stopped container).
+mkdir -p ./masscanr-data
+docker compose cp masscanr:/data/. ./masscanr-data/
+
+# Stop the service and database while preserving data volumes.
+docker compose down
+
+# Rebuild after updating this checkout; existing volumes are reused.
+docker compose up --build -d --wait
+```
+
+Compose waits for PostgreSQL readiness before starting the service and stops the
+service before PostgreSQL. The service has up to 32 minutes to shut down and clean
+up workers; avoid shortening that timeout during active scans. Copy artifacts
+before `down` removes the container, or after starting it again. An explicit
+`docker compose down --volumes` permanently deletes this Compose project's
+database and artifacts; use it only for a deliberate reset after scans and cleanup
+have settled. Changing the password in `.env` does not rotate an initialized
+PostgreSQL volume's password—keep the original value when reusing that volume.
+
+For hosting, keep this checkout, `.env`, and volumes on the Docker host. The
+containers use `restart: unless-stopped`. Set `MASSCANR_PORT` to change the host
+port. To publish beyond loopback, explicitly set `MASSCANR_BIND_ADDRESS` to the
+host interface (or `0.0.0.0`); V9 has no API authentication or TLS, so use your
+existing private-network/reverse-proxy arrangement. Only one service instance may
+use a database. Use a stable `docker compose -p <project-name>` on every command
+for multiple isolated deployments; assign each a different host port. Compose
+project names scope the containers, networks, and volumes.
+
 ### Run locally
 
 The local PostgreSQL server accepts connections as your current operating-system
