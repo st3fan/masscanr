@@ -109,3 +109,6 @@ var exportColumns = []string{"ip", "port", "addr", "protocol", "state", "timesta
 func exportRow(row finding) []string {
 	return []string{row.IP, strconv.FormatUint(uint64(row.Port), 10), row.Addr, row.Protocol, row.State, strconv.FormatUint(row.Timestamp, 10), row.Target, row.Prefix}
 }
+
+// ExportResults creates the standard exports for a completed journal.
+func ExportResults(path string) error { return exportResults(path, path) }
