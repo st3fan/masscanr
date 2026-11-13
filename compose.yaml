@@ -1,0 +1,46 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: masscanr
+      POSTGRES_DB: masscanr
+      POSTGRES_PASSWORD: ${MASSCANR_POSTGRES_PASSWORD:?Set MASSCANR_POSTGRES_PASSWORD in .env or the environment}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U masscanr -d masscanr"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+    stop_grace_period: 1m
+
+  masscanr:
+    build:
+      context: .
+    environment:
+      # Keyword DSN plus PGPASSWORD avoids URL-encoding the password.
+      DBOS_SYSTEM_DATABASE_URL: host=postgres port=5432 dbname=masscanr user=masscanr sslmode=disable
+      PGPASSWORD: ${MASSCANR_POSTGRES_PASSWORD:?Set MASSCANR_POSTGRES_PASSWORD in .env or the environment}
+      VULTR_API_TOKEN: ${VULTR_API_TOKEN:-}
+    ports:
+      - "${MASSCANR_BIND_ADDRESS:-127.0.0.1}:${MASSCANR_PORT:-8080}:8080"
+    volumes:
+      - scan-data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+    # HTTP shutdown + up to 30 minutes of cleanup + DBOS shutdown.
+    stop_grace_period: 32m
+
+volumes:
+  postgres-data:
+  scan-data:
