@@ -30,6 +30,9 @@ type runFunc func(context.Context, scan.Config, io.Writer, func(controller.Event
 type factory func(string, controller.Timeouts, backend.Backend) runFunc
 
 func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	if len(args) > 0 && args[0] == "scan" {
+		return fmt.Errorf("interactive scans have been retired; use masscanr serve and the REST API")
+	}
 	return execute(ctx, args, stdout, stderr, func(key string, timeouts controller.Timeouts, engine backend.Backend) runFunc {
 		c := &controller.Controller{Backend: engine, Provider: vultr.New(key), Runner: remote.NewSSH(), Timeouts: timeouts}
 		return c.Run
@@ -85,7 +88,7 @@ func rootHelp(out io.Writer) error {
 	_, err := fmt.Fprint(out, `Usage: masscanr <command> [options]
 
 Commands:
-  scan                  Scan IPv4 CIDRs, addresses or AS targets using temporary Vultr workers
+  serve                 Start the REST service (see masscanr serve --help)
   inspect               Inspect a saved .scan document offline
   export                Export .scan findings as list, CSV or JSONL
   list-regions          Show region IDs, names, countries and continents
