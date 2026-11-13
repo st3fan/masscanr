@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -35,6 +36,7 @@ func NewManager(s *Store, dc dbos.Context, dir string) *Manager {
 		b, _ := registry.Resolve(r.Plan.Config.Backend)
 		return &controller.Controller{RunID: r.ID, Backend: b, Provider: vultr.New(os.Getenv("VULTR_API_TOKEN")), Runner: remote.NewSSH(), Timeouts: r.Plan.Timeouts}
 	}
+	dbos.RegisterWorkflow(dc, m.cleanupWorkflow, dbos.WithWorkflowName("masscanr.cleanup.v9"))
 	dbos.RegisterWorkflow(dc, m.workflow, dbos.WithWorkflowName("masscanr.scan.v9"))
 	return m
 }
@@ -126,9 +128,11 @@ func (m *Manager) execute(ctx context.Context, id string) error {
 			r.Error = "artifact creation failed"
 		})
 	}
-	dest := scanfile.Destination{Writer: file, SyncFunc: file.Sync, Output: path, Exports: [2]string{path[:len(path)-5] + ".csv", path[:len(path)-5] + ".jsonl"}}
+	dest := privateArtifact{Destination: scanfile.Destination{Writer: file, SyncFunc: file.Sync, Output: path, Exports: [2]string{path[:len(path)-5] + ".csv", path[:len(path)-5] + ".jsonl"}}, token: os.Getenv("VULTR_API_TOKEN")}
 	summary, runErr := m.Factory(r).Run(c, r.Plan.Config, dest, func(event controller.Event) {
-		err := m.Store.mutateRun(context.Background(), id, func(r *Run) {
+		eventCtx, stopEvent := context.WithTimeout(context.Background(), 5*time.Second)
+		defer stopEvent()
+		err := m.Store.mutateRun(eventCtx, id, func(r *Run) {
 			if r.Events == nil {
 				r.Events = map[int]controller.Event{}
 			}
@@ -172,6 +176,7 @@ func (m *Manager) finish(ctx context.Context, id string) error {
 		r.Summary.ReconciliationUnresolved = unresolved
 		r.Summary.CleanupOutcome = "complete"
 		if cleanupErr != nil {
+			r.Phase = "cleanup_incomplete"
 			r.Summary.CleanupOutcome = "incomplete"
 			r.Error = "owned worker cleanup incomplete"
 		}
@@ -188,6 +193,7 @@ func (m *Manager) finish(ctx context.Context, id string) error {
 }
 func (m *Manager) Routes(a *API, mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/scans/{id}/start", m.start)
+	mux.HandleFunc("POST /v1/scans/{id}/stop", m.stop)
 	mux.HandleFunc("GET /v1/runs/{id}", func(w http.ResponseWriter, r *http.Request) {
 		v, e := m.Store.GetRun(r.Context(), r.PathValue("id"))
 		if e != nil {
@@ -232,4 +238,16 @@ func (m *Manager) start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respond(w, 202, v)
+}
+
+type privateArtifact struct {
+	scanfile.Destination
+	token string
+}
+
+func (d privateArtifact) Sanitize(s string) string {
+	if d.token != "" {
+		s = strings.ReplaceAll(s, d.token, "[REDACTED]")
+	}
+	return s
 }

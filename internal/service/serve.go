@@ -35,6 +35,16 @@ func Serve(ctx context.Context, args []string, out io.Writer) error {
 		return fmt.Errorf("database initialization failed")
 	}
 	defer s.Pool.Close()
+	lock, e := s.Pool.Acquire(ctx)
+	if e != nil {
+		return e
+	}
+	defer lock.Release()
+	var acquired bool
+	if e = lock.QueryRow(ctx, "SELECT pg_try_advisory_lock(746592017)").Scan(&acquired); e != nil || !acquired {
+		return fmt.Errorf("another service owns this database")
+	}
+	defer lock.Exec(context.Background(), "SELECT pg_advisory_unlock(746592017)")
 	if e = os.MkdirAll(*dir, 0700); e != nil {
 		return e
 	}
@@ -43,10 +53,17 @@ func Serve(ctx context.Context, args []string, out io.Writer) error {
 		return fmt.Errorf("workflow initialization failed")
 	}
 	manager := NewManager(s, dc, *dir)
+	recovery, e := manager.PrepareRecovery(ctx)
+	if e != nil {
+		return fmt.Errorf("recovery preparation failed")
+	}
 	if e = dbos.Launch(dc); e != nil {
 		return fmt.Errorf("workflow launch failed")
 	}
 	defer dbos.Shutdown(dc, 30*time.Second)
+	if e = manager.ResumeReserved(recovery); e != nil {
+		return fmt.Errorf("workflow recovery failed")
+	}
 	api := &API{Store: s}
 	api.Extra = func(m *http.ServeMux) { manager.Routes(api, m) }
 	srv := &http.Server{Handler: api.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second}
@@ -63,6 +80,11 @@ func Serve(ctx context.Context, args []string, out io.Writer) error {
 		stop, c := context.WithTimeout(context.Background(), 30*time.Second)
 		defer c()
 		e = srv.Shutdown(stop)
+		cleanup, stopCleanup := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer stopCleanup()
+		if err := manager.Shutdown(cleanup); err != nil {
+			return err
+		}
 	}
 	if e == http.ErrServerClosed {
 		return nil
