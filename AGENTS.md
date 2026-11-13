@@ -46,3 +46,12 @@ contains unrelated projects.
   unrelated infrastructure, including the existing VM at `144.202.29.87`.
 - Keep credentials in ignored `.env` or the environment, out of commits, logs,
   worker configuration and `.env.example`. The example contains placeholders.
+
+## Local PostgreSQL
+
+- Development and tests may create databases as the current operating-system
+  user through the local Unix socket; no password or credentials are needed.
+- Give every development/test database a unique name (for example,
+  `masscanr_test_<random-id>`). Never reuse or drop an unrelated database.
+- Tests must clean up only the database they created. Keep connection URLs in
+  the environment and out of logs and commits.
