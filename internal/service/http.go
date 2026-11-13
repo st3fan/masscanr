@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/st3fan/masscanr/internal/scan"
 	"io"
 	"net/http"
 	"strconv"
@@ -12,9 +13,10 @@ import (
 )
 
 type API struct {
-	Store *Store
-	Ready func() bool
-	Extra func(*http.ServeMux)
+	Resolve func(context.Context, []scan.Target) ([]scan.Target, error)
+	Store   *Store
+	Ready   func() bool
+	Extra   func(*http.ServeMux)
 }
 
 func (a *API) Handler() http.Handler {
@@ -29,6 +31,7 @@ func (a *API) Handler() http.Handler {
 		respond(w, 200, map[string]string{"status": "ready"})
 	})
 	m.HandleFunc("POST /v1/scans", a.create)
+	m.HandleFunc("POST /v1/scans/{id}/preflight", a.preflight)
 	m.HandleFunc("GET /v1/scans", a.list)
 	m.HandleFunc("GET /v1/scans/{id}", a.get)
 	m.HandleFunc("PUT /v1/scans/{id}", a.replace)
