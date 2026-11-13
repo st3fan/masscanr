@@ -1,5 +1,16 @@
 # masscanr
 
+## V9 service (under review)
+
+V9 exposes scan CRUD, frozen preflight, start/stop, and run history through a REST
+service backed by PostgreSQL and DBOS. Start with `masscanr serve`; the interactive
+`scan` command is retired. See the [REST API and operations guide](docs/rest-api.md)
+for database setup, request examples, recovery semantics, and local test commands.
+[V9 planning issue](https://github.com/st3fan/masscanr/issues/86) tracks this iteration.
+
+The sections below describe the V1–V8 engine, artifacts, and historical CLI. Their
+scan invocation examples are retained as reference; use the V9 API for execution.
+
 Run masscan or ZMap shards on temporary Vultr VPS workers, stream discoveries back to a
 local `.scan` document with CSV/JSONL exports, and watch each worker in a terminal UI. The controller is
 written in Go and needs no root privileges. Masscan is the default; select
