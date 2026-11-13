@@ -37,3 +37,8 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Compose example contains placeholders only; runtime storage stays local.
+!.env.example
+/masscanr-data/
+/preflight.json
