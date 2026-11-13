@@ -67,7 +67,7 @@ func execute(ctx context.Context, args []string, stdout, stderr io.Writer, build
 		if len(args) != 1 {
 			return fmt.Errorf("usage: masscanr --version")
 		}
-		_, err := fmt.Fprintln(stdout, "masscanr v8")
+		_, err := fmt.Fprintln(stdout, "masscanr v9")
 		return err
 	case "inspect":
 		return inspectScan(ctx, args[1:], stdout, stderr)
@@ -161,7 +161,7 @@ func executeScanWithResolver(ctx context.Context, args []string, stdout, stderr 
 		return err
 	}
 	if version {
-		fmt.Fprintln(stdout, "masscanr v8")
+		fmt.Fprintln(stdout, "masscanr v9")
 		return nil
 	}
 	if strings.ContainsAny(slug, "/\\") || strings.IndexFunc(slug, unicode.IsControl) >= 0 {
