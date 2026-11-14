@@ -96,7 +96,11 @@ func renderPlain(server string, s snapshot, stale string) string {
 		lines = append(lines, stale)
 	}
 	if len(s.Runs) == 0 {
-		lines = append(lines, "No active scans — waiting for new runs")
+		message := "No active scans — waiting for new runs"
+		if stale != "" {
+			message = "Last snapshot had no active scans; current activity unknown"
+		}
+		lines = append(lines, message)
 	}
 	for _, r := range s.Runs {
 		lines = append(lines, runLines(r, 0, 100)...)

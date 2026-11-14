@@ -194,7 +194,11 @@ func (m model) body() []string {
 	}
 	if m.options.All {
 		if len(m.snapshot.Runs) == 0 {
-			lines = append(lines, "No active scans — waiting for new runs")
+			message := "No active scans — waiting for new runs"
+			if m.stale != "" {
+				message = "Last snapshot had no active scans; current activity unknown"
+			}
+			lines = append(lines, message)
 		}
 		for _, r := range m.snapshot.Runs {
 			mark := "  "

@@ -315,3 +315,17 @@ func TestStopCannotBeConfirmedInUnreadableTerminal(t *testing.T) {
 		t.Fatal("cannot cancel")
 	}
 }
+
+func TestStaleIdleDoesNotClaimCurrentInactivity(t *testing.T) {
+	text := renderPlain("http://server", snapshot{}, "STALE: connection lost")
+	if strings.Contains(text, "No active scans — waiting") || !strings.Contains(text, "current activity unknown") {
+		t.Fatal(text)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	m := newModel(ctx, cancel, &fakeSource{}, options{All: true}, snapshot{})
+	m.stale = "STALE: connection lost"
+	if text := strings.Join(m.body(), " "); !strings.Contains(text, "current activity unknown") {
+		t.Fatal(text)
+	}
+}
