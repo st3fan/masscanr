@@ -137,6 +137,40 @@ after successful completion, CSV/JSONL exports. The run response exposes artifac
 paths and separate scan/cleanup outcomes. See the [full API guide](docs/rest-api.md)
 for update/delete requests, pagination, recovery behavior, and test setup.
 
+### Debugging scan starts
+
+Use the Python 3 script to see each request stage, its payload, HTTP status,
+server errors, and the scan/plan/run IDs:
+
+```sh
+# Inspect the created definition and frozen plan without starting a scan.
+python3 scripts/start-scan.py --preflight-only --ports 22,80,443 64.98.138.0/22
+
+# Create and start a scan, then observe status for early asynchronous errors.
+python3 scripts/start-scan.py --ports 22,80,443 --wait 60 64.98.138.0/22
+```
+
+The example uses the authorized company test prefix; substitute only networks you
+are authorized to scan. `--server` changes the API URL (default
+`http://127.0.0.1:8080`). Run `python3 scripts/start-scan.py --help` for backend,
+shard, rate, placement, and timeout options. It uses only Python's standard library.
+The Vultr token must be configured on the service, not on this client.
+
+Large scans require interactive approval of the displayed frozen plan, or an
+explicit `--yes`. `--preflight-only` still saves a definition and plan. The script
+does not automatically retry mutations, delete definitions, or stop scans. If a
+start response is lost, use the printed exact start request and idempotency key;
+do not blindly rerun the whole script and create another definition.
+
+A `202` means accepted, not successful scanner startup. The script polls for 30
+seconds by default, prints worker/cleanup diagnostics, and exits nonzero for HTTP,
+protocol, connection, or reported run errors. Exit zero means no error was seen in
+the observation window; continue checking the printed status URL for completion.
+Ctrl-C detaches the script and leaves any accepted scan running. For server detail:
+`docker compose logs --tail=100 masscanr postgres`. Review logs before sharing them.
+
+Offline script tests: `python3 -B -m unittest discover -s scripts -p 'test_start_scan.py'`.
+
 ### Historical CLI reference
 
 The sections below describe the V1–V8 engine, artifacts, and historical CLI. Their
