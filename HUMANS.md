@@ -4,13 +4,31 @@ This is the human-facing guide for developing `masscanr` with **Codex CLI/TUI**,
 
 **You describe the outcome and make the important decisions. Codex does the planning, code, tests, and GitHub bookkeeping.** Work lands continuously on `main` after your review; a release happens separately when you decide the time is right.
 
-GitHub stores the planning record. The **Issue body** holds intent, design, implementation plan, decisions, and acceptance criteria; comments are discussion. Native sub-issues organize outcomes, labels classify them, a GitHub Project tracks progress, PRs hold code review, and the Wiki holds durable architecture. Do not create `intent.md`, `spec.md`, `plan.md`, or GitHub Issue Artifacts. Git holds code, tests, product documentation/configuration, and operating guidance in `AGENTS.md`, `HUMANS.md`, and `VERSIONS.md`. The last file is **release policy**, not an intent, spec, or plan.
+GitHub stores the planning record. The **Issue body** holds intent, design, implementation plan, decisions, and acceptance criteria; comments are discussion. Native sub-issues organize outcomes, labels classify them, a GitHub Project tracks progress, PRs hold code review, and the Wiki holds durable architecture. Do not create `intent.md`, `spec.md`, `plan.md`, or GitHub Issue Artifacts. Git holds code, tests, product documentation/configuration, and four durable guides: `AGENTS.md`, `HUMANS.md`, `OBJECTIVE.md`, and `VERSIONS.md`. `OBJECTIVE.md` defines the project's purpose and direction; `VERSIONS.md` defines its release policy. Neither is an intent, spec, or implementation plan.
+
+## How to bootstrap a project
+
+**No special Issue #1 or permanent “project guidance Issue.”** Use a normal Intent Issue, with whatever number GitHub assigns, to establish the project objective.
+
+1. Tell Codex the project idea: who it is for, which problem it should solve, the desired outcomes, rough direction, constraints/non-goals, and guiding principles.
+2. Codex creates/refines a normal Intent Issue with that material **in the Issue body**. You review and resolve major questions before authorizing implementation.
+3. Codex prepares a small PR containing `OBJECTIVE.md`: a concise, durable statement of purpose and direction, **not** a specification, roadmap, or version plan.
+4. You review and explicitly approve the PR merge. The bootstrap Intent Issue can close; it does not become a permanent authority. Future work is checked against `OBJECTIVE.md`.
+5. Codex adapts `AGENTS.md`, `HUMANS.md`, and `VERSIONS.md` for the project. These are guidance/policy files, not implementation plans.
+
+**Bootstrap prompt:**
+
+> Help me establish a new project's objective. Ask about the problem, audience, desired outcomes, direction, non-goals, and guiding principles. Create a normal GitHub Intent Issue containing our decisions in its body. When I approve the objective, propose `OBJECTIVE.md` in a PR. Do not start implementing features or merge the PR without my approval.
+
+For an established project like `masscanr`, adopting `OBJECTIVE.md` is itself an ordinary Intent Issue and PR. Older Issues can be consulted as history but have no special authority.
+
+**Changing project direction:** use the same Intent process to propose material changes to `OBJECTIVE.md`; do not silently edit it while completing unrelated feature work.
 
 ## How to start new work
 
 **Recommended: start in Codex.**
 
-1. In a checkout of `masscanr`, run `codex` and describe the problem, desired outcome, and any constraints you already know.
+1. In a checkout of `masscanr`, run `codex` and describe the problem, desired outcome, and any constraints you already know. Codex reads `OBJECTIVE.md` and checks that the proposed work supports the project's direction.
 2. Ask Codex to search for an existing Issue, discuss important gaps, and **create or refine an Issue body**. Tell it not to write code yet.
 3. Review the proposed intent, scope, acceptance criteria, design, and risks. Approve material decisions and tell Codex when implementation may begin (or mark the Issue `Ready`).
 4. Codex creates sub-issues for substantial work, classifies them with labels, and prepares small, testable PRs. Related PRs can form a GitHub Stack when they depend on each other.
@@ -56,7 +74,7 @@ The previous `masscanr` **Version Issue** was already functioning as an **Intent
 
 A sub-issue is a separately verifiable **outcome**. A PR is a reviewable **code slice**. A PR stack is a sequence of **dependent** slices. These structures do not have to match one-to-one. Keep independent code changes unstacked.
 
-`masscanr`'s [Issue #1](https://github.com/st3fan/masscanr/issues/1) can continue to serve as historical/project-wide guidance. Existing V1–V10 Issues and released tags remain historical facts; do not rewrite them. **Do not create new Version Issues** or require an Issue to belong to a version.
+`masscanr`'s older Issues (including #1 and V1–V10) remain historical records, **not** the authority for purpose or direction; that role belongs to `OBJECTIVE.md`. Existing releases remain historical facts; do not rewrite them. **Do not create new Version Issues** or require an Issue to belong to a version.
 
 ## Trunk-based development
 
@@ -112,7 +130,7 @@ Codex provides the release proposal and supporting links. After you review it, y
 
 Give Codex the Issue number; GitHub retains the durable plan:
 
-> Continue `st3fan/masscanr#123`. Read its full Issue body, labels, sub-issues, dependencies, PRs, Project status, `AGENTS.md`, and `HUMANS.md`. Summarize the current state and next safe action before changing anything. Do not merge, deploy, or release.
+> Continue `st3fan/masscanr#123`. Read `OBJECTIVE.md`, its full Issue body, labels, sub-issues, dependencies, PRs, Project status, `AGENTS.md`, and `HUMANS.md`. Summarize the current state and next safe action before changing anything. Do not merge, deploy, or release.
 
 Useful commands:
 
@@ -123,4 +141,4 @@ gh pr list -R st3fan/masscanr
 gh stack view --json  # if gh stack is available
 ```
 
-**Default rule:** start with an idea, end planning with a well-formed Issue, build small PRs, merge approved safe slices into trunk, and release only when you choose to.
+**Default rule:** use `OBJECTIVE.md` for enduring project direction, start each new change with an ordinary Intent Issue, build small PRs, merge approved safe slices into trunk, and release only when you choose to.
