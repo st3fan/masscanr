@@ -296,3 +296,22 @@ func TestOldServiceExplainsDiscovery404(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestStopCannotBeConfirmedInUnreadableTerminal(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	api := &fakeSource{}
+	m := newModel(ctx, cancel, api, options{}, snapshot{Runs: []runapi.Run{fixtureRun("a", true)}})
+	m, _ = update(m, key("s"))
+	m.width = 10
+	m.height = 2
+	m, _ = update(m, key("right"))
+	m, cmd := update(m, key("enter"))
+	if cmd != nil || m.confirmYes || len(api.stopIDs) != 0 {
+		t.Fatal("confirmed without readable scope")
+	}
+	m, _ = update(m, key("esc"))
+	if m.confirmID != "" {
+		t.Fatal("cannot cancel")
+	}
+}

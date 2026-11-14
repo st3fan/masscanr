@@ -108,6 +108,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		key := msg.String()
 		if m.confirmID != "" {
+			if (m.width < 40 || m.height < 8) && key != "esc" && key != "ctrl+c" && key != "q" && key != "n" {
+				return m, nil
+			}
 			switch key {
 			case "esc", "ctrl+c", "q", "n":
 				m.confirmID = ""
@@ -184,7 +187,10 @@ func (m model) body() []string {
 		if m.confirmYes {
 			choice = "Cancel  [Stop]"
 		}
-		lines = append(lines, "Stop run "+m.confirmID+"?", choice, "Left/right selects; Enter confirms; Esc cancels.")
+		if m.width < 40 || m.height < 8 {
+			return []string{ansi.Truncate("Enlarge terminal to confirm; Esc cancels", m.width, "")}
+		}
+		return strings.Split(ansi.Wrap("Stop run "+clean(m.confirmID)+"?\n"+choice+"\nLeft/right selects; Enter confirms; Esc cancels.", m.width, ""), "\n")
 	}
 	if m.options.All {
 		if len(m.snapshot.Runs) == 0 {
