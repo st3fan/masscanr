@@ -6,6 +6,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/st3fan/masscanr/internal/backend/registry"
 	"github.com/st3fan/masscanr/internal/controller"
+	"github.com/st3fan/masscanr/internal/runapi"
 	"github.com/st3fan/masscanr/internal/scan"
 	"github.com/st3fan/masscanr/internal/scanfile"
 	"net/netip"
@@ -66,26 +67,7 @@ type Scan struct {
 	UpdatedAt  time.Time  `json:"updated_at"`
 	Definition Definition `json:"definition"`
 }
-type Plan struct {
-	ID                   string              `json:"id"`
-	ScanID               string              `json:"scan_id"`
-	Revision             int64               `json:"revision"`
-	ExpiresAt            time.Time           `json:"expires_at"`
-	Config               scan.Config         `json:"config"`
-	Timeouts             controller.Timeouts `json:"timeouts"`
-	Workload             scan.Workload       `json:"workload"`
-	RequiresConfirmation bool                `json:"requires_confirmation"`
-}
-type Run struct {
-	ID        string                   `json:"id"`
-	ScanID    string                   `json:"scan_id"`
-	Plan      Plan                     `json:"plan"`
-	Phase     string                   `json:"phase"`
-	CreatedAt time.Time                `json:"created_at"`
-	Artifact  string                   `json:"artifact"`
-	Summary   controller.Summary       `json:"summary"`
-	Error     string                   `json:"error,omitempty"`
-	Events    map[int]controller.Event `json:"workers,omitempty"`
-}
+type Plan = runapi.Plan
+type Run = runapi.Run
 
 func newID() string { return uuid.NewString() }

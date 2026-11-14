@@ -74,7 +74,7 @@ func (a *API) preflight(w http.ResponseWriter, r *http.Request) {
 func (s *Store) Reserve(ctx context.Context, scanID, planID, key string, confirm bool) (Run, error) {
 	var out Run
 	e := s.tx(ctx, func(tx pgx.Tx) error {
-		old, e := readJSON[Run](ctx, tx, `SELECT data FROM masscanr.runs WHERE request_key=$1`, key)
+		old, e := readJSON[Run](ctx, tx, `SELECT `+runSnapshotSQL+` FROM masscanr.runs WHERE request_key=$1`, key)
 		if e == nil {
 			if old.ScanID != scanID || old.Plan.ID != planID {
 				return ErrConflict
@@ -103,7 +103,7 @@ func (s *Store) Reserve(ctx context.Context, scanID, planID, key string, confirm
 		if active {
 			return ErrConflict
 		}
-		out = Run{ID: newID(), ScanID: scanID, Plan: p, Phase: "accepted", CreatedAt: time.Now().UTC()}
+		out = Run{SnapshotVersion: 1, Active: true, ID: newID(), ScanID: scanID, Plan: p, Phase: "accepted", CreatedAt: time.Now().UTC()}
 		data, e := json.Marshal(out)
 		if e != nil {
 			return e

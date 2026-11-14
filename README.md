@@ -1,12 +1,13 @@
 # masscanr
 
-## V9 service (under review)
+## Service and terminal viewer
 
 V9 exposes scan CRUD, frozen preflight, start/stop, and run history through a REST
 service backed by PostgreSQL and DBOS. Start with `masscanr serve`; the interactive
 `scan` command is retired. See the [REST API and operations guide](docs/rest-api.md)
 for database setup, request examples, recovery semantics, and local test commands.
-[V9 planning issue](https://github.com/st3fan/masscanr/issues/86) tracks this iteration.
+[V9](https://github.com/st3fan/masscanr/issues/86) introduced the service;
+[V10](https://github.com/st3fan/masscanr/issues/100) adds an HTTP-only terminal viewer.
 
 ### Running locally with Docker Compose
 
@@ -128,7 +129,7 @@ curl --fail-with-body -sS "http://127.0.0.1:8080/v1/runs/$run_id" | jq .
 
 # Request stop when needed; poll run status until cleanup settles.
 curl --fail-with-body -sS -X POST \
-  "http://127.0.0.1:8080/v1/scans/$scan_id/stop" | jq .
+  "http://127.0.0.1:8080/v1/runs/$run_id/stop" | jq .
 ```
 
 Plans expire after ten minutes. Only one scan can run at a time, including worker
@@ -136,6 +137,70 @@ cleanup. Results are saved in the artifact directory as `.scan` journals and,
 after successful completion, CSV/JSONL exports. The run response exposes artifact
 paths and separate scan/cleanup outcomes. See the [full API guide](docs/rest-api.md)
 for update/delete requests, pagination, recovery behavior, and test setup.
+
+### Watch scans
+
+Build both the service and client from the V10 checkout. The viewer needs only
+HTTP access to the service; it needs no PostgreSQL connection, Vultr credentials,
+SSH access, or local scan artifacts.
+
+```sh
+go build -o masscanr ./cmd/masscanr
+
+# Attach to one current or historical run.
+./masscanr watch "$run_id"
+
+# Leave a window open: wait while idle and discover new runs automatically.
+./masscanr watch --all
+
+# Choose a service and polling interval (100ms to 1m; default 2s).
+./masscanr watch --all --server http://127.0.0.1:8080 --interval 1s
+
+# Plain status output, also selected automatically when input/output is not a TTY.
+./masscanr watch "$run_id" --plain
+```
+
+`--all` and a run ID are mutually exclusive. All-runs mode shows provisioning,
+scanning, stopping, and cleanup. When nothing is active it displays **No active
+scans — waiting for new runs** and stays running. It retains the last observed
+settled summary while idle and replaces it when another run appears. It is a
+current-activity view: a run that starts and settles entirely between polls can
+be missed. The service still permits only one active run through cleanup.
+
+| Key | Action |
+| --- | --- |
+| `q`, Ctrl-C, Ctrl-D | Detach; scans and the service continue |
+| Tab, `1`, `2` | Switch Overview / Config |
+| Up/down, PageUp/PageDown, Home | Scroll the selected view |
+| `[` / `]` | Select the previous/next active run |
+| `s` | Ask to stop the selected active run |
+| Left/right or Tab, then Enter | Choose Cancel (default) or Stop in the confirmation |
+| Escape, Ctrl-C, `q`, `n` in confirmation | Dismiss without stopping |
+
+Stop confirmation shows and retains the exact run ID even if a newer run appears.
+There is no stop-all action. A stop acknowledgement is only a request; keep
+watching the separate scan and cleanup outcomes. Terminal views remain open
+when the run settles. Plain single-run output exits once `settled:true` is seen;
+plain `--all` stays running while idle and prints only changes. Exit zero describes
+successful viewing/detachment, not successful scanning: inspect the displayed
+scan and cleanup outcomes for failures. EOF or terminal loss detaches the TUI;
+plain mode does not read stdin. SIGTERM/SIGHUP also detach.
+
+After a successful initial connection, temporary connection failures and HTTP
+408/429/5xx preserve the last snapshot, mark it stale, and retry with backoff capped
+at 30 seconds. Stop is unavailable while the view is stale. Malformed or
+incompatible responses and missing runs exit with an error. Startup failures fail
+immediately before changing terminal settings. Run IDs, instance IDs, unknown
+telemetry, last telemetry timestamps, cleanup errors, and server artifact paths
+remain visible; the viewer never treats a lost connection as scan completion.
+
+**A 404 from `/v1/runs?active=true` means the service lacks V10 discovery or the
+server URL is wrong.** Running `go run ./cmd/masscanr watch --all` rebuilds only
+the client. Rebuild/restart the service too: for Compose use
+`docker compose up --build -d --wait`; for native hosting, gracefully stop the old
+process and restart the new `masscanr serve` with the same database and artifact
+directory. Ensure an old native service is not occupying Compose's host port.
+The V10 viewer requires V10 snapshot fields; V9 clients retain their existing API.
 
 ### Debugging scan starts
 
