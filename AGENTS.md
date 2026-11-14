@@ -1,20 +1,29 @@
 # AGENTS.md — masscanr
 
-You are Codex working on `st3fan/masscanr`, a Go-based distributed port scanner. Read `HUMANS.md` for the human-facing workflow and `VERSIONS.md` for this project's release/version policy. The human owns intent, significant design and risk decisions, approval to begin implementation, and authorization to merge, deploy, tag, or release. You may maintain GitHub Issues, labels, native sub-issues/dependencies, Project items, Wiki pages, and draft PRs for authorized work. **An existing Issue is not permission to implement it.**
+You are Codex working on `st3fan/masscanr`, a Go-based distributed port scanner. Read `OBJECTIVE.md` for the project's enduring purpose and direction, `HUMANS.md` for the human-facing workflow, and `VERSIONS.md` for this project's release/version policy. The human owns intent, significant design and risk decisions, approval to begin implementation, and authorization to merge, deploy, tag, or release. You may maintain GitHub Issues, labels, native sub-issues/dependencies, Project items, Wiki pages, and draft PRs for authorized work. **An existing Issue is not permission to implement it.**
 
 ## Sources of truth
 
+- **`OBJECTIVE.md`:** the authoritative, high-level project purpose, intended outcomes, direction, non-goals, and guiding principles. It is stable project guidance in Git, **not** a roadmap, specification, or release plan. Check new work against it; raise inconsistencies for human resolution.
 - **Issue body:** the current intent, scope, acceptance criteria, design, implementation plan, risks, decisions, and delivery links. Edit it when decisions are resolved. Comments are discussion, not a competing specification. Never use GitHub Issue Artifacts.
 - **Intent Issue:** a parent Issue representing a substantial desired outcome. Native sub-issues describe independently verifiable deliverables; native dependencies show blockers. An Intent Issue is **not** a version, milestone, release train, or promise to ship everything together.
-- **Global project context:** [Issue #1](https://github.com/st3fan/masscanr/issues/1) contains historical/project-level guidance. Use it for enduring project-wide principles. Decisions specific to one outcome belong in its Intent Issue. Existing version Issues remain historical; **do not create new version-planning Issues**.
+- **Historical context:** older Issues (including Issue #1 and V1–V10 planning Issues) remain as history, not a privileged or authoritative source of project direction. Use `OBJECTIVE.md` for project-wide purpose and the relevant Intent Issue for current work. **Never bootstrap a project with a special Issue number or create new version-planning Issues.**
 - **Labels:** classification and review cues. **GitHub Project Status:** `Triage`, `Ready`, `In progress`, `In review`, `Done`; do not add status labels.
 - **Wiki:** durable architecture, operations, and reusable product knowledge; link relevant pages from Issues. **PRs:** code diffs, links to Issues, CI/test evidence, review, and stack relationships.
-- **Git:** code, tests, build/runtime configuration, existing product documentation, and minimal project operating guidance: `AGENTS.md`, `HUMANS.md`, and `VERSIONS.md`. Do not commit `intent.md`, `spec.md`, `plan.md`, PRDs, or SDLC planning documents. Temporary local scratch files may be used but must not be committed.
+- **Git:** code, tests, build/runtime configuration, existing product documentation, and durable project guidance: `AGENTS.md`, `HUMANS.md`, `OBJECTIVE.md`, and `VERSIONS.md`. Do not commit `intent.md`, `spec.md`, `plan.md`, PRDs, or SDLC planning documents. Temporary local scratch files may be used but must not be committed.
+
+## Project bootstrap and objective changes
+
+- **No special Issue #1.** For a new project, begin with the same Intent process used for any substantial change: create an ordinary GitHub Intent Issue (whatever number GitHub assigns), with the proposed purpose, audience/problem, desired outcomes, direction, non-goals, principles, and unresolved decisions **in its body**.
+- Codex refines the bootstrap Intent Issue with the human before writing project code. Once the human approves the objective, Codex opens a small PR adding `OBJECTIVE.md`. The human reviews and separately authorizes merging it. The bootstrap Issue closes when its accepted outcome lands on trunk; it never becomes a permanent global guidance Issue.
+- A newly bootstrapped repository may begin with `AGENTS.md` and `HUMANS.md` templates before `OBJECTIVE.md` exists. Treat missing `OBJECTIVE.md` as bootstrap work to resolve, **not** a license to infer permanent project direction.
+- For an existing project adopting this workflow, create `OBJECTIVE.md` through an ordinary approved Intent Issue and PR using existing product knowledge. Historical guidance Issues remain read-only context without special authority.
+- Substantial changes to the purpose, scope boundaries, or direction require a new Intent Issue and human-approved `OBJECTIVE.md` PR. Never silently revise the objective as a side effect of feature development. Keep technical designs, work plans, and roadmaps in GitHub, not this file.
 
 ## Start and plan work
 
-1. Use `gh` for GitHub operations. Read `AGENTS.md`, `HUMANS.md`, the target Issue body, parent/sub-issues, dependencies, labels, linked PRs, Project status, relevant Wiki pages, and the code/tests. Search for duplicate Issues before creating one.
-2. When given an idea, help the human describe the problem, desired outcome, constraints, non-goals, and testable acceptance criteria. Create or update the Issue **body**, using sections as appropriate: `## Intent`, `## Acceptance criteria`, `## Design`, `## Implementation plan`, `## Risks and open questions`, `## Delivery`.
+1. Use `gh` for GitHub operations. Read `OBJECTIVE.md` (or identify that bootstrapping is needed), `AGENTS.md`, `HUMANS.md`, the target Issue body, parent/sub-issues, dependencies, labels, linked PRs, Project status, relevant Wiki pages, and the code/tests. Search for duplicate Issues before creating one.
+2. When given an idea, compare it against `OBJECTIVE.md` and flag a conflict with the project's scope or direction before proceeding. Help the human describe the problem, desired outcome, constraints, non-goals, and testable acceptance criteria. Create or update the Issue **body**, using sections as appropriate: `## Intent`, `## Acceptance criteria`, `## Design`, `## Implementation plan`, `## Risks and open questions`, `## Delivery`.
 3. For a substantial outcome, create an **Intent Issue** with `scope:intent` and native sub-issues for separately verifiable deliverables. Small changes use a single Issue. Sub-issues are delivery outcomes; PRs are reviewable code slices and need not map 1:1.
 4. Propose material architecture, security, scope, compatibility, cost, or operational choices and wait for approval. Do not implement until the Issue is `Ready` or the human explicitly authorizes the work. If the design materially changes while coding, update the Issue with the proposed change and request approval.
 5. Classify Issues with exactly one `type:feature|bug|maintenance|research`, at least one `area:cli|api|ui|infra|security|docs`, and exactly one `priority:p0|p1|p2`. Add `scope:intent` for parent Intent Issues, `risk:security|breaking|data` for relevant risks, and `delivery:stack` for stacked work. Only apply labels that actually exist; ask for one-time setup if required labels or the Project are missing. Do not invent labels or silently omit classification.
@@ -41,7 +50,7 @@ You are Codex working on `st3fan/masscanr`, a Go-based distributed port scanner.
 - A release is a **separate human-triggered decision**, made from a tested, known-good commit already on `main`. Do not schedule or create releases merely because an Intent Issue or PR stack is completed.
 - When asked to prepare a release: read `VERSIONS.md`, inspect trunk health, CI, tests, merged PRs since the last release, breaking changes, migration requirements, flags, and open regressions. Follow the project's policy to propose an identifier, exact target commit, concise notes, and any operational actions. Ask for release authorization before creating tags or publishing a GitHub Release; deployments require explicit permission as well.
 - Do not silently cherry-pick features into a release or create long-lived release branches. A release includes the behavior present at the selected trunk commit; if something must not ship, use a safe feature flag, defer its merge, or raise the concern to the human.
-- Do not modify `VERSIONS.md`, change a published tag, or alter the versioning convention without explicit human authorization.
+- Do not modify `VERSIONS.md`, change a published tag, or alter the versioning convention without explicit human authorization. Follow the same Intent-and-approval requirement for material changes to `OBJECTIVE.md`.
 
 ## masscanr safety rules (retained)
 
@@ -55,4 +64,4 @@ You are Codex working on `st3fan/masscanr`, a Go-based distributed port scanner.
 
 ## Definition of done
 
-The agreed Issue acceptance criteria are met; the relevant PRs were reviewed, tested, and **human-authorized** for merge; trunk remains healthy; sub-issue/parent status and delivery links are current; operational changes are reflected in the Wiki if appropriate. Follow-ups remain in GitHub Issues, not untracked files. **A release is never part of the definition of done for an Intent Issue.**
+The agreed Issue acceptance criteria are met and consistent with `OBJECTIVE.md`; the relevant PRs were reviewed, tested, and **human-authorized** for merge; trunk remains healthy; sub-issue/parent status and delivery links are current; operational changes are reflected in the Wiki if appropriate. Follow-ups remain in GitHub Issues, not untracked files. **A release is never part of the definition of done for an Intent Issue.**
