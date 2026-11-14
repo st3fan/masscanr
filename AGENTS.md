@@ -11,27 +11,21 @@ contains unrelated projects.
 
 ## GitHub workflow
 
-- V1's authoritative project description is
-  https://github.com/st3fan/masscanr/issues/1. Record material design decisions
-  there; do not silently expand its scope or choose major components.
-- Plan each version in a dedicated version planning issue, which defines that
-  version's scope and design decisions. Put work issues under that planning
-  issue using GitHub's native sub-issue relationships.
+- [Issue #1](https://github.com/st3fan/masscanr/issues/1) records the historical
+  V1 scope and decisions. For new work, use a normal GitHub Intent Issue and
+  keep its body current with confirmed scope, design decisions, acceptance
+  criteria, and plan. Use native sub-issues for distinct outcomes.
 - Use the GitHub CLI (`gh`) for issues, PRs, reviews and API calls (`gh api`).
-- Use the installed `gh-stack` skill and `gh stack` for stacked branches and
-  PRs. Read [.agents/skills/gh-stack/SKILL.md](.agents/skills/gh-stack/SKILL.md)
-  before stack operations and follow its non-interactive command guidance.
-- Create or identify an issue before implementation. Link iteration sub-issues
-  under the guidance issue, with clear scope, acceptance criteria, dependencies
-  and validation expectations.
-- Deliver small, manageable PRs linked to their issues. Use one PR stack per
-  version with explicit dependencies and review order. Keep descriptions consistent
-  with final scope and include relevant validation results.
-- When an authorized version merge completes, create and push its version tag
-  and publish a GitHub release. Summarize the version planning issue in the
-  release description, reflecting the final delivered scope.
-- Do not merge PRs or publish releases without user authorization. Authorization
-  to merge a version includes its version tag and GitHub release.
+- For dependent slices, use the installed `gh-stack` skill and `gh stack` for
+  stacked branches and PRs. Read its command guidance before stack operations.
+- Create or identify an Intent Issue before implementation. Obtain separate
+  approval to start coding. Give sub-issues clear scope, acceptance criteria,
+  dependencies, and validation expectations.
+- Deliver small, manageable PRs linked to their issues. Keep dependent stacks
+  to approximately 2–5 PRs, with explicit dependencies and review order. Keep
+  descriptions consistent with final scope and include validation results.
+- Merge PRs, create tags, and publish GitHub releases only with separate user
+  authorization. Releases do not automatically accompany merges.
 
 ## Implementation and validation
 
@@ -55,3 +49,17 @@ contains unrelated projects.
   `masscanr_test_<random-id>`). Never reuse or drop an unrelated database.
 - Tests must clean up only the database they created. Keep connection URLs in
   the environment and out of logs and commits.
+
+<!-- sdlc:managed:start -->
+# Agent guidance
+
+This repository uses **Stefan's Development Lifecycle**, the user-installed Codex skill `$sdlc`. Invoke `$sdlc bootstrap`, `$sdlc objective`, or `$sdlc intent` for lifecycle work; the detailed reusable rules are maintained in that skill, not copied into every project. **Bootstrap creates a reviewable PR for these guides, never a direct trunk change.**
+
+- Read `OBJECTIVE.md` and `TECHNOLOGY.md` (when present) before proposing significant work. The former defines enduring purpose and direction; the latter defines the project's chosen technology stack and engineering preferences. Use normal GitHub Intent Issues to propose changing it.
+- Work **conversation-first, GitHub-backed**: discuss questions, drafts, decisions, and approvals with the human in Codex. Keep current intent, acceptance criteria, design decisions, risks, and implementation plan **synchronized in GitHub Issue bodies**. Do not require the human to edit or approve an Issue in the GitHub UI; direct Issue edits are valid and must be respected. Do not commit `intent.md`, `spec.md`, `plan.md`, or use GitHub Issue Artifacts.
+- Use labels, native sub-issues/dependencies, GitHub Projects for status, and small, reviewable PRs or stacked PRs. Integrate approved safe changes into the default branch (trunk), independently of releases.
+- The human approves significant decisions, start of implementation, PR merges, impactful operations, releases, and deployments separately. Never infer one approval from another.
+- Do not silently change `TECHNOLOGY.md` or ignore its constraints when implementing an Issue; discuss meaningful stack changes with the human and propose them in a reviewed PR.
+- If `VERSIONS.md` exists, follow it for release policy. Do not create Version Issues or assume a release accompanies a merge.
+- Preserve and obey the project's stricter security, testing, operational, and repository boundaries below. If generic and project-specific instructions conflict, raise the conflict rather than silently weakening safeguards.
+<!-- sdlc:managed:end -->
