@@ -133,13 +133,7 @@ func (m *Manager) execute(ctx context.Context, id string) error {
 		eventCtx, stopEvent := context.WithTimeout(context.Background(), 5*time.Second)
 		defer stopEvent()
 		err := m.Store.mutateRun(eventCtx, id, func(r *Run) {
-			if r.Events == nil {
-				r.Events = map[int]controller.Event{}
-			}
-			r.Events[event.Shard] = event
-			if event.State != "finding" {
-				r.Phase = event.State
-			}
+			applyEvent(r, event, time.Now().UTC())
 		})
 		if err != nil {
 			cancel()
@@ -194,6 +188,8 @@ func (m *Manager) finish(ctx context.Context, id string) error {
 func (m *Manager) Routes(a *API, mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/scans/{id}/start", m.start)
 	mux.HandleFunc("POST /v1/scans/{id}/stop", m.stop)
+	mux.HandleFunc("POST /v1/runs/{id}/stop", m.stopRun)
+	mux.HandleFunc("GET /v1/runs", m.activeRuns)
 	mux.HandleFunc("GET /v1/runs/{id}", func(w http.ResponseWriter, r *http.Request) {
 		v, e := m.Store.GetRun(r.Context(), r.PathValue("id"))
 		if e != nil {

@@ -78,7 +78,7 @@ func (s *Store) GetScan(ctx context.Context, id string) (Scan, error) {
 	return readJSON[Scan](ctx, s.Pool, `SELECT data FROM masscanr.scans WHERE id=$1`, id)
 }
 func (s *Store) GetRun(ctx context.Context, id string) (Run, error) {
-	return readJSON[Run](ctx, s.Pool, `SELECT data FROM masscanr.runs WHERE id=$1`, id)
+	return readJSON[Run](ctx, s.Pool, `SELECT `+runSnapshotSQL+` FROM masscanr.runs WHERE id=$1`, id)
 }
 func (s *Store) SaveScan(ctx context.Context, v Scan, revision int64, create bool) error {
 	return s.tx(ctx, func(tx pgx.Tx) error {
@@ -128,7 +128,11 @@ func (s *Store) List(ctx context.Context, table, scanID, after string, limit int
 	if table != "scans" && table != "runs" {
 		return nil, fmt.Errorf("invalid table")
 	}
-	query := `SELECT data FROM masscanr.` + table + ` WHERE id>$1`
+	selection := "data"
+	if table == "runs" {
+		selection = runSnapshotSQL
+	}
+	query := `SELECT ` + selection + ` FROM masscanr.` + table + ` WHERE id>$1`
 	args := []any{after, limit}
 	if table == "runs" {
 		query += ` AND scan_id=$3`

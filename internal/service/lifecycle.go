@@ -34,7 +34,14 @@ func (m *Manager) stop(w http.ResponseWriter, r *http.Request) {
 	respond(w, 202, v)
 }
 func (m *Manager) requestStop(ctx context.Context, id string) error {
-	_, e := m.Store.Pool.Exec(ctx, `UPDATE masscanr.runs SET stop=true WHERE id=$1 AND active`, id)
+	result, e := m.Store.Pool.Exec(ctx, `UPDATE masscanr.runs SET stop=true WHERE id=$1 AND active`, id)
+	if e != nil {
+		return e
+	}
+	if result.RowsAffected() == 0 {
+		_, e = m.Store.GetRun(ctx, id)
+		return e
+	}
 	m.mu.Lock()
 	if cancel := m.cancel[id]; cancel != nil {
 		cancel()
