@@ -49,7 +49,13 @@ func (i instance) worker() cloud.Worker {
 }
 
 func runTag(runID string) (string, error) {
-	b, err := hex.DecodeString(runID)
+	// Older CLI runs use 32 hex digits; durable service runs use UUIDs.
+	// Preserve the exact identifier in the ownership tag for cleanup.
+	digits := runID
+	if len(runID) == 36 && runID[8] == '-' && runID[13] == '-' && runID[18] == '-' && runID[23] == '-' {
+		digits = strings.ReplaceAll(runID, "-", "")
+	}
+	b, err := hex.DecodeString(digits)
 	if err != nil || len(b) != 16 {
 		return "", fmt.Errorf("invalid run identifier")
 	}

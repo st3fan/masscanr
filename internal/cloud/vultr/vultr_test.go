@@ -31,50 +31,54 @@ func fixture(t *testing.T, handler http.HandlerFunc) *Client {
 }
 
 func TestValidateAndCreate(t *testing.T) {
-	c := fixture(t, func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/regions/atl/availability":
-			fmt.Fprint(w, `{"available_plans":["vc2-1c-1gb"]}`)
-		case "/plans":
-			fmt.Fprint(w, `{"plans":[{"id":"vc2-1c-1gb","type":"vc2","disk":25}]}`)
-		case "/os":
-			fmt.Fprint(w, `{"os":[{"id":999,"name":"Alpine Linux x64","arch":"x64","family":"alpinelinux"}]}`)
-		case "/instances":
-			if r.Method == "GET" {
-				fmt.Fprint(w, `{"instances":[]}`)
-				return
+	for _, testRun := range []string{testRun, "79bf9495-f0bd-4a2b-be5a-62224850e741"} {
+		t.Run(testRun, func(t *testing.T) {
+			c := fixture(t, func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/regions/atl/availability":
+					fmt.Fprint(w, `{"available_plans":["vc2-1c-1gb"]}`)
+				case "/plans":
+					fmt.Fprint(w, `{"plans":[{"id":"vc2-1c-1gb","type":"vc2","disk":25}]}`)
+				case "/os":
+					fmt.Fprint(w, `{"os":[{"id":999,"name":"Alpine Linux x64","arch":"x64","family":"alpinelinux"}]}`)
+				case "/instances":
+					if r.Method == "GET" {
+						fmt.Fprint(w, `{"instances":[]}`)
+						return
+					}
+					if r.Method != "POST" {
+						t.Fatal(r.Method)
+					}
+					var req map[string]any
+					if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+						t.Error(err)
+					}
+					if req["label"] != "masscanr" || req["user_scheme"] != "root" || req["os_id"] != float64(999) {
+						t.Error(req)
+					}
+					tags := req["tags"].([]any)
+					if tags[0] != "masscanr-run-"+testRun {
+						t.Error(tags)
+					}
+					fmt.Fprint(w, `{"instance":{"id":"new","main_ip":"192.0.2.1","default_password":"never-log-me"}}`)
+				default:
+					t.Error(r.URL)
+					http.NotFound(w, r)
+				}
+			})
+			spec := cloud.Spec{RunID: testRun, Shard: 1, Region: "atl", InstanceType: "vc2-1c-1gb"}
+			if err := c.Validate(context.Background(), spec); err != nil {
+				t.Fatal(err)
 			}
-			if r.Method != "POST" {
-				t.Fatal(r.Method)
+			worker, err := c.Create(context.Background(), spec)
+			if err != nil || worker.ID != "new" || worker.Password != "never-log-me" {
+				t.Fatal(worker.ID, err)
 			}
-			var req map[string]any
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				t.Error(err)
+			data, _ := json.Marshal(worker)
+			if strings.Contains(string(data), "never-log-me") {
+				t.Fatal("password serialized")
 			}
-			if req["label"] != "masscanr" || req["user_scheme"] != "root" || req["os_id"] != float64(999) {
-				t.Error(req)
-			}
-			tags := req["tags"].([]any)
-			if tags[0] != "masscanr-run-"+testRun {
-				t.Error(tags)
-			}
-			fmt.Fprint(w, `{"instance":{"id":"new","main_ip":"192.0.2.1","default_password":"never-log-me"}}`)
-		default:
-			t.Error(r.URL)
-			http.NotFound(w, r)
-		}
-	})
-	spec := cloud.Spec{RunID: testRun, Shard: 1, Region: "atl", InstanceType: "vc2-1c-1gb"}
-	if err := c.Validate(context.Background(), spec); err != nil {
-		t.Fatal(err)
-	}
-	worker, err := c.Create(context.Background(), spec)
-	if err != nil || worker.ID != "new" || worker.Password != "never-log-me" {
-		t.Fatal(worker.ID, err)
-	}
-	data, _ := json.Marshal(worker)
-	if strings.Contains(string(data), "never-log-me") {
-		t.Fatal("password serialized")
+		})
 	}
 }
 
@@ -248,5 +252,51 @@ func TestAlpineImageSelectionReadsAllCatalogPages(t *testing.T) {
 				t.Fatal(calls, id, err)
 			}
 		})
+	}
+}
+
+func TestRunTagRejectsMalformedIdentifiers(t *testing.T) {
+	for _, id := range []string{"", "abc", "../0123456789abcdef0123456789abcdef", "79bf9495f-0bd-4a2b-be5a-62224850e741", "79bf9495-f0bd-4a2b-be5a-62224850e74z", "{79bf9495-f0bd-4a2b-be5a-62224850e741}"} {
+		if tag, err := runTag(id); err == nil {
+			t.Errorf("accepted %q as %q", id, tag)
+		}
+	}
+}
+
+func TestUUIDCleanupPreservesExactOwnership(t *testing.T) {
+	const id = "79bf9495-f0bd-4a2b-be5a-62224850e741"
+	const tag = "masscanr-run-" + id
+	deleted := false
+	c := fixture(t, func(w http.ResponseWriter, r *http.Request) {
+		worker := map[string]any{"id": "owned", "label": "masscanr", "tags": []string{tag}}
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/instances":
+			json.NewEncoder(w).Encode(map[string]any{"instances": []any{worker,
+				map[string]any{"id": "legacy-spelling", "label": "masscanr", "tags": []string{"masscanr-run-" + strings.ReplaceAll(id, "-", "")}},
+				map[string]any{"id": "wrong-label", "label": "production", "tags": []string{tag}},
+			}})
+		case r.Method == "GET" && r.URL.Path == "/instances/owned":
+			if deleted {
+				http.NotFound(w, r)
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]any{"instance": worker})
+		case r.Method == "DELETE" && r.URL.Path == "/instances/owned":
+			deleted = true
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	})
+	workers, err := c.List(t.Context(), id)
+	if err != nil || len(workers) != 1 || workers[0].ID != "owned" {
+		t.Fatalf("workers=%v err=%v", workers, err)
+	}
+	if err := c.Delete(t.Context(), workers[0], id); err != nil {
+		t.Fatal(err)
+	}
+	if !deleted {
+		t.Fatal("owned UUID worker was not deleted")
 	}
 }
