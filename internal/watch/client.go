@@ -24,6 +24,7 @@ type Client struct {
 	http *http.Client
 }
 type clientError struct {
+	status  int
 	message string
 	retry   bool
 }
@@ -73,7 +74,7 @@ func (c *Client) request(ctx context.Context, method, path string, status int) (
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != status {
-		return nil, &clientError{message: fmt.Sprintf("%s %s: HTTP %d %s", method, path, resp.StatusCode, http.StatusText(resp.StatusCode)), retry: resp.StatusCode == 408 || resp.StatusCode == 429 || resp.StatusCode >= 500}
+		return nil, &clientError{status: resp.StatusCode, message: fmt.Sprintf("%s %s: HTTP %d %s", method, path, resp.StatusCode, http.StatusText(resp.StatusCode)), retry: resp.StatusCode == 408 || resp.StatusCode == 429 || resp.StatusCode >= 500}
 	}
 	b, err := io.ReadAll(io.LimitReader(resp.Body, maxResponse+1))
 	if err != nil {
@@ -124,6 +125,10 @@ func (c *Client) runRequest(ctx context.Context, method, id, suffix string, stat
 func (c *Client) Active(ctx context.Context) ([]runapi.Run, error) {
 	b, err := c.request(ctx, http.MethodGet, "/v1/runs?active=true", 200)
 	if err != nil {
+		var e *clientError
+		if errors.As(err, &e) && e.status == http.StatusNotFound {
+			return nil, &clientError{message: e.message + "; this service does not provide V10 active-run discovery. Check --server, then rebuild and restart masscanr serve (Docker: docker compose up --build -d --wait). Building watch alone does not update the service."}
+		}
 		return nil, err
 	}
 	var envelope struct {

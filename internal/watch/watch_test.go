@@ -288,3 +288,11 @@ func TestTerminalEOFFromFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestOldServiceExplainsDiscovery404(t *testing.T) {
+	c := fixtureClient(t, func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) })
+	_, err := c.Active(t.Context())
+	if err == nil || !strings.Contains(err.Error(), "rebuild and restart") || retryable(err) {
+		t.Fatal(err)
+	}
+}
