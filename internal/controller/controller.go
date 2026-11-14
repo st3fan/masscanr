@@ -48,6 +48,7 @@ func DefaultTimeouts() Timeouts {
 }
 
 type Controller struct {
+	RunID    string // Optional service-assigned durable identity.
 	Backend  backend.Backend
 	Provider cloud.Provider
 	Runner   remote.Runner
@@ -88,6 +89,17 @@ func (c *Controller) Run(ctx context.Context, cfg scan.Config, out io.Writer, em
 		return summary, err
 	}
 	summary.RunID = hex.EncodeToString(id)
+	if c.RunID != "" {
+		if len(c.RunID) > 64 {
+			return summary, fmt.Errorf("invalid run ID")
+		}
+		for _, ch := range c.RunID {
+			if !((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-') {
+				return summary, fmt.Errorf("invalid run ID")
+			}
+		}
+		summary.RunID = c.RunID
+	}
 	if summary.Seed, err = scan.NewSeedWithin(c.Backend.MaxSeed()); err != nil {
 		return summary, err
 	}
@@ -463,4 +475,12 @@ func onlyCancelled(err error) bool {
 		return onlyCancelled(wrapped.Unwrap())
 	}
 	return false
+}
+
+// CleanupRun reconciles only workers owned by a durable service run.
+func (c *Controller) CleanupRun(ctx context.Context, id string) ([]string, bool, error) {
+	if id == "" {
+		return nil, true, fmt.Errorf("run ID required")
+	}
+	return c.cleanup(ctx, id, nil, true, func(Event) {})
 }

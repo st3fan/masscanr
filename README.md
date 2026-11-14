@@ -1,5 +1,181 @@
 # masscanr
 
+## V9 service (under review)
+
+V9 exposes scan CRUD, frozen preflight, start/stop, and run history through a REST
+service backed by PostgreSQL and DBOS. Start with `masscanr serve`; the interactive
+`scan` command is retired. See the [REST API and operations guide](docs/rest-api.md)
+for database setup, request examples, recovery semantics, and local test commands.
+[V9 planning issue](https://github.com/st3fan/masscanr/issues/86) tracks this iteration.
+
+### Running locally with Docker Compose
+
+Requires Docker Engine/Desktop with Docker Compose v2 or newer. Compose builds
+the Go service and starts PostgreSQL 17, so no local Go or PostgreSQL installation
+is needed. From the repository root, initialize a database password in the ignored
+`.env` file (this command leaves an existing `.env` untouched):
+
+```sh
+test -e .env || (umask 077; printf 'MASSCANR_POSTGRES_PASSWORD=%s\n' "$(openssl rand -hex 24)" > .env)
+docker compose up --build -d --wait
+curl --fail-with-body http://127.0.0.1:8080/healthz
+```
+
+If `.env` already exists, add `MASSCANR_POSTGRES_PASSWORD` to it before starting;
+[.env.example](.env.example) lists the available settings with placeholders.
+Compose reads `.env` and passes configuration to the service as environment
+variables. Set `VULTR_API_TOKEN` in `.env` or the launching shell to enable scan
+starts; it can be empty for CRUD and preflight. Recreate the service after changing
+runtime variables: `docker compose up -d --force-recreate masscanr`. Never commit
+real tokens or passwords, and avoid printing resolved Compose configuration.
+
+The API is available at `http://127.0.0.1:8080`; use the [Manage a scan](#manage-a-scan)
+examples below. PostgreSQL is accessible only within the Compose network. Both
+database state and `/data` scan artifacts use persistent named volumes. The image
+runs the service as a non-root user, with no local scanner/root privileges needed.
+
+```sh
+# Check readiness and follow service logs.
+docker compose ps
+docker compose logs -f masscanr
+
+# Copy retained artifacts to the host (also works with a stopped container).
+mkdir -p ./masscanr-data
+docker compose cp masscanr:/data/. ./masscanr-data/
+
+# Stop the service and database while preserving data volumes.
+docker compose down
+
+# Rebuild after updating this checkout; existing volumes are reused.
+docker compose up --build -d --wait
+```
+
+Compose waits for PostgreSQL readiness before starting the service and stops the
+service before PostgreSQL. The service has up to 32 minutes to shut down and clean
+up workers; avoid shortening that timeout during active scans. Copy artifacts
+before `down` removes the container, or after starting it again. An explicit
+`docker compose down --volumes` permanently deletes this Compose project's
+database and artifacts; use it only for a deliberate reset after scans and cleanup
+have settled. Changing the password in `.env` does not rotate an initialized
+PostgreSQL volume's password—keep the original value when reusing that volume.
+
+For hosting, keep this checkout, `.env`, and volumes on the Docker host. The
+containers use `restart: unless-stopped`. Set `MASSCANR_PORT` to change the host
+port. To publish beyond loopback, explicitly set `MASSCANR_BIND_ADDRESS` to the
+host interface (or `0.0.0.0`); V9 has no API authentication or TLS, so use your
+existing private-network/reverse-proxy arrangement. Only one service instance may
+use a database. Use a stable `docker compose -p <project-name>` on every command
+for multiple isolated deployments; assign each a different host port. Compose
+project names scope the containers, networks, and volumes.
+
+### Run locally
+
+The local PostgreSQL server accepts connections as your current operating-system
+user through its Unix socket. Create a uniquely named development database:
+
+```sh
+masscanr_db="masscanr_dev_$(openssl rand -hex 8)"
+createdb --host=/tmp "$masscanr_db"
+export DBOS_SYSTEM_DATABASE_URL="host=/tmp dbname=$masscanr_db sslmode=disable"
+
+go build -o masscanr ./cmd/masscanr
+./masscanr serve --listen 127.0.0.1:8080 --data-dir ./masscanr-data
+```
+
+The service initializes its PostgreSQL and DBOS schemas automatically. Keep the
+same database and artifact directory when restarting. Set `VULTR_API_TOKEN` in
+the service's environment through your secret manager before starting scans;
+CRUD and preflight work without it. For example, with 1Password:
+
+```sh
+VULTR_API_TOKEN='op://Company/Vultr/api-token' \
+  op run -- ./masscanr serve --listen 127.0.0.1:8080 --data-dir ./masscanr-data
+```
+
+Use Ctrl-C or SIGTERM to stop the service and wait for worker cleanup. Only one
+service process may use a database. This version has no users or authentication.
+
+### Manage a scan
+
+In another terminal, check readiness and create a scan definition. Replace the
+placeholder below with a network you are authorized to scan. These commands use
+`curl` and `jq`.
+
+```sh
+curl --fail-with-body http://127.0.0.1:8080/healthz
+
+scan_id=$(curl --fail-with-body -sS http://127.0.0.1:8080/v1/scans \
+  -H 'Content-Type: application/json' \
+  -d '{"targets":["YOUR_AUTHORIZED_IPV4_OR_CIDR"],"ports":"22,80,443"}' \
+  | jq -r .id)
+
+# Resolve and inspect the exact scope before starting.
+curl --fail-with-body -sS -X POST \
+  "http://127.0.0.1:8080/v1/scans/$scan_id/preflight" > preflight.json
+jq . preflight.json
+plan_id=$(jq -r .id preflight.json)
+
+# Start only after reviewing the returned targets and planned probe count.
+# Keep this request key when retrying a lost response.
+request_key=$(openssl rand -hex 16)
+run_id=$(curl --fail-with-body -sS \
+  "http://127.0.0.1:8080/v1/scans/$scan_id/start" \
+  -H 'Content-Type: application/json' \
+  -H "Idempotency-Key: $request_key" \
+  -d "{\"plan_id\":\"$plan_id\",\"confirm\":true}" | jq -r .id)
+
+curl --fail-with-body -sS "http://127.0.0.1:8080/v1/runs/$run_id" | jq .
+
+# Request stop when needed; poll run status until cleanup settles.
+curl --fail-with-body -sS -X POST \
+  "http://127.0.0.1:8080/v1/scans/$scan_id/stop" | jq .
+```
+
+Plans expire after ten minutes. Only one scan can run at a time, including worker
+cleanup. Results are saved in the artifact directory as `.scan` journals and,
+after successful completion, CSV/JSONL exports. The run response exposes artifact
+paths and separate scan/cleanup outcomes. See the [full API guide](docs/rest-api.md)
+for update/delete requests, pagination, recovery behavior, and test setup.
+
+### Debugging scan starts
+
+Use the Python 3 script to see each request stage, its payload, HTTP status,
+server errors, and the scan/plan/run IDs:
+
+```sh
+# Inspect the created definition and frozen plan without starting a scan.
+python3 scripts/start-scan.py --preflight-only --ports 22,80,443 64.98.138.0/22
+
+# Create and start a scan, then observe status for early asynchronous errors.
+python3 scripts/start-scan.py --ports 22,80,443 --wait 60 64.98.138.0/22
+```
+
+The example uses the authorized company test prefix; substitute only networks you
+are authorized to scan. `--server` changes the API URL (default
+`http://127.0.0.1:8080`). Run `python3 scripts/start-scan.py --help` for backend,
+shard, rate, placement, and timeout options. It uses only Python's standard library.
+The Vultr token must be configured on the service, not on this client.
+
+Large scans require interactive approval of the displayed frozen plan, or an
+explicit `--yes`. `--preflight-only` still saves a definition and plan. The script
+does not automatically retry mutations, delete definitions, or stop scans. If a
+start response is lost, use the printed exact start request and idempotency key;
+do not blindly rerun the whole script and create another definition.
+
+A `202` means accepted, not successful scanner startup. The script polls for 30
+seconds by default, prints worker/cleanup diagnostics, and exits nonzero for HTTP,
+protocol, connection, or reported run errors. Exit zero means no error was seen in
+the observation window; continue checking the printed status URL for completion.
+Ctrl-C detaches the script and leaves any accepted scan running. For server detail:
+`docker compose logs --tail=100 masscanr postgres`. Review logs before sharing them.
+
+Offline script tests: `python3 -B -m unittest discover -s scripts -p 'test_start_scan.py'`.
+
+### Historical CLI reference
+
+The sections below describe the V1–V8 engine, artifacts, and historical CLI. Their
+scan invocation examples are retained as reference; use the V9 API for execution.
+
 Run masscan or ZMap shards on temporary Vultr VPS workers, stream discoveries back to a
 local `.scan` document with CSV/JSONL exports, and watch each worker in a terminal UI. The controller is
 written in Go and needs no root privileges. Masscan is the default; select
