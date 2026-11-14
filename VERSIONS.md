@@ -2,7 +2,7 @@
 
 This file defines **how masscanr versions and publishes releases**. It does not define feature scope, implementation planning, release cadence, or what belongs in an Intent Issue. Those remain independent of releases.
 
-`AGENTS.md` defines the development workflow; `HUMANS.md` describes human interaction with it. Other projects may define an entirely different policy in their own `VERSIONS.md`.
+`AGENTS.md` defines the development workflow; `HUMANS.md` describes human interaction with it; `OBJECTIVE.md` defines the enduring project purpose and direction. Other projects may define an entirely different policy in their own `VERSIONS.md`.
 
 ## Version identifiers
 
