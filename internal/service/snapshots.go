@@ -79,10 +79,10 @@ func applyEvent(r *Run, e controller.Event, now time.Time) {
 	if e.RunID != "" {
 		r.Summary.RunID = e.RunID
 	}
-	if e.State != "finding" {
-		r.Phase = e.State
-	}
 	if e.Shard == 0 && e.ID == "" {
+		if e.State != "finding" {
+			r.Phase = e.State
+		}
 		return
 	}
 	if r.WorkerSnapshots == nil {
@@ -147,4 +147,27 @@ func applyEvent(r *Run, e controller.Event, now time.Time) {
 		w.Progress.Found = *w.Found
 	}
 	r.WorkerSnapshots[key] = w
+	// A completed/deleted shard must not hide peers which are still scanning.
+	if r.Phase != "cleanup" && r.Phase != "exporting" {
+		phase, priority := "provisioning", 0
+		for _, worker := range r.WorkerSnapshots {
+			candidate, rank := "provisioning", 0
+			switch worker.State {
+			case "failed", "cancelled":
+				candidate, rank = "stopping", 5
+			case "scanning":
+				candidate, rank = "scanning", 4
+			case "waiting", "collecting":
+				candidate, rank = worker.State, 3
+			case "preparing", "ready":
+				candidate, rank = "preparing", 2
+			case "completed":
+				candidate, rank = "cleanup", 1
+			}
+			if rank > priority {
+				phase, priority = candidate, rank
+			}
+		}
+		r.Phase = phase
+	}
 }

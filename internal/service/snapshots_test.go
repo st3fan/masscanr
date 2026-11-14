@@ -113,3 +113,19 @@ func TestActiveDiscoveryAndHistoricalRunStop(t *testing.T) {
 		}
 	}
 }
+
+func TestCompletedShardDoesNotHideScanningPeer(t *testing.T) {
+	r := Run{Phase: "accepted"}
+	now := time.Now()
+	applyEvent(&r, controller.Event{Shard: 1, State: "scanning"}, now)
+	applyEvent(&r, controller.Event{Shard: 2, State: "completed"}, now)
+	applyEvent(&r, controller.Event{Shard: 2, State: "shutdown"}, now)
+	if r.Phase != "scanning" {
+		t.Fatal(r.Phase)
+	}
+	applyEvent(&r, controller.Event{State: "cleanup"}, now)
+	applyEvent(&r, controller.Event{Shard: 1, State: "shutdown"}, now)
+	if r.Phase != "cleanup" {
+		t.Fatal(r.Phase)
+	}
+}
