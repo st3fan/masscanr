@@ -60,14 +60,7 @@ func (d Definition) Config() (scan.Config, controller.Timeouts, error) {
 	return c, t, b.Validate(intent, c.Shards)
 }
 
-type Scan struct {
-	ID         string     `json:"id"`
-	Revision   int64      `json:"revision"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
-	Definition Definition `json:"definition"`
-}
-type Plan = runapi.Plan
+type Plan = runapi.Preflight
 type Run = runapi.Run
 
 func newID() string { return uuid.NewString() }

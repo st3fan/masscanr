@@ -53,7 +53,7 @@ func TestActiveDiscoveryAndHistoricalRunStop(t *testing.T) {
 			} `json:"meta"`
 		}
 		var runs []Run
-		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &out) != nil || out.Meta.SnapshotVersion != 1 || decodeTestList(w.Body.Bytes(), &runs) != nil {
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &out) != nil || out.Meta.SnapshotVersion != 2 || decodeTestList(w.Body.Bytes(), &runs) != nil {
 			t.Fatal(w.Code, w.Body)
 		}
 		return runs
@@ -74,7 +74,7 @@ func TestActiveDiscoveryAndHistoricalRunStop(t *testing.T) {
 	if len(list()) != 0 {
 		t.Fatal("settled run remains active")
 	}
-	b, err := s.Reserve(ctx, a.ScanID, a.Plan.ID, "second-run", false)
+	b, err := s.ReserveScanPlan(ctx, a.ScanPlanID, a.Plan.ID, "second-run", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,13 +106,13 @@ func TestActiveDiscoveryAndHistoricalRunStop(t *testing.T) {
 	if w := request(h, "GET", "/v1/runs", ""); w.Code != 400 {
 		t.Fatal(w.Code)
 	}
-	history := request(h, "GET", "/v1/scans/"+a.ScanID+"/runs", "")
+	history := request(h, "GET", "/v1/scan-plans/"+a.ScanPlanID+"/runs", "")
 	var runs []Run
 	if decodeTestList(history.Body.Bytes(), &runs) != nil || len(runs) != 2 {
 		t.Fatal(history.Body)
 	}
 	for _, r := range runs {
-		if r.SnapshotVersion != 1 || r.Active == r.Settled {
+		if r.SnapshotVersion != 2 || r.Active == r.Settled {
 			t.Fatal(r)
 		}
 	}

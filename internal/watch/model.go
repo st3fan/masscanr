@@ -204,7 +204,7 @@ func (m model) body() []string {
 			if r.ID == m.selected {
 				mark = "> "
 			}
-			lines = append(lines, mark+r.ID+" | scan "+r.ScanID+" | "+r.Phase)
+			lines = append(lines, mark+r.ID+" | plan "+r.ScanPlanID+" | "+r.Phase)
 		}
 	}
 	r := m.selectedRun()

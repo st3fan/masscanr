@@ -1,0 +1,132 @@
+package service
+
+import (
+	"context"
+	"encoding/json"
+	"time"
+
+	"github.com/gofiber/fiber/v3"
+	"github.com/jackc/pgx/v5"
+	"github.com/st3fan/masscanr/internal/backend/registry"
+	"github.com/st3fan/masscanr/internal/ripe"
+	"github.com/st3fan/masscanr/internal/scan"
+)
+
+func (a *API) preflightScanPlan(c fiber.Ctx) error {
+	plan, err := a.Store.GetScanPlan(c.Context(), c.Params("id"))
+	if err != nil {
+		return problem(c, err)
+	}
+	target, err := a.Store.GetTarget(c.Context(), plan.TargetID)
+	if err != nil {
+		return problem(c, err)
+	}
+	if target.ArchivedAt != nil {
+		return problem(c, ErrConflict)
+	}
+	cfg, timeouts, err := plan.Settings.Config(target.Inputs())
+	if err != nil {
+		return bad(c, err)
+	}
+	resolve := a.Resolve
+	if resolve == nil {
+		resolve = ripe.New().Resolve
+	}
+	cfg.RequestedTargets, err = resolve(c.Context(), cfg.RequestedTargets)
+	if err != nil {
+		return respond(c, 422, map[string]string{"error": "target resolution failed"})
+	}
+	cfg.Targets = scan.TargetUnion(cfg.RequestedTargets)
+	if err = cfg.Validate(); err != nil {
+		return bad(c, err)
+	}
+	backend, err := registry.Resolve(cfg.Backend)
+	if err == nil {
+		err = backend.Validate(cfg.Intent(), cfg.Shards)
+	}
+	if err != nil {
+		return bad(c, err)
+	}
+	workload, err := cfg.Intent().Workload()
+	if err != nil {
+		return bad(c, err)
+	}
+	preflight := Plan{
+		ID:       newID(),
+		TargetID: target.ID, TargetRevision: target.Revision,
+		ScanPlanID: plan.ID, ScanPlanRevision: plan.Revision,
+		ExpiresAt: time.Now().UTC().Add(10 * time.Minute),
+		Config:    cfg, Timeouts: timeouts, Workload: workload,
+		RequiresConfirmation: workload.RequiresConfirmation(),
+	}
+	err = a.Store.tx(c.Context(), func(tx pgx.Tx) error {
+		currentTarget, e := readTarget(c.Context(), tx, target.ID)
+		if e != nil {
+			return e
+		}
+		currentPlan, e := readScanPlan(c.Context(), tx, plan.ID)
+		if e != nil {
+			return e
+		}
+		if currentTarget.Revision != target.Revision || currentTarget.ArchivedAt != nil || currentPlan.Revision != plan.Revision || currentPlan.TargetID != target.ID {
+			return ErrConflict
+		}
+		data, e := json.Marshal(preflight)
+		if e != nil {
+			return e
+		}
+		_, e = tx.Exec(c.Context(), `INSERT INTO masscanr.scan_preflights(id,target_id,scan_plan_id,target_revision,scan_plan_revision,expires_at,data) VALUES($1,$2,$3,$4,$5,$6,$7)`, preflight.ID, target.ID, plan.ID, target.Revision, plan.Revision, preflight.ExpiresAt, data)
+		return e
+	})
+	if err != nil {
+		return problem(c, err)
+	}
+	return respond(c, 201, preflight)
+}
+
+func (s *Store) ReserveScanPlan(ctx context.Context, scanPlanID, preflightID, key string, confirm bool) (Run, error) {
+	var run Run
+	err := s.tx(ctx, func(tx pgx.Tx) error {
+		existing, e := readJSON[Run](ctx, tx, `SELECT `+runSnapshotSQL+` FROM masscanr.runs WHERE request_key=$1`, key)
+		if e == nil {
+			if existing.ScanPlanID != scanPlanID || existing.Plan.ID != preflightID {
+				return ErrConflict
+			}
+			run = existing
+			return nil
+		}
+		if e != ErrNotFound {
+			return e
+		}
+		plan, e := readScanPlan(ctx, tx, scanPlanID)
+		if e != nil {
+			return e
+		}
+		target, e := readTarget(ctx, tx, plan.TargetID)
+		if e != nil {
+			return e
+		}
+		preflight, e := readJSON[Plan](ctx, tx, `SELECT data FROM masscanr.scan_preflights WHERE id=$1`, preflightID)
+		if e != nil {
+			return e
+		}
+		if target.ArchivedAt != nil || preflight.ScanPlanID != scanPlanID || preflight.TargetID != target.ID || preflight.TargetRevision != target.Revision || preflight.ScanPlanRevision != plan.Revision || !time.Now().Before(preflight.ExpiresAt) || preflight.RequiresConfirmation && !confirm {
+			return ErrConflict
+		}
+		var active bool
+		if e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM masscanr.runs WHERE active)`).Scan(&active); e != nil {
+			return e
+		}
+		if active {
+			return ErrConflict
+		}
+		run = Run{SnapshotVersion: 2, Active: true, ID: newID(), TargetID: target.ID, ScanPlanID: plan.ID, Plan: preflight, Phase: "accepted", CreatedAt: time.Now().UTC()}
+		data, e := json.Marshal(run)
+		if e != nil {
+			return e
+		}
+		_, e = tx.Exec(ctx, `INSERT INTO masscanr.runs(id,target_id,scan_plan_id,request_key,data) VALUES($1,$2,$3,$4,$5)`, run.ID, target.ID, plan.ID, key, data)
+		return e
+	})
+	return run, err
+}

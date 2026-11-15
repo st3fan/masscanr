@@ -14,7 +14,7 @@ import (
 
 // Overlay database columns in the same SELECT: persisted JSON is not authoritative
 // for admission, stop intent, or settlement (including V9 historical rows).
-const runSnapshotSQL = `data || jsonb_build_object('snapshot_version',1,'active',active,'settled',NOT active,'stop_requested',stop)`
+const runSnapshotSQL = `data || jsonb_build_object('snapshot_version',2,'active',active,'settled',NOT active,'stop_requested',stop)`
 
 func (s *Store) ActiveRuns(ctx context.Context) ([]Run, error) {
 	rows, err := s.Pool.Query(ctx, `SELECT `+runSnapshotSQL+` FROM masscanr.runs WHERE active ORDER BY id`)

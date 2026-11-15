@@ -7,18 +7,22 @@ import (
 	"time"
 )
 
-const SnapshotVersion = 1
+const SnapshotVersion = 2
 
-type Plan struct {
+type Preflight struct {
 	ID                   string              `json:"id"`
-	ScanID               string              `json:"scan_id"`
-	Revision             int64               `json:"revision"`
+	TargetID             string              `json:"target_id,omitempty"`
+	TargetRevision       int64               `json:"target_revision,omitempty"`
+	ScanPlanID           string              `json:"scan_plan_id,omitempty"`
+	ScanPlanRevision     int64               `json:"scan_plan_revision,omitempty"`
 	ExpiresAt            time.Time           `json:"expires_at"`
 	Config               scan.Config         `json:"config"`
 	Timeouts             controller.Timeouts `json:"timeouts"`
 	Workload             scan.Workload       `json:"workload"`
 	RequiresConfirmation bool                `json:"requires_confirmation"`
 }
+type Plan = Preflight
+
 type Run struct {
 	SnapshotVersion int               `json:"snapshot_version"`
 	Active          bool              `json:"active"`
@@ -26,15 +30,16 @@ type Run struct {
 	StopRequested   bool              `json:"stop_requested"`
 	WorkerSnapshots map[string]Worker `json:"worker_snapshots"`
 
-	ID        string                   `json:"id"`
-	ScanID    string                   `json:"scan_id"`
-	Plan      Plan                     `json:"plan"`
-	Phase     string                   `json:"phase"`
-	CreatedAt time.Time                `json:"created_at"`
-	Artifact  string                   `json:"artifact"`
-	Summary   controller.Summary       `json:"summary"`
-	Error     string                   `json:"error,omitempty"`
-	Events    map[int]controller.Event `json:"workers,omitempty"`
+	ID         string                   `json:"id"`
+	TargetID   string                   `json:"target_id,omitempty"`
+	ScanPlanID string                   `json:"scan_plan_id,omitempty"`
+	Plan       Preflight                `json:"preflight"`
+	Phase      string                   `json:"phase"`
+	CreatedAt  time.Time                `json:"created_at"`
+	Artifact   string                   `json:"artifact"`
+	Summary    controller.Summary       `json:"summary"`
+	Error      string                   `json:"error,omitempty"`
+	Events     map[int]controller.Event `json:"workers,omitempty"`
 }
 
 // Worker retains independent execution and cleanup state. Nil measurements are unknown.

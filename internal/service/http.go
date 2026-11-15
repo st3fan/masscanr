@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"mime"
-	"strconv"
 	"strings"
 	"time"
 
@@ -68,7 +67,7 @@ func (a *API) Handler() *fiber.App {
 		if c.Path() == "/v1/catalog/regions" || c.Path() == "/v1/catalog/instance-types" {
 			duration = time.Minute
 		}
-		if c.Method() == fiber.MethodPost && strings.HasPrefix(c.Path(), "/v1/scans/") && strings.HasSuffix(c.Path(), "/preflight") {
+		if c.Method() == fiber.MethodPost && strings.HasPrefix(c.Path(), "/v1/scan-plans/") && strings.HasSuffix(c.Path(), "/preflight") {
 			duration = 2 * time.Minute
 		}
 		if c.Method() == fiber.MethodGet && strings.HasPrefix(c.Path(), "/v1/runs/") && strings.HasSuffix(c.Path(), "/inspection") {
@@ -88,14 +87,18 @@ func (a *API) Handler() *fiber.App {
 		}
 		return respond(c, 200, map[string]string{"status": "ready"})
 	})
-	a.register("POST", "/v1/scans", "createScan", "Create a scan definition", Scan{}, a.create)
-	a.register("POST", "/v1/scans/:id/preflight", "preflightScan", "Resolve an authorized scan plan", Plan{}, a.preflight)
-	a.register("GET", "/v1/scans", "listScans", "List scan definitions", Scan{}, a.list)
-	a.register("GET", "/v1/scans/:id", "getScan", "Get a scan definition", Scan{}, a.get)
+	a.register("POST", "/v1/targets", "createTarget", "Create a reusable target", Target{}, a.createTarget)
+	a.register("GET", "/v1/targets", "listTargets", "List targets", Target{}, a.listTargets)
+	a.register("GET", "/v1/targets/:id", "getTarget", "Get a target", Target{}, a.getTarget)
+	a.register("PATCH", "/v1/targets/:id", "updateTarget", "Update or archive a target", Target{}, a.patchTarget)
+	a.register("POST", "/v1/scan-plans", "createScanPlan", "Create a reusable scan plan", ScanPlan{}, a.createScanPlan)
+	a.register("GET", "/v1/scan-plans", "listScanPlans", "List scan plans", ScanPlan{}, a.listScanPlans)
+	a.register("GET", "/v1/scan-results", "listScanResults", "List positive open port observations", ScanResult{}, a.listScanResults)
+	a.register("GET", "/v1/scan-plans/:id", "getScanPlan", "Get a scan plan", ScanPlan{}, a.getScanPlan)
+	a.register("POST", "/v1/scan-plans/:id/preflight", "preflightScanPlan", "Resolve and freeze a scan preflight", Plan{}, a.preflightScanPlan)
+	a.register("PATCH", "/v1/scan-plans/:id", "updateScanPlan", "Update a scan plan", ScanPlan{}, a.patchScanPlan)
 	a.register("GET", "/v1/catalog/regions", "listRegions", "List provider regions", regionResponse{}, a.regions)
 	a.register("GET", "/v1/catalog/instance-types", "listInstanceTypes", "List provider instance types", instanceTypeResponse{}, a.instanceTypes)
-	a.register("PATCH", "/v1/scans/:id", "updateScan", "Partially update a scan definition", Scan{}, a.patch)
-	a.register("DELETE", "/v1/scans/:id", "deleteScan", "Delete a scan definition", nil, a.remove)
 	if a.Extra != nil {
 		a.Extra(app)
 	}
@@ -164,99 +167,3 @@ func problem(c fiber.Ctx, e error) error {
 	return respond(c, code, map[string]string{"error": message})
 }
 func bad(c fiber.Ctx, e error) error { return respond(c, 400, map[string]string{"error": e.Error()}) }
-func (a *API) create(c fiber.Ctx) error {
-	d := Defaults()
-	if e := decode(c, &d); e != nil {
-		return bad(c, e)
-	}
-	if _, _, e := d.Config(); e != nil {
-		return bad(c, e)
-	}
-	now := time.Now().UTC()
-	v := Scan{ID: newID(), Revision: 1, CreatedAt: now, UpdatedAt: now, Definition: d}
-	if e := a.Store.SaveScan(c.Context(), v, 0, true); e != nil {
-		return problem(c, e)
-	}
-	c.Set("Location", "/v1/scans/"+v.ID)
-	return respond(c, 201, v)
-}
-func (a *API) get(c fiber.Ctx) error {
-	v, e := a.Store.GetScan(c.Context(), c.Params("id"))
-	if e != nil {
-		return problem(c, e)
-	}
-	return respond(c, 200, v)
-}
-func (a *API) patch(c fiber.Ctx) error {
-	var in struct {
-		Revision   int64                      `json:"revision"`
-		Definition map[string]json.RawMessage `json:"definition"`
-	}
-	if e := decode(c, &in); e != nil {
-		return bad(c, e)
-	}
-	if in.Revision < 1 || len(in.Definition) == 0 {
-		return bad(c, fmt.Errorf("revision and changed definition attributes are required"))
-	}
-	current, e := a.Store.GetScan(c.Context(), c.Params("id"))
-	if e != nil {
-		return problem(c, e)
-	}
-	if current.Revision != in.Revision {
-		return problem(c, ErrConflict)
-	}
-	b, e := json.Marshal(current.Definition)
-	if e != nil {
-		return problem(c, e)
-	}
-	var fields map[string]json.RawMessage
-	if e = json.Unmarshal(b, &fields); e != nil {
-		return problem(c, e)
-	}
-	for key, value := range in.Definition {
-		if _, ok := fields[key]; !ok {
-			return bad(c, fmt.Errorf("unknown definition attribute %q", key))
-		}
-		fields[key] = value
-	}
-	b, e = json.Marshal(fields)
-	if e != nil {
-		return problem(c, e)
-	}
-	var definition Definition
-	if e = json.Unmarshal(b, &definition); e != nil {
-		return bad(c, fmt.Errorf("invalid definition attributes"))
-	}
-	if _, _, e = definition.Config(); e != nil {
-		return bad(c, e)
-	}
-	current.Definition = definition
-	current.Revision++
-	current.UpdatedAt = time.Now().UTC()
-	if e = a.Store.SaveScan(c.Context(), current, in.Revision, false); e != nil {
-		return problem(c, e)
-	}
-	return respond(c, 200, current)
-}
-func (a *API) remove(c fiber.Ctx) error {
-	if e := a.Store.DeleteScan(c.Context(), c.Params("id")); e != nil {
-		return problem(c, e)
-	}
-	return respond(c, 204, nil)
-}
-func (a *API) list(c fiber.Ctx) error { return a.listTable(c, "scans", "") }
-func (a *API) listTable(c fiber.Ctx, table, id string) error {
-	limit := 100
-	if s := c.Query("limit"); s != "" {
-		n, e := strconv.Atoi(s)
-		if e != nil || n < 1 || n > 1000 {
-			return bad(c, fmt.Errorf("limit must be 1..1000"))
-		}
-		limit = n
-	}
-	v, e := a.Store.List(c.Context(), table, id, c.Query("after"), limit)
-	if e != nil {
-		return problem(c, e)
-	}
-	return respond(c, 200, v)
-}

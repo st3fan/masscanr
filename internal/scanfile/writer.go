@@ -182,6 +182,16 @@ func (w *Writer) Finish(scanOutcome string, reconciliation bool, detail string) 
 	return w.append(Record{Type: "finished", Finished: &final}, true)
 }
 
+// Flush durably syncs all accepted records and returns the synced journal sequence.
+func (w *Writer) Flush() (uint64, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if err := w.flush(); err != nil {
+		return 0, err
+	}
+	return w.state.Seq, nil
+}
+
 func (w *Writer) Err() error { w.mu.Lock(); defer w.mu.Unlock(); return w.err }
 
 func (w *Writer) Close() error {

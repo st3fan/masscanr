@@ -6,84 +6,89 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/st3fan/masscanr/internal/scan"
 )
 
-func TestAdmissionIsAtomicAndHistorySurvivesDelete(t *testing.T) {
-	s := testStore(t)
-	h := (&API{Store: s}).Handler()
-	w := request(h, "POST", "/v1/scans", `{"data":{"type":"scans","attributes":{"targets":["192.0.2.1"]}}}`)
-	var v Scan
-	decodeTestResource(w.Body.Bytes(), &v)
-	w = request(h, "POST", "/v1/scans/"+v.ID+"/preflight", "")
-	var p Plan
-	decodeTestResource(w.Body.Bytes(), &p)
+func TestScanPlanAdmissionIsAtomic(t *testing.T) {
+	store := testStore(t)
 	ctx := context.Background()
+	target, err := store.CreateTarget(ctx, "External Network", []string{"192.0.2.1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := store.CreateScanPlan(ctx, "Daily", target.ID, DefaultScanPlanSettings())
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := (&API{Store: store, Resolve: func(_ context.Context, targets []scan.Target) ([]scan.Target, error) { return targets, nil }}).Handler()
+	response := request(app, "POST", "/v1/scan-plans/"+plan.ID+"/preflight", "")
+	var preflight Plan
+	if response.Code != 201 || decodeTestResource(response.Body.Bytes(), &preflight) != nil {
+		t.Fatal(response.Code, response.Body)
+	}
 	var wg sync.WaitGroup
-	out := make(chan Run, 8)
-	errs := make(chan error, 8)
-	for i := 0; i < 8; i++ {
+	accepted := make(chan Run, 8)
+	failures := make(chan error, 8)
+	for range 8 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			r, e := s.Reserve(ctx, v.ID, p.ID, newID(), false)
-			if e == nil {
-				out <- r
+			run, err := store.ReserveScanPlan(ctx, plan.ID, preflight.ID, newID(), true)
+			if err == nil {
+				accepted <- run
 			} else {
-				errs <- e
+				failures <- err
 			}
 		}()
 	}
 	wg.Wait()
-	close(out)
-	close(errs)
-	if len(out) != 1 {
-		t.Fatalf("accepted %d runs", len(out))
+	close(accepted)
+	close(failures)
+	if len(accepted) != 1 {
+		t.Fatalf("accepted %d runs", len(accepted))
 	}
-	for e := range errs {
-		if e != ErrConflict {
-			t.Fatal(e)
+	for err := range failures {
+		if err != ErrConflict {
+			t.Fatal(err)
 		}
 	}
-	r := <-out
-	s.Pool.Exec(ctx, `UPDATE masscanr.runs SET active=false WHERE id=$1`, r.ID)
-	if e := s.DeleteScan(ctx, v.ID); e != nil {
-		t.Fatal(e)
-	}
-	if _, e := s.GetRun(ctx, r.ID); e != nil {
-		t.Fatal(e)
+	run := <-accepted
+	if run.TargetID != target.ID || run.ScanPlanID != plan.ID {
+		t.Fatal(run)
 	}
 }
-func TestStaleAndExpiredPlansCannotStart(t *testing.T) {
-	for _, edit := range []bool{true, false} {
-		t.Run(time.Now().String(), func(t *testing.T) {
-			s := testStore(t)
-			h := (&API{Store: s}).Handler()
-			w := request(h, "POST", "/v1/scans", `{"data":{"type":"scans","attributes":{"targets":["192.0.2.1"]}}}`)
-			var v Scan
-			decodeTestResource(w.Body.Bytes(), &v)
-			w = request(h, "POST", "/v1/scans/"+v.ID+"/preflight", "")
-			var p Plan
-			decodeTestResource(w.Body.Bytes(), &p)
-			ctx := context.Background()
-			if edit {
-				v.Revision++
-				v.Definition.Targets = []string{"198.51.100.1"}
-				if e := s.SaveScan(ctx, v, 1, false); e != nil {
-					t.Fatal(e)
-				}
-			} else {
-				p.ExpiresAt = time.Now().Add(-time.Second)
-				b, _ := json.Marshal(p)
-				s.Pool.Exec(ctx, `UPDATE masscanr.plans SET data=$2 WHERE id=$1`, p.ID, b)
-			}
-			if _, e := s.Reserve(ctx, v.ID, p.ID, newID(), true); e != ErrConflict {
-				t.Fatal(e)
-			}
-			var n int
-			s.Pool.QueryRow(ctx, `SELECT count(*) FROM masscanr.runs`).Scan(&n)
-			if n != 0 {
-				t.Fatal("created run before acceptance")
-			}
-		})
+
+func TestExpiredScanPlanPreflightCannotStart(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	target, err := store.CreateTarget(ctx, "External Network", []string{"192.0.2.1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := store.CreateScanPlan(ctx, "Daily", target.ID, DefaultScanPlanSettings())
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := (&API{Store: store, Resolve: func(_ context.Context, targets []scan.Target) ([]scan.Target, error) { return targets, nil }}).Handler()
+	response := request(app, "POST", "/v1/scan-plans/"+plan.ID+"/preflight", "")
+	var preflight Plan
+	if response.Code != 201 || decodeTestResource(response.Body.Bytes(), &preflight) != nil {
+		t.Fatal(response.Code, response.Body)
+	}
+	preflight.ExpiresAt = time.Now().Add(-time.Second)
+	data, err := json.Marshal(preflight)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.Pool.Exec(ctx, `UPDATE masscanr.scan_preflights SET expires_at=$2,data=$3 WHERE id=$1`, preflight.ID, preflight.ExpiresAt, data); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.ReserveScanPlan(ctx, plan.ID, preflight.ID, newID(), true); err != ErrConflict {
+		t.Fatalf("accepted expired preflight: %v", err)
+	}
+	var count int
+	if err = store.Pool.QueryRow(ctx, `SELECT count(*) FROM masscanr.runs`).Scan(&count); err != nil || count != 0 {
+		t.Fatal(count, err)
 	}
 }

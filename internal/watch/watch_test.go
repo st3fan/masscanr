@@ -43,13 +43,13 @@ func (f activeRunsFixture) MarshalJSON() ([]byte, error) {
 }
 
 func fixtureRun(id string, active bool) runSnapshot {
-	return runSnapshot{SnapshotVersion: 1, ID: id, ScanID: "scan", Active: active, Settled: !active, Phase: "scanning", CreatedAt: time.Now(), Plan: planSnapshot{Revision: 1, Config: configSnapshot{Backend: "masscan", Shards: 2, Ports: []uint16{80, 443}}}}
+	return runSnapshot{SnapshotVersion: 2, ID: id, ScanPlanID: "plan", Active: active, Settled: !active, Phase: "scanning", CreatedAt: time.Now(), Plan: planSnapshot{ScanPlanRevision: 1, Config: configSnapshot{Backend: "masscan", Shards: 2, Ports: []uint16{80, 443}}}}
 }
 
 func TestServerSnapshotWireCompatibility(t *testing.T) {
 	cfg := scan.Defaults()
 	cfg.Targets, _ = scan.ParseTargets([]string{"192.0.2.0/24"})
-	r := runapi.Run{SnapshotVersion: runapi.SnapshotVersion, Active: true, ID: "run-a", ScanID: "scan-a", Phase: "scanning", Plan: runapi.Plan{Revision: 2, Config: cfg, Timeouts: controller.DefaultTimeouts()}, Summary: controller.Summary{RunID: "run-a", Seed: 17, Found: 3, ScanOutcome: "running"}, WorkerSnapshots: map[string]runapi.Worker{"1": {Shard: 1, ID: "worker-a", Progress: &scan.Progress{PercentUnknown: true}}}}
+	r := runapi.Run{SnapshotVersion: runapi.SnapshotVersion, Active: true, ID: "run-a", ScanPlanID: "plan-a", TargetID: "target-a", Phase: "scanning", Plan: runapi.Plan{ScanPlanRevision: 2, Config: cfg, Timeouts: controller.DefaultTimeouts()}, Summary: controller.Summary{RunID: "run-a", Seed: 17, Found: 3, ScanOutcome: "running"}, WorkerSnapshots: map[string]runapi.Worker{"1": {Shard: 1, ID: "worker-a", Progress: &scan.Progress{PercentUnknown: true}}}}
 	b, err := json.Marshal(wireRun(r))
 	if err != nil {
 		t.Fatal(err)
@@ -142,7 +142,7 @@ func TestDiscoveryTransitionsAndStopRequest(t *testing.T) {
 				w.WriteHeader(503)
 				return
 			}
-			json.NewEncoder(w).Encode(activeRunsFixture{SnapshotVersion: 1, Runs: runs})
+			json.NewEncoder(w).Encode(activeRunsFixture{SnapshotVersion: 2, Runs: runs})
 		case "/v1/runs/a":
 			v := a
 			v.Active = false
@@ -301,7 +301,7 @@ func TestPlainAllIdleAndDedup(t *testing.T) {
 			mutations.Add(1)
 		}
 		gets.Add(1)
-		json.NewEncoder(w).Encode(activeRunsFixture{SnapshotVersion: 1, Runs: []runSnapshot{}})
+		json.NewEncoder(w).Encode(activeRunsFixture{SnapshotVersion: 2, Runs: []runSnapshot{}})
 	})
 	s, err := poll(ctx, c, "", snapshot{})
 	if err != nil {

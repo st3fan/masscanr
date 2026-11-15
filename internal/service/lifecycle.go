@@ -7,29 +7,9 @@ import (
 	"time"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
-	"github.com/gofiber/fiber/v3"
 	"github.com/st3fan/masscanr/internal/scanfile"
 )
 
-func (m *Manager) stop(c fiber.Ctx) error {
-	id := c.Params("id")
-	if _, e := m.Store.GetScan(c.Context(), id); e != nil {
-		return problem(c, e)
-	}
-	var runID string
-	e := m.Store.Pool.QueryRow(c.Context(), `SELECT id FROM masscanr.runs WHERE scan_id=$1 ORDER BY (data->>'created_at') DESC LIMIT 1`, id).Scan(&runID)
-	if e != nil {
-		return problem(c, ErrNotFound)
-	}
-	if e = m.requestStop(c.Context(), runID); e != nil {
-		return problem(c, e)
-	}
-	v, e := m.Store.GetRun(c.Context(), runID)
-	if e != nil {
-		return problem(c, e)
-	}
-	return respond(c, 202, v)
-}
 func (m *Manager) requestStop(ctx context.Context, id string) error {
 	result, e := m.Store.Pool.Exec(ctx, `UPDATE masscanr.runs SET stop=true WHERE id=$1 AND active`, id)
 	if e != nil {
@@ -130,6 +110,11 @@ func (m *Manager) replay(ctx context.Context, id string) error {
 				state = scanfile.State{}
 			}
 		}
+	}
+	if r.Artifact != "" {
+		// Recovery publishes only a validated journal prefix; repair failures
+		// must not prevent cleanup of owned cloud workers.
+		_ = m.Store.RebuildRunResults(ctx, id, r.Artifact)
 	}
 	return m.Store.mutateRun(ctx, id, func(r *Run) {
 		r.Phase = "interrupted"

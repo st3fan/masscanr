@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create, preflight, and start an explicit scan through the V9 REST API."""
+"""Create a Target and ScanPlan, then preflight and start through JSON:API."""
 
 import argparse
 import http.client
@@ -48,12 +48,15 @@ class Client:
     def call(self, stage, method, path, expected, body=None, headers=None):
         url = self.server + path
         log(f"\n[{stage}] {method} {url}")
+        if body is not None and path.startswith("/v1/"):
+            kind = "runs" if path.endswith("/start") else ("targets" if path == "/v1/targets" else "scan-plans")
+            body = {"data": {"type": kind, "attributes": body}}
         data = None if body is None else json.dumps(body).encode()
         if body is not None:
             log("Request: " + json.dumps(body, sort_keys=True))
         req = request.Request(url, data=data, method=method,
-                              headers={"Accept": "application/json",
-                                       "Content-Type": "application/json", **(headers or {})})
+                              headers={"Accept": "application/vnd.api+json",
+                                       "Content-Type": "application/vnd.api+json", **(headers or {})})
         began = time.monotonic()
         try:
             response = self.opener.open(req, timeout=self.timeout)
@@ -76,8 +79,8 @@ class Client:
             hints = {
                 400: "Check the request fields and target/port syntax shown above.",
                 404: "Check the server address, API version, and resource IDs.",
-                409: "V9 reports a generic conflict: another run may be active, the plan may "
-                     "be expired/stale, or confirmation/idempotency may not match.",
+                409: "Another run may be active, the preflight may be expired/stale, "
+                     "or confirmation/idempotency may not match.",
                 422: "Target resolution failed; check the AS target and service/RIPE connectivity.",
                 503: "Check service readiness and VULTR_API_TOKEN in the SERVICE environment. "
                      "A launch-pending response may already have reserved a run.",
@@ -91,6 +94,11 @@ class Client:
             raise Failure(f"{stage}: HTTP {status} returned invalid JSON: {text[:2048]}") from exc
         if not isinstance(obj, dict):
             raise Failure(f"{stage}: expected a JSON object, got {type(obj).__name__}")
+        if path.startswith("/v1/"):
+            data = obj.get("data")
+            if not isinstance(data, dict) or not isinstance(data.get("attributes"), dict):
+                raise Failure(f"{stage}: missing JSON:API resource")
+            return {"id": data.get("id"), **data["attributes"]}
         return obj
 
 
@@ -153,23 +161,34 @@ def run(a):
     health = client.call("health", "GET", "/healthz", 200)
     if health.get("status") != "ready":
         raise Failure(f"health: service did not report ready: {health}")
-    definition = {"targets": a.targets}
+    target = client.call("create target", "POST", "/v1/targets", 201,
+                         {"name": "CLI target", "entries": a.targets})
+    target_id = identifier(target, "id", "create target")
+    created = client.call("create scan plan", "POST", "/v1/scan-plans", 201,
+                          {"name": "CLI scan plan", "target_id": target_id})
+    scan_plan_id = identifier(created, "id", "create scan plan")
+    settings = created.get("settings")
+    if not isinstance(settings, dict):
+        raise Failure("create scan plan: missing settings")
+    changed = False
     for field in ("ports", "backend", "shards", "rate", "region", "instance_type", "cleanup_timeout"):
         if getattr(a, field) is not None:
-            definition[field] = getattr(a, field)
+            settings[field] = getattr(a, field)
+            changed = True
     if a.scan_timeout:
-        definition["timeout"] = a.scan_timeout
-    created = client.call("create", "POST", "/v1/scans", 201, definition)
-    scan_id = identifier(created, "id", "create")
-    if type(created.get("revision")) is not int or created["revision"] < 1:
-        raise Failure("create: missing/invalid definition revision")
-    path = "/v1/scans/" + segment(scan_id)
-    log(f"Scan ID: {scan_id}\nSaved definition: {json.dumps(created.get('definition'), sort_keys=True)}")
+        settings["timeout"] = a.scan_timeout
+        changed = True
+    path = "/v1/scan-plans/" + segment(scan_plan_id)
+    if changed:
+        created = client.call("update scan plan", "PATCH", path, 200,
+                              {"revision": created.get("revision"), "settings": settings})
+    log(f"Target ID: {target_id}\nScanPlan ID: {scan_plan_id}\nSaved settings: {json.dumps(created.get('settings'), sort_keys=True)}")
     plan = client.call("preflight", "POST", path + "/preflight", 201)
     plan_id = identifier(plan, "id", "preflight")
     identifier(plan, "expires_at", "preflight")
-    if plan.get("scan_id") != scan_id or plan.get("revision") != created.get("revision"):
-        raise Failure("preflight: scan ID or definition revision does not match the created scan")
+    if (plan.get("scan_plan_id") != scan_plan_id or plan.get("scan_plan_revision") != created.get("revision")
+            or plan.get("target_id") != target_id or plan.get("target_revision") != target.get("revision")):
+        raise Failure("preflight: Target or ScanPlan revision does not match")
     work = plan.get("workload")
     cfg = plan.get("config")
     if (not isinstance(work, dict) or not isinstance(cfg, dict)
@@ -181,32 +200,32 @@ def run(a):
     if work["Probes"] != work["Addresses"] * work["Ports"]:
         raise Failure("preflight: inconsistent probe count")
     if plan["requires_confirmation"] != (work["Probes"] > 1_000_000):
-        raise Failure("preflight: confirmation flag disagrees with V9 probe threshold")
-    log(f"Plan ID: {plan_id}\nExpires: {plan.get('expires_at', '(missing)')}\n"
+        raise Failure("preflight: confirmation flag disagrees with probe threshold")
+    log(f"Preflight ID: {plan_id}\nExpires: {plan.get('expires_at', '(missing)')}\n"
         f"Planned probes: {work['Probes']:,} = {work['Addresses']:,} addresses x {work['Ports']:,} ports")
     log("Frozen targets/provenance: " + json.dumps(cfg.get("RequestedTargets"), indent=2))
     log("Effective scope: " + json.dumps(cfg["Targets"]))
     if a.preflight_only:
-        log("Preflight only: definition and plan saved; no start requested.")
+        log("Preflight only: Target and ScanPlan saved; no start requested.")
         return 0
     if plan["requires_confirmation"] and not a.yes:
         if not sys.stdin.isatty():
             raise Failure("Large scan requires approval. Review the frozen scope, then rerun with --yes "
                           "or use an interactive terminal. No start requested.")
         if input("Start this exact plan? Type yes to approve: ").strip().lower() != "yes":
-            raise Failure("Start declined; definition retained and no start requested.")
+            raise Failure("Start declined; Target and ScanPlan retained and no start requested.")
     key = str(uuid.uuid4())
-    body = {"plan_id": plan_id, "confirm": plan["requires_confirmation"]}
+    body = {"preflight_id": plan_id, "confirm": plan["requires_confirmation"]}
     log(f"Idempotency-Key: {key}")
     log("If the start response is lost, inspect history at " + client.server + path + "/runs")
     log("Retry ONLY this same start request/key (do not rerun create blindly):\n" + shlex.join([
         "curl", "--fail-with-body", "-sS", "-X", "POST", client.server + path + "/start",
-        "-H", "Content-Type: application/json", "-H", "Idempotency-Key: " + key,
-        "-d", json.dumps(body)]))
+        "-H", "Content-Type: application/vnd.api+json", "-H", "Idempotency-Key: " + key,
+        "-d", json.dumps({"data": {"type": "runs", "attributes": body}})]))
     started = client.call("start", "POST", path + "/start", 202, body, {"Idempotency-Key": key})
     run_id = identifier(started, "id", "start")
-    if started.get("scan_id") != scan_id:
-        raise Failure("start: returned run belongs to a different scan")
+    if started.get("scan_plan_id") != scan_plan_id or started.get("target_id") != target_id:
+        raise Failure("start: returned run belongs to a different Target or ScanPlan")
     run_path = "/v1/runs/" + segment(run_id)
     log(f"Run ID: {run_id}\nAccepted asynchronously; HTTP 202 does not prove the scanner started.\n"
         f"Status URL: {client.server}{run_path}")
@@ -226,7 +245,7 @@ def run(a):
                 or current.get("phase") in ("failed", "interrupted", "cancelled", "cleanup_incomplete")):
             raise Failure("Run reports an execution/cleanup problem; see status above. "
                           "The run may still be cleaning up—keep inspecting its status URL.")
-        # V9 has no explicit settled flag, so do not infer settlement from phase alone.
+        # An accepted run can still be active during cleanup.
         if time.monotonic() >= deadline:
             log("Observation window ended without a reported error. This does not guarantee run "
                 "completion; continue checking the status URL. Exiting does not stop the scan.")
@@ -241,7 +260,7 @@ def main(argv=None):
     except Failure as exc:
         print("\nERROR: " + safe(exc), file=sys.stderr, flush=True)
         print("For server-side detail: docker compose logs --tail=100 masscanr postgres\n"
-              "No definitions/runs were deleted and no stop request was sent.", file=sys.stderr)
+              "No Targets, ScanPlans, or runs were deleted and no stop request was sent.", file=sys.stderr)
         return 1
     except (KeyboardInterrupt, EOFError):
         print("\nInterrupted. Any accepted scan continues; inspect the printed IDs/status URL.",

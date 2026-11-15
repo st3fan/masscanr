@@ -2,7 +2,7 @@
 
 ## Service and terminal viewer
 
-`masscanr-server` exposes scan CRUD, frozen preflight, start/stop, run history,
+`masscanr-server` exposes Target and ScanPlan management, frozen preflight, start/stop, run history,
 inspection, saved exports, and provider catalogs through a REST API backed by
 PostgreSQL and DBOS. `masscanr-cli` offers only the HTTP-based `watch` command.
 See the [REST API and operations guide](docs/rest-api.md) for database setup,
@@ -99,34 +99,37 @@ service process may use a database. This version has no users or authentication.
 
 ### Manage a scan
 
-In another terminal, check readiness and create a scan definition. Replace the
-placeholder below with a network you are authorized to scan. These commands use
-`curl` and `jq`.
+In another terminal, create a Target containing only networks you are authorized
+to scan, then a reusable ScanPlan. These commands use `curl` and `jq`.
 
 ```sh
 curl --fail-with-body http://127.0.0.1:8080/healthz
 
-scan_id=$(curl --fail-with-body -sS http://127.0.0.1:8080/v1/scans \
+target_id=$(curl --fail-with-body -sS http://127.0.0.1:8080/v1/targets \
   -H 'Content-Type: application/vnd.api+json' \
-  -H 'Accept: application/vnd.api+json' \
-  -d '{"data":{"type":"scans","attributes":{"targets":["YOUR_AUTHORIZED_IPV4_OR_CIDR"],"ports":"22,80,443"}}}' \
+  -d '{"data":{"type":"targets","attributes":{"name":"External network","entries":["YOUR_AUTHORIZED_IPV4_OR_CIDR"]}}}' \
+  | jq -r .data.id)
+
+scan_plan_id=$(curl --fail-with-body -sS http://127.0.0.1:8080/v1/scan-plans \
+  -H 'Content-Type: application/vnd.api+json' \
+  -d "{\"data\":{\"type\":\"scan-plans\",\"attributes\":{\"name\":\"Routine inventory\",\"target_id\":\"$target_id\"}}}" \
   | jq -r .data.id)
 
 # Resolve and inspect the exact scope before starting.
 curl --fail-with-body -sS -X POST \
-  "http://127.0.0.1:8080/v1/scans/$scan_id/preflight" > preflight.json
+  "http://127.0.0.1:8080/v1/scan-plans/$scan_plan_id/preflight" > preflight.json
 jq . preflight.json
-plan_id=$(jq -r .data.id preflight.json)
+preflight_id=$(jq -r .data.id preflight.json)
 
 # Start only after reviewing the returned targets and planned probe count.
 # Keep this request key when retrying a lost response.
 request_key=$(openssl rand -hex 16)
 run_id=$(curl --fail-with-body -sS \
-  "http://127.0.0.1:8080/v1/scans/$scan_id/start" \
+  "http://127.0.0.1:8080/v1/scan-plans/$scan_plan_id/start" \
   -H 'Content-Type: application/vnd.api+json' \
   -H 'Accept: application/vnd.api+json' \
   -H "Idempotency-Key: $request_key" \
-  -d "{\"data\":{\"type\":\"runs\",\"attributes\":{\"plan_id\":\"$plan_id\",\"confirm\":true}}}" | jq -r .data.id)
+  -d "{\"data\":{\"type\":\"runs\",\"attributes\":{\"preflight_id\":\"$preflight_id\",\"confirm\":true}}}" | jq -r .data.id)
 
 curl --fail-with-body -sS "http://127.0.0.1:8080/v1/runs/$run_id" | jq .
 
@@ -135,13 +138,13 @@ curl --fail-with-body -sS -X POST \
   "http://127.0.0.1:8080/v1/runs/$run_id/stop" | jq .
 ```
 
-Plans expire after ten minutes. Only one scan can run at a time, including worker
-cleanup. Results are saved in the artifact directory as `.scan` journals and,
-after successful completion, CSV/JSONL exports. The run response exposes artifact
-paths and separate scan/cleanup outcomes. See the [full API guide](docs/rest-api.md)
-for update/delete requests, pagination, recovery behavior, and test setup.
-The generated OpenAPI contract is at `/openapi.json`; interactive offline
-Stoplight documentation is at `/docs` on the same listener.
+Preflights expire after ten minutes. Only one scan can run at a time, including
+worker cleanup. PostgreSQL stores queryable open-port results as the scan proceeds;
+the `.scan` journal retains every observation as durable evidence. Completed scans
+also retain CSV/JSONL exports. See the [full API guide](docs/rest-api.md) for
+revisions, coverage semantics, recovery behavior, and test setup. The generated
+OpenAPI contract is at `/openapi.json`; interactive offline Stoplight documentation
+is at `/docs` on the same listener.
 
 ### Watch scans
 
@@ -203,7 +206,7 @@ remain visible; the viewer never treats a lost connection as scan completion.
 server lacks active-run discovery.** Running `go run ./cmd/masscanr-cli watch --all`
 rebuilds only the client. Rebuild/restart the service too: for Compose use
 `docker compose up --build -d --wait`; for native hosting, gracefully stop the old
-process and restart the new `masscanr-server` with the same database and artifact
+process and restart the new `masscanr-server` with a compatible fresh database and artifact
 directory. Ensure an old native service is not occupying Compose's host port.
 The client requires versioned run snapshots from the server.
 
@@ -213,7 +216,7 @@ Use the Python 3 script to see each request stage, its payload, HTTP status,
 server errors, and the scan/plan/run IDs:
 
 ```sh
-# Inspect the created definition and frozen plan without starting a scan.
+# Inspect the created Target, ScanPlan, and preflight without starting a scan.
 python3 scripts/start-scan.py --preflight-only --ports 22,80,443 64.98.138.0/22
 
 # Create and start a scan, then observe status for early asynchronous errors.
@@ -227,10 +230,10 @@ shard, rate, placement, and timeout options. It uses only Python's standard libr
 The Vultr token must be configured on the service, not on this client.
 
 Large scans require interactive approval of the displayed frozen plan, or an
-explicit `--yes`. `--preflight-only` still saves a definition and plan. The script
-does not automatically retry mutations, delete definitions, or stop scans. If a
+explicit `--yes`. `--preflight-only` still saves a Target and ScanPlan. The script
+does not automatically retry mutations, archive Targets, or stop scans. If a
 start response is lost, use the printed exact start request and idempotency key;
-do not blindly rerun the whole script and create another definition.
+do not blindly rerun the whole script and create another Target and ScanPlan.
 
 A `202` means accepted, not successful scanner startup. The script polls for 30
 seconds by default, prints worker/cleanup diagnostics, and exits nonzero for HTTP,

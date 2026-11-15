@@ -48,11 +48,12 @@ func DefaultTimeouts() Timeouts {
 }
 
 type Controller struct {
-	RunID    string // Optional service-assigned durable identity.
-	Backend  backend.Backend
-	Provider cloud.Provider
-	Runner   remote.Runner
-	Timeouts Timeouts
+	RunID      string // Optional service-assigned durable identity.
+	Backend    backend.Backend
+	Provider   cloud.Provider
+	Runner     remote.Runner
+	Timeouts   Timeouts
+	ResultSink ResultSink
 }
 
 type tracked struct {
@@ -125,7 +126,7 @@ func (c *Controller) Run(ctx context.Context, cfg scan.Config, out io.Writer, em
 		}
 	}
 	notify(Event{State: "validating", RunID: summary.RunID, Seed: &summary.Seed, Identity: &summary.Identity})
-	result := newResults(journal, cfg)
+	result := newResults(journal, cfg, c.ResultSink)
 	var workers []tracked
 	attempted, ambiguous := false, false
 	defer func() {
@@ -266,6 +267,7 @@ func (c *Controller) Run(ctx context.Context, cfg scan.Config, out io.Writer, em
 		}()
 	}
 	wg.Wait()
+	failure = errors.Join(failure, result.flush(ctx))
 	// Shutdown has its own context. Cancellation after all scanners exited
 	// must not retroactively invalidate an otherwise completed scan.
 	return summary, failure

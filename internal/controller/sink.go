@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"fmt"
 	"slices"
 
@@ -29,11 +30,19 @@ func (r *results) accept(shard int, f scan.Finding) error {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if err := r.journal.Append(scanfile.Record{Type: "finding", Finding: &scanfile.Finding{Shard: shard, IP: f.Address, Port: f.Port, Protocol: f.Protocol, State: f.State, Timestamp: f.Timestamp, Target: target, Prefix: prefix}}, false); err != nil {
+	finding := scanfile.Finding{Shard: shard, IP: f.Address, Port: f.Port, Protocol: f.Protocol, State: f.State, Timestamp: f.Timestamp, Target: target, Prefix: prefix}
+	if err := r.journal.Append(scanfile.Record{Type: "finding", Finding: &finding}, false); err != nil {
 		return err
 	}
-
 	r.count++
+	if r.persist != nil {
+		r.pending = append(r.pending, finding)
+		if len(r.pending) >= resultBatchSize {
+			if err := r.flushLocked(context.Background()); err != nil {
+				return err
+			}
+		}
+	}
 	if r.counts == nil {
 		r.counts = make(map[int]uint64)
 	}
