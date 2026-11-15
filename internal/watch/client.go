@@ -12,9 +12,6 @@ import (
 	"strings"
 	"time"
 	"unicode"
-
-	"github.com/st3fan/masscanr/internal/runapi"
-	"github.com/st3fan/masscanr/internal/scanfile"
 )
 
 const maxResponse = 8 << 20
@@ -85,8 +82,8 @@ func (c *Client) request(ctx context.Context, method, path string, status int) (
 	}
 	return b, nil
 }
-func decodeRun(b []byte) (runapi.Run, error) {
-	var r runapi.Run
+func decodeRun(b []byte) (runSnapshot, error) {
+	var r runSnapshot
 	var fields map[string]json.RawMessage
 	if json.Unmarshal(b, &r) != nil || json.Unmarshal(b, &fields) != nil {
 		return r, &clientError{message: "invalid run JSON"}
@@ -97,24 +94,24 @@ func decodeRun(b []byte) (runapi.Run, error) {
 			return r, &clientError{message: "incompatible run snapshot: missing " + key}
 		}
 	}
-	if r.SnapshotVersion != runapi.SnapshotVersion || r.Active == r.Settled || !validID(r.ID) || !validID(r.ScanID) || r.Plan.Config.Shards < 1 || r.Plan.Config.Shards > scanfile.MaxShards || r.Plan.Revision < 1 || r.Phase == "" {
+	if r.SnapshotVersion != snapshotVersion || r.Active == r.Settled || !validID(r.ID) || !validID(r.ScanID) || r.Plan.Config.Shards < 1 || r.Plan.Config.Shards > maxShards || r.Plan.Revision < 1 || r.Phase == "" {
 		return r, &clientError{message: "incompatible run snapshot; upgrade the service to V10"}
 	}
 	return r, nil
 }
-func (c *Client) Get(ctx context.Context, id string) (runapi.Run, error) {
+func (c *Client) Get(ctx context.Context, id string) (runSnapshot, error) {
 	return c.runRequest(ctx, http.MethodGet, id, "", 200)
 }
-func (c *Client) Stop(ctx context.Context, id string) (runapi.Run, error) {
+func (c *Client) Stop(ctx context.Context, id string) (runSnapshot, error) {
 	return c.runRequest(ctx, http.MethodPost, id, "/stop", 202)
 }
-func (c *Client) runRequest(ctx context.Context, method, id, suffix string, status int) (runapi.Run, error) {
+func (c *Client) runRequest(ctx context.Context, method, id, suffix string, status int) (runSnapshot, error) {
 	if !validID(id) {
-		return runapi.Run{}, &clientError{message: "invalid run ID"}
+		return runSnapshot{}, &clientError{message: "invalid run ID"}
 	}
 	b, err := c.request(ctx, method, "/v1/runs/"+id+suffix, status)
 	if err != nil {
-		return runapi.Run{}, err
+		return runSnapshot{}, err
 	}
 	r, err := decodeRun(b)
 	if err == nil && r.ID != id {
@@ -122,12 +119,12 @@ func (c *Client) runRequest(ctx context.Context, method, id, suffix string, stat
 	}
 	return r, err
 }
-func (c *Client) Active(ctx context.Context) ([]runapi.Run, error) {
+func (c *Client) Active(ctx context.Context) ([]runSnapshot, error) {
 	b, err := c.request(ctx, http.MethodGet, "/v1/runs?active=true", 200)
 	if err != nil {
 		var e *clientError
 		if errors.As(err, &e) && e.status == http.StatusNotFound {
-			return nil, &clientError{message: e.message + "; this service does not provide V10 active-run discovery. Check --server, then rebuild and restart masscanr serve (Docker: docker compose up --build -d --wait). Building watch alone does not update the service."}
+			return nil, &clientError{message: e.message + "; this service does not provide V10 active-run discovery. Check --server, then update and restart masscanr-server. Updating masscanr-cli alone does not update the service."}
 		}
 		return nil, err
 	}
@@ -135,10 +132,10 @@ func (c *Client) Active(ctx context.Context) ([]runapi.Run, error) {
 		SnapshotVersion int               `json:"snapshot_version"`
 		Runs            []json.RawMessage `json:"runs"`
 	}
-	if json.Unmarshal(b, &envelope) != nil || envelope.SnapshotVersion != runapi.SnapshotVersion || envelope.Runs == nil {
+	if json.Unmarshal(b, &envelope) != nil || envelope.SnapshotVersion != snapshotVersion || envelope.Runs == nil {
 		return nil, &clientError{message: "incompatible active-run response; upgrade the service to V10"}
 	}
-	runs := make([]runapi.Run, 0, len(envelope.Runs))
+	runs := make([]runSnapshot, 0, len(envelope.Runs))
 	seen := map[string]bool{}
 	for _, raw := range envelope.Runs {
 		r, err := decodeRun(raw)

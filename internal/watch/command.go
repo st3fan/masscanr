@@ -29,7 +29,7 @@ func parse(args []string, out io.Writer) (options, error) {
 	fs.BoolVar(&o.All, "all", false, "continuously watch all active runs, including while idle")
 	fs.BoolVar(&o.Plain, "plain", false, "plain status output (automatic when redirected)")
 	fs.Usage = func() {
-		fmt.Fprintln(out, "Usage: masscanr watch <run-id> | --all [--server URL] [--interval 2s] [--plain]")
+		fmt.Fprintln(out, "Usage: masscanr-cli watch <run-id> | --all [--server URL] [--interval 2s] [--plain]")
 		fs.PrintDefaults()
 	}
 	// Accept options on either side of the positional ID.

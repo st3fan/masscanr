@@ -8,7 +8,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/st3fan/masscanr/internal/runapi"
 )
 
 type pollMsg struct {
@@ -50,7 +49,7 @@ func (m *model) selectRun() {
 		m.selected = m.snapshot.Runs[0].ID
 	}
 }
-func (m model) selectedRun() *runapi.Run {
+func (m model) selectedRun() *runSnapshot {
 	for _, r := range m.snapshot.Runs {
 		if r.ID == m.selected {
 			return &r
@@ -225,7 +224,7 @@ func (m model) body() []string {
 	return wrapped
 }
 func (m model) View() tea.View {
-	header := fmt.Sprintf("masscanr watch | %s | 1 Overview / 2 Config", clean(m.options.Server))
+	header := fmt.Sprintf("masscanr-cli watch | %s | 1 Overview / 2 Config", clean(m.options.Server))
 	footer := "q/^C detach | s stop | tab view | ↑↓ scroll | [ ] run"
 	body := m.body()
 	available := max(0, m.height-2)

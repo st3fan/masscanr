@@ -4,19 +4,17 @@ import (
 	"context"
 	"sort"
 	"time"
-
-	"github.com/st3fan/masscanr/internal/runapi"
 )
 
 type source interface {
-	Get(context.Context, string) (runapi.Run, error)
-	Active(context.Context) ([]runapi.Run, error)
-	Stop(context.Context, string) (runapi.Run, error)
+	Get(context.Context, string) (runSnapshot, error)
+	Active(context.Context) ([]runSnapshot, error)
+	Stop(context.Context, string) (runSnapshot, error)
 }
 
 type snapshot struct {
-	Runs    []runapi.Run
-	Last    *runapi.Run
+	Runs    []runSnapshot
+	Last    *runSnapshot
 	Updated time.Time
 }
 
@@ -29,7 +27,7 @@ func poll(ctx context.Context, api source, id string, previous snapshot) (snapsh
 		if err != nil {
 			return previous, err
 		}
-		next.Runs = []runapi.Run{r}
+		next.Runs = []runSnapshot{r}
 	} else {
 		runs, err := api.Active(ctx)
 		if err != nil {
