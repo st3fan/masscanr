@@ -43,6 +43,8 @@ func resourceSchema(attributes *huma.Schema, typ string) *huma.Schema {
 
 func requestResourceSchema(attributes *huma.Schema, typ string, requireID bool) *huma.Schema {
 	resource := resourceSchema(attributes, typ)
+	delete(resource.Properties, "relationships")
+	delete(resource.Properties, "links")
 	resource.Required = []string{"type", "attributes"}
 	if requireID {
 		resource.Required = append(resource.Required, "id")
@@ -153,6 +155,9 @@ func (a *API) register(method, path, operationID, summary string, model any, han
 			example := map[string]any{"data": exampleResource(typ, model)}
 			if strings.HasPrefix(operationID, "list") {
 				example["data"] = []any{exampleResource(typ, model)}
+			}
+			if operationID == "listActiveRuns" {
+				example["meta"] = map[string]int{"snapshot_version": 1}
 			}
 			op.Responses[strconv.Itoa(status)] = &huma.Response{Description: "JSON:API resource document", Content: map[string]*huma.MediaType{jsonAPIMediaType: {Schema: schema, Example: example}}}
 		}

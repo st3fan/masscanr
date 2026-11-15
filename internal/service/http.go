@@ -187,27 +187,6 @@ func (a *API) get(c fiber.Ctx) error {
 	}
 	return respond(c, 200, v)
 }
-func (a *API) replace(c fiber.Ctx) error {
-	var in struct {
-		Revision   int64      `json:"revision"`
-		Definition Definition `json:"definition"`
-	}
-	in.Definition = Defaults()
-	if e := decode(c, &in); e != nil {
-		return bad(c, e)
-	}
-	if in.Revision < 1 {
-		return bad(c, fmt.Errorf("revision must be positive"))
-	}
-	if _, _, e := in.Definition.Config(); e != nil {
-		return bad(c, e)
-	}
-	v := Scan{ID: c.Params("id"), Revision: in.Revision + 1, UpdatedAt: time.Now().UTC(), Definition: in.Definition}
-	if e := a.Store.SaveScan(c.Context(), v, in.Revision, false); e != nil {
-		return problem(c, e)
-	}
-	return a.get(c)
-}
 func (a *API) patch(c fiber.Ctx) error {
 	var in struct {
 		Revision   int64                      `json:"revision"`
