@@ -93,6 +93,7 @@ func (a *API) Handler() *fiber.App {
 	a.register("PATCH", "/v1/targets/:id", "updateTarget", "Update or archive a target", Target{}, a.patchTarget)
 	a.register("POST", "/v1/scan-plans", "createScanPlan", "Create a reusable scan plan", ScanPlan{}, a.createScanPlan)
 	a.register("GET", "/v1/scan-plans", "listScanPlans", "List scan plans", ScanPlan{}, a.listScanPlans)
+	a.register("GET", "/v1/scan-results", "listScanResults", "List positive open port observations", ScanResult{}, a.listScanResults)
 	a.register("GET", "/v1/scan-plans/:id", "getScanPlan", "Get a scan plan", ScanPlan{}, a.getScanPlan)
 	a.register("POST", "/v1/scan-plans/:id/preflight", "preflightScanPlan", "Resolve and freeze a scan preflight", Plan{}, a.preflightScanPlan)
 	a.register("PATCH", "/v1/scan-plans/:id", "updateScanPlan", "Update a scan plan", ScanPlan{}, a.patchScanPlan)

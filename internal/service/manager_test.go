@@ -191,6 +191,20 @@ func TestDurableExecution(t *testing.T) {
 				if got.Summary.ScanOutcome != want {
 					t.Fatal(got)
 				}
+				coverage, err := s.GetResultCoverage(context.Background(), r.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if stop {
+					if coverage.State != "partial" {
+						t.Fatalf("cancelled coverage: %+v", coverage)
+					}
+				} else {
+					results, err := s.ListScanResults(context.Background(), ResultFilter{RunID: r.ID, Limit: 100})
+					if err != nil || coverage.State != "complete" || len(results) != 1 || results[0].Observations != 1 {
+						t.Fatalf("persisted results: coverage=%+v results=%+v err=%v", coverage, results, err)
+					}
+				}
 				if runner.calls.Load() != 1 || p.creates != 1 {
 					t.Fatal("duplicate execution")
 				}

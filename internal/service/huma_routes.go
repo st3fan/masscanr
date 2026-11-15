@@ -93,6 +93,11 @@ func (a *API) register(method, path, operationID, summary string, model any, han
 	if operationID == "listScans" || operationID == "listScanRuns" || operationID == "listScanPlanRuns" || operationID == "listTargets" || operationID == "listScanPlans" {
 		op.Parameters = append(op.Parameters, &huma.Param{Name: "limit", In: "query", Schema: &huma.Schema{Type: "integer", Minimum: floatPtr(1), Maximum: floatPtr(1000)}}, &huma.Param{Name: "after", In: "query", Schema: &huma.Schema{Type: "string"}})
 	}
+	if operationID == "listScanResults" {
+		for _, name := range []string{"filter[run_id]", "filter[target_id]", "filter[ip]", "filter[port]", "after", "limit"} {
+			op.Parameters = append(op.Parameters, &huma.Param{Name: name, In: "query", Schema: &huma.Schema{Type: "string"}})
+		}
+	}
 	if operationID == "listActiveRuns" {
 		op.Parameters = append(op.Parameters, &huma.Param{Name: "active", In: "query", Required: true, Schema: &huma.Schema{Type: "string", Const: "true"}})
 	}
@@ -240,6 +245,9 @@ func resourceTypeForPath(path, operationID string) string {
 	}
 	if strings.Contains(path, "/runs") || strings.HasSuffix(path, "/start") || strings.HasSuffix(path, "/stop") {
 		return "runs"
+	}
+	if strings.HasPrefix(path, "/v1/scan-results") {
+		return "scan-results"
 	}
 	if strings.HasPrefix(path, "/v1/targets") {
 		return "targets"

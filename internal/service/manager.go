@@ -130,7 +130,11 @@ func (m *Manager) execute(ctx context.Context, id string) error {
 		})
 	}
 	dest := privateArtifact{Destination: scanfile.Destination{Writer: file, SyncFunc: file.Sync, Output: path, Exports: [2]string{path[:len(path)-5] + ".csv", path[:len(path)-5] + ".jsonl"}}, token: os.Getenv("VULTR_API_TOKEN")}
-	summary, runErr := m.Factory(r).Run(c, r.Plan.Config, dest, func(event controller.Event) {
+	runner := m.Factory(r)
+	if runner.ResultSink == nil {
+		runner.ResultSink = m.Store.ResultSink(r.ID, r.TargetID)
+	}
+	summary, runErr := runner.Run(c, r.Plan.Config, dest, func(event controller.Event) {
 		eventCtx, stopEvent := context.WithTimeout(context.Background(), 5*time.Second)
 		defer stopEvent()
 		err := m.Store.mutateRun(eventCtx, id, func(r *Run) {
@@ -155,6 +159,13 @@ func (m *Manager) execute(ctx context.Context, id string) error {
 		if e = results.ExportResults(path); e != nil {
 			message = "export failed; journal retained"
 		}
+	}
+	resultCtx, cancelResults := context.WithTimeout(context.Background(), 2*time.Minute)
+	resultErr := m.Store.FinalizeRunResults(resultCtx, id, path)
+	cancelResults()
+	if resultErr != nil {
+		phase = "failed"
+		message = "result persistence incomplete; journal retained"
 	}
 	return m.Store.mutateRun(context.Background(), id, func(r *Run) { r.Phase = phase; r.Summary = summary; r.Error = message })
 }

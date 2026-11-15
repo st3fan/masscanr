@@ -22,6 +22,7 @@ var applicationRoutes = []string{
 	"GET /v1/scan-plans",
 	"GET /v1/scan-plans/:id",
 	"GET /v1/scan-plans/:id/runs",
+	"GET /v1/scan-results",
 	"GET /v1/targets",
 	"GET /v1/targets/:id",
 	"PATCH /v1/scan-plans/:id",

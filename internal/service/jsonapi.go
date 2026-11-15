@@ -82,6 +82,8 @@ func resourceType(c fiber.Ctx, v any) string {
 		return "targets"
 	case ScanPlan:
 		return "scan-plans"
+	case ScanResult:
+		return "scan-results"
 	case Plan:
 		if strings.HasPrefix(c.Path(), "/v1/scan-plans/") {
 			return "scan-preflights"
@@ -140,6 +142,14 @@ func makeResource(typ string, value any) (jsonAPIResource, error) {
 	_ = json.Unmarshal(attributes["scan_plan_id"], &scanPlanID)
 	if scanPlanID != "" {
 		resource.Relationships = map[string]any{"scan-plan": map[string]any{"data": map[string]string{"type": "scan-plans", "id": scanPlanID}}}
+	}
+	var runID string
+	_ = json.Unmarshal(attributes["run_id"], &runID)
+	if runID != "" {
+		if resource.Relationships == nil {
+			resource.Relationships = map[string]any{}
+		}
+		resource.Relationships["run"] = map[string]any{"data": map[string]string{"type": "runs", "id": runID}}
 	}
 	var targetID string
 	_ = json.Unmarshal(attributes["target_id"], &targetID)

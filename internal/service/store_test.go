@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func testStore(t *testing.T) *Store {
+func testStore(t testing.TB) *Store {
 	t.Helper()
 	url := os.Getenv("MASSCANR_TEST_POSTGRES")
 	if url == "" {

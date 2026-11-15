@@ -111,6 +111,11 @@ func (m *Manager) replay(ctx context.Context, id string) error {
 			}
 		}
 	}
+	if r.Artifact != "" {
+		// Recovery publishes only a validated journal prefix; repair failures
+		// must not prevent cleanup of owned cloud workers.
+		_ = m.Store.RebuildRunResults(ctx, id, r.Artifact)
+	}
 	return m.Store.mutateRun(ctx, id, func(r *Run) {
 		r.Phase = "interrupted"
 		r.Summary.ScanOutcome = "interrupted"

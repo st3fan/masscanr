@@ -103,6 +103,7 @@ type ScanPlan struct {
 }
 
 type ScanResult struct {
+	ID           string     `json:"id"`
 	RunID        string     `json:"run_id"`
 	TargetID     string     `json:"target_id"`
 	IP           netip.Addr `json:"ip"`
@@ -113,4 +114,5 @@ type ScanResult struct {
 	Observations uint64     `json:"observations"`
 	Selector     string     `json:"selector,omitempty"`
 	OriginPrefix string     `json:"origin_prefix,omitempty"`
+	Coverage     string     `json:"coverage"`
 }
