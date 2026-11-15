@@ -1,0 +1,4 @@
+interface:
+  display_name: "Stefan's Development Lifecycle"
+  short_description: "Bootstrap guides, define project objectives, and start GitHub intents"
+  default_prompt: "$sdlc bootstrap"
