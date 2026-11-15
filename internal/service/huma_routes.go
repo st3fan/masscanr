@@ -90,13 +90,14 @@ func (a *API) register(method, path, operationID, summary string, model any, han
 			op.Parameters = append(op.Parameters, p)
 		}
 	}
-	if operationID == "listScans" || operationID == "listScanRuns" || operationID == "listScanPlanRuns" || operationID == "listTargets" || operationID == "listScanPlans" {
+	if operationID == "listScanPlanRuns" || operationID == "listTargets" || operationID == "listScanPlans" {
 		op.Parameters = append(op.Parameters, &huma.Param{Name: "limit", In: "query", Schema: &huma.Schema{Type: "integer", Minimum: floatPtr(1), Maximum: floatPtr(1000)}}, &huma.Param{Name: "after", In: "query", Schema: &huma.Schema{Type: "string"}})
 	}
 	if operationID == "listScanResults" {
-		for _, name := range []string{"filter[run_id]", "filter[target_id]", "filter[ip]", "filter[port]", "after", "limit"} {
+		for _, name := range []string{"filter[run_id]", "filter[target_id]", "filter[ip]", "filter[port]", "after"} {
 			op.Parameters = append(op.Parameters, &huma.Param{Name: name, In: "query", Schema: &huma.Schema{Type: "string"}})
 		}
+		op.Parameters = append(op.Parameters, &huma.Param{Name: "limit", In: "query", Schema: &huma.Schema{Type: "integer", Minimum: floatPtr(1), Maximum: floatPtr(1000)}})
 	}
 	if operationID == "listActiveRuns" {
 		op.Parameters = append(op.Parameters, &huma.Param{Name: "active", In: "query", Required: true, Schema: &huma.Schema{Type: "string", Const: "true"}})
@@ -104,21 +105,12 @@ func (a *API) register(method, path, operationID, summary string, model any, han
 	if operationID == "listInstanceTypes" {
 		op.Parameters = append(op.Parameters, &huma.Param{Name: "region", In: "query", Schema: &huma.Schema{Type: "string"}})
 	}
-	if operationID == "startScan" || operationID == "startScanPlan" {
+	if operationID == "startScanPlan" {
 		op.Parameters = append(op.Parameters, &huma.Param{Name: "Idempotency-Key", In: "header", Required: true, Schema: &huma.Schema{Type: "string", MinLength: intPtr(1), MaxLength: intPtr(200)}})
 	}
-	if operationID == "createScan" || operationID == "updateScan" || operationID == "startScan" || operationID == "createTarget" || operationID == "updateTarget" || operationID == "createScanPlan" || operationID == "updateScanPlan" || operationID == "startScanPlan" {
+	if operationID == "createTarget" || operationID == "updateTarget" || operationID == "createScanPlan" || operationID == "updateScanPlan" || operationID == "startScanPlan" {
 		var attrs *huma.Schema
 		switch operationID {
-		case "createScan":
-			attrs = a.attributesSchema(Definition{})
-			attrs.Required = []string{"targets"}
-		case "updateScan":
-			partial := a.attributesSchema(Definition{})
-			partial.Required = nil
-			attrs = &huma.Schema{Type: "object", Required: []string{"revision", "definition"}, Properties: map[string]*huma.Schema{"revision": {Type: "integer", Minimum: floatPtr(1)}, "definition": partial}}
-		case "startScan":
-			attrs = &huma.Schema{Type: "object", Required: []string{"plan_id"}, Properties: map[string]*huma.Schema{"plan_id": {Type: "string"}, "confirm": {Type: "boolean"}}}
 		case "startScanPlan":
 			attrs = &huma.Schema{Type: "object", Required: []string{"preflight_id"}, Properties: map[string]*huma.Schema{"preflight_id": {Type: "string"}, "confirm": {Type: "boolean"}}}
 		case "createTarget":
@@ -134,13 +126,6 @@ func (a *API) register(method, path, operationID, summary string, model any, han
 		}
 		example := map[string]any{"data": map[string]any{"type": requestTypeForOperation(operationID), "attributes": map[string]any{}}}
 		switch operationID {
-		case "createScan":
-			example["data"].(map[string]any)["attributes"] = map[string]any{"targets": []string{"192.0.2.0/24"}}
-		case "updateScan":
-			example["data"].(map[string]any)["id"] = "scan-id"
-			example["data"].(map[string]any)["attributes"] = map[string]any{"revision": 1, "definition": map[string]any{"ports": "443"}}
-		case "startScan":
-			example["data"].(map[string]any)["attributes"] = map[string]any{"plan_id": "plan-id", "confirm": true}
 		case "startScanPlan":
 			example["data"].(map[string]any)["attributes"] = map[string]any{"preflight_id": "preflight-id", "confirm": true}
 		case "createTarget":
@@ -154,26 +139,21 @@ func (a *API) register(method, path, operationID, summary string, model any, han
 			example["data"].(map[string]any)["id"] = "scan-plan-id"
 			example["data"].(map[string]any)["attributes"] = map[string]any{"revision": 1, "settings": map[string]any{"ports": "443"}}
 		}
-		op.RequestBody = &huma.RequestBody{Required: true, Content: map[string]*huma.MediaType{jsonAPIMediaType: {Schema: &huma.Schema{Type: "object", Required: []string{"data"}, Properties: map[string]*huma.Schema{"data": requestResourceSchema(attrs, requestTypeForOperation(operationID), operationID == "updateScan" || operationID == "updateTarget" || operationID == "updateScanPlan")}}, Example: example}}}
+		op.RequestBody = &huma.RequestBody{Required: true, Content: map[string]*huma.MediaType{jsonAPIMediaType: {Schema: &huma.Schema{Type: "object", Required: []string{"data"}, Properties: map[string]*huma.Schema{"data": requestResourceSchema(attrs, requestTypeForOperation(operationID), operationID == "updateTarget" || operationID == "updateScanPlan")}}, Example: example}}}
 	}
 	if operationID == "health" {
 		op.Responses["200"] = &huma.Response{Description: "Ready", Content: map[string]*huma.MediaType{"application/json": {Schema: &huma.Schema{Type: "object", Required: []string{"status"}, Properties: map[string]*huma.Schema{"status": {Type: "string", Const: "ready"}}}, Example: map[string]string{"status": "ready"}}}}
 		op.Responses["503"] = &huma.Response{Description: "Unavailable", Content: map[string]*huma.MediaType{"application/json": {Schema: &huma.Schema{Type: "object", Properties: map[string]*huma.Schema{"error": {Type: "string"}}}}}}
 	} else {
 		status := 200
-		if operationID == "createScan" || operationID == "preflightScan" || operationID == "preflightScanPlan" || operationID == "createTarget" || operationID == "createScanPlan" {
+		if operationID == "preflightScanPlan" || operationID == "createTarget" || operationID == "createScanPlan" {
 			status = 201
 		}
-		if operationID == "startScan" || operationID == "startScanPlan" || operationID == "stopScan" || operationID == "stopRun" {
+		if operationID == "startScanPlan" || operationID == "stopRun" {
 			status = 202
-		}
-		if method == "DELETE" {
-			status = 204
 		}
 		if operationID == "exportRun" {
 			op.Responses["200"] = &huma.Response{Description: "Complete saved export", Content: map[string]*huma.MediaType{"text/csv": {Schema: &huma.Schema{Type: "string"}, Example: "ip,port\n192.0.2.1,80\n"}, "application/x-ndjson": {Schema: &huma.Schema{Type: "string"}, Example: "{\"ip\":\"192.0.2.1\"}\n"}}}
-		} else if status == 204 {
-			op.Responses["204"] = &huma.Response{Description: "Deleted"}
 		} else {
 			attrs := a.attributesSchema(model)
 			data := resourceSchema(attrs, typ)
@@ -216,7 +196,7 @@ func floatPtr(v float64) *float64 { return &v }
 func intPtr(v int) *int           { return &v }
 
 func requestTypeForOperation(id string) string {
-	if id == "startScan" || id == "startScanPlan" {
+	if id == "startScanPlan" {
 		return "runs"
 	}
 	if id == "createTarget" || id == "updateTarget" {
@@ -225,15 +205,13 @@ func requestTypeForOperation(id string) string {
 	if id == "createScanPlan" || id == "updateScanPlan" {
 		return "scan-plans"
 	}
-	return "scans"
+	return ""
 }
 
 func resourceTypeForPath(path, operationID string) string {
 	switch operationID {
 	case "health":
 		return "health"
-	case "preflightScan":
-		return "plans"
 	case "preflightScanPlan":
 		return "scan-preflights"
 	case "listRegions":
@@ -255,5 +233,5 @@ func resourceTypeForPath(path, operationID string) string {
 	if strings.HasPrefix(path, "/v1/scan-plans") {
 		return "scan-plans"
 	}
-	return "scans"
+	return ""
 }

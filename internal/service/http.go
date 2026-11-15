@@ -67,7 +67,7 @@ func (a *API) Handler() *fiber.App {
 		if c.Path() == "/v1/catalog/regions" || c.Path() == "/v1/catalog/instance-types" {
 			duration = time.Minute
 		}
-		if c.Method() == fiber.MethodPost && (strings.HasPrefix(c.Path(), "/v1/scans/") || strings.HasPrefix(c.Path(), "/v1/scan-plans/")) && strings.HasSuffix(c.Path(), "/preflight") {
+		if c.Method() == fiber.MethodPost && strings.HasPrefix(c.Path(), "/v1/scan-plans/") && strings.HasSuffix(c.Path(), "/preflight") {
 			duration = 2 * time.Minute
 		}
 		if c.Method() == fiber.MethodGet && strings.HasPrefix(c.Path(), "/v1/runs/") && strings.HasSuffix(c.Path(), "/inspection") {

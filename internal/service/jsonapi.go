@@ -38,7 +38,7 @@ func requestResourceType(c fiber.Ctx) string {
 	if strings.HasPrefix(c.Path(), "/v1/scan-plans") {
 		return "scan-plans"
 	}
-	return "scans"
+	return ""
 }
 
 func invalidJSONAPIParams(params map[string]string) bool {
@@ -85,10 +85,7 @@ func resourceType(c fiber.Ctx, v any) string {
 	case ScanResult:
 		return "scan-results"
 	case Plan:
-		if strings.HasPrefix(c.Path(), "/v1/scan-plans/") {
-			return "scan-preflights"
-		}
-		return "plans"
+		return "scan-preflights"
 	case Run:
 		return "runs"
 	case inspection:
@@ -116,7 +113,7 @@ func resourceType(c fiber.Ctx, v any) string {
 	if strings.HasPrefix(c.Path(), "/v1/runs") || strings.HasSuffix(c.Path(), "/runs") || strings.HasSuffix(c.Path(), "/stop") || strings.HasSuffix(c.Path(), "/start") {
 		return "runs"
 	}
-	return "scans"
+	return ""
 }
 
 func makeResource(typ string, value any) (jsonAPIResource, error) {
@@ -207,7 +204,7 @@ func respondJSONAPI(c fiber.Ctx, status int, v any) error {
 			items = append(items, r)
 		}
 		doc := map[string]any{"data": items, "links": map[string]any{"self": string(c.Request().URI().RequestURI())}}
-		if c.Path() == "/v1/scans" || c.Path() == "/v1/targets" || c.Path() == "/v1/scan-plans" || strings.HasSuffix(c.Path(), "/runs") && (strings.HasPrefix(c.Path(), "/v1/scans/") || strings.HasPrefix(c.Path(), "/v1/scan-plans/")) {
+		if c.Path() == "/v1/targets" || c.Path() == "/v1/scan-plans" || strings.HasSuffix(c.Path(), "/runs") && strings.HasPrefix(c.Path(), "/v1/scan-plans/") {
 			limit, _ := strconv.Atoi(c.Query("limit", "100"))
 			if len(items) == limit && limit > 0 {
 				q := url.Values{}
@@ -226,8 +223,6 @@ func respondJSONAPI(c fiber.Ctx, status int, v any) error {
 		return err
 	}
 	switch r.Type {
-	case "scans":
-		r.Links = map[string]any{"self": "/v1/scans/" + r.ID}
 	case "targets":
 		r.Links = map[string]any{"self": "/v1/targets/" + r.ID}
 	case "scan-plans":
