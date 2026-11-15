@@ -1,0 +1,125 @@
+import type { operations } from './schema'
+
+export type ListTargets =
+  operations['listTargets']['responses'][200]['content']['application/vnd.api+json']
+export type ListScanPlans =
+  operations['listScanPlans']['responses'][200]['content']['application/vnd.api+json']
+export type ListRuns =
+  operations['listRuns']['responses'][200]['content']['application/vnd.api+json']
+export type ListResults =
+  operations['listScanResults']['responses'][200]['content']['application/vnd.api+json']
+export type Target = ListTargets['data'][number]
+export type ScanPlan = ListScanPlans['data'][number]
+export type ScanRun = ListRuns['data'][number]
+export type ScanResult = ListResults['data'][number]
+export type Collection<T> = {
+  data: T[]
+  links?: Record<string, unknown>
+  meta?: Record<string, unknown>
+}
+
+export class ApiError extends Error {
+  constructor(
+    public status: number,
+    message: string,
+  ) {
+    super(message)
+    this.name = 'ApiError'
+  }
+}
+
+function expectDocument<T>(value: unknown, type: string, collection: boolean): T {
+  if (!value || typeof value !== 'object' || !('data' in value))
+    throw new ApiError(502, 'Invalid API document')
+  const document = value as { data: unknown }
+  const resources = collection ? document.data : [document.data]
+  if (
+    !Array.isArray(resources) ||
+    resources.some(
+      (item) =>
+        !item ||
+        typeof item !== 'object' ||
+        (item as Record<string, unknown>).type !== type ||
+        typeof (item as Record<string, unknown>).id !== 'string' ||
+        !(item as Record<string, unknown>).attributes,
+    )
+  ) {
+    throw new ApiError(502, 'Invalid API resource')
+  }
+  return value as T
+}
+
+async function request<T>(
+  path: string,
+  type: string,
+  collection: boolean,
+  signal?: AbortSignal,
+): Promise<T> {
+  if (!path.startsWith('/v1/')) throw new ApiError(400, 'Invalid API path')
+  const response = await fetch(path, {
+    headers: { Accept: 'application/vnd.api+json' },
+    credentials: 'same-origin',
+    signal,
+  })
+  const contentType = response.headers.get('content-type')?.split(';')[0]
+  if (contentType !== 'application/vnd.api+json')
+    throw new ApiError(response.status, 'Unexpected API response type')
+  let body: unknown
+  try {
+    body = await response.json()
+  } catch {
+    throw new ApiError(response.status, 'Invalid API JSON')
+  }
+  if (!response.ok) {
+    const errors =
+      body && typeof body === 'object' && 'errors' in body
+        ? (body as { errors: unknown }).errors
+        : []
+    const detail = Array.isArray(errors)
+      ? errors
+          .map((error) => (typeof error?.detail === 'string' ? error.detail : ''))
+          .filter(Boolean)
+          .join('; ')
+      : ''
+    throw new ApiError(response.status, detail || `Request failed (${response.status})`)
+  }
+  return expectDocument<T>(body, type, collection)
+}
+
+function url(path: string, query: Record<string, string | number | undefined> = {}) {
+  const params = new URLSearchParams()
+  for (const [key, value] of Object.entries(query))
+    if (value !== undefined && value !== '') params.set(key, String(value))
+  return path + (params.size ? `?${params}` : '')
+}
+
+export const api = {
+  targets: (query?: Record<string, string | number | undefined>, signal?: AbortSignal) =>
+    request<ListTargets>(url('/v1/targets', query), 'targets', true, signal),
+  target: (id: string, signal?: AbortSignal) =>
+    request<{ data: Target }>(`/v1/targets/${encodeURIComponent(id)}`, 'targets', false, signal),
+  plans: (query?: Record<string, string | number | undefined>, signal?: AbortSignal) =>
+    request<ListScanPlans>(url('/v1/scan-plans', query), 'scan-plans', true, signal),
+  plan: (id: string, signal?: AbortSignal) =>
+    request<{ data: ScanPlan }>(
+      `/v1/scan-plans/${encodeURIComponent(id)}`,
+      'scan-plans',
+      false,
+      signal,
+    ),
+  runs: (query?: Record<string, string | number | undefined>, signal?: AbortSignal) =>
+    request<ListRuns>(url('/v1/runs', query), 'runs', true, signal),
+  run: (id: string, signal?: AbortSignal) =>
+    request<{ data: ScanRun }>(`/v1/runs/${encodeURIComponent(id)}`, 'runs', false, signal),
+  results: (query?: Record<string, string | number | undefined>, signal?: AbortSignal) =>
+    request<ListResults>(url('/v1/scan-results', query), 'scan-results', true, signal),
+}
+
+export function nextCursor(link: unknown): string | undefined {
+  if (typeof link !== 'string') return undefined
+  try {
+    return new URL(link, window.location.origin).searchParams.get('after') ?? undefined
+  } catch {
+    return undefined
+  }
+}
