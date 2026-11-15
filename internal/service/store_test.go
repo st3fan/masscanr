@@ -6,7 +6,6 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 )
 
 func testStore(t *testing.T) *Store {
@@ -45,33 +44,6 @@ func testStore(t *testing.T) *Store {
 	}
 	t.Cleanup(s.Pool.Close)
 	return s
-}
-func TestStorePersistenceAndConflicts(t *testing.T) {
-	s := testStore(t)
-	ctx := context.Background()
-	d := Defaults()
-	d.Targets = []string{"192.0.2.1"}
-	v := Scan{ID: newID(), Revision: 1, CreatedAt: time.Now().UTC(), Definition: d}
-	if e := s.SaveScan(ctx, v, 0, true); e != nil {
-		t.Fatal(e)
-	}
-	got, e := s.GetScan(ctx, v.ID)
-	if e != nil || got.Definition.Targets[0] != d.Targets[0] {
-		t.Fatal(got, e)
-	}
-	v.Revision = 2
-	if e = s.SaveScan(ctx, v, 0, false); e != ErrConflict {
-		t.Fatal(e)
-	}
-	if e = s.SaveScan(ctx, v, 1, false); e != nil {
-		t.Fatal(e)
-	}
-	if e = s.DeleteScan(ctx, v.ID); e != nil {
-		t.Fatal(e)
-	}
-	if _, e = s.GetScan(ctx, v.ID); e != ErrNotFound {
-		t.Fatal(e)
-	}
 }
 func TestDefinitionValidation(t *testing.T) {
 	d := Defaults()

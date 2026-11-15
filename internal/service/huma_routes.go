@@ -181,7 +181,7 @@ func (a *API) register(method, path, operationID, summary string, model any, han
 				example["data"] = []any{exampleResource(typ, model)}
 			}
 			if operationID == "listActiveRuns" {
-				example["meta"] = map[string]int{"snapshot_version": 1}
+				example["meta"] = map[string]int{"snapshot_version": 2}
 			}
 			op.Responses[strconv.Itoa(status)] = &huma.Response{Description: "JSON:API resource document", Content: map[string]*huma.MediaType{jsonAPIMediaType: {Schema: schema, Example: example}}}
 		}

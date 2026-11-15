@@ -102,20 +102,6 @@ type ScanPlan struct {
 	Settings  ScanPlanSettings `json:"settings"`
 }
 
-// ScanPreflight is a short-lived approval of frozen effective scope and settings.
-type ScanPreflight struct {
-	ID                   string              `json:"id"`
-	TargetID             string              `json:"target_id"`
-	TargetRevision       int64               `json:"target_revision"`
-	ScanPlanID           string              `json:"scan_plan_id"`
-	ScanPlanRevision     int64               `json:"scan_plan_revision"`
-	ExpiresAt            time.Time           `json:"expires_at"`
-	Config               scan.Config         `json:"config"`
-	Timeouts             controller.Timeouts `json:"timeouts"`
-	Workload             scan.Workload       `json:"workload"`
-	RequiresConfirmation bool                `json:"requires_confirmation"`
-}
-
 type ScanResult struct {
 	RunID        string     `json:"run_id"`
 	TargetID     string     `json:"target_id"`

@@ -52,7 +52,7 @@ func (a *API) preflightScanPlan(c fiber.Ctx) error {
 		return bad(c, err)
 	}
 	preflight := Plan{
-		ID: newID(), ScanID: plan.ID, Revision: plan.Revision,
+		ID:       newID(),
 		TargetID: target.ID, TargetRevision: target.Revision,
 		ScanPlanID: plan.ID, ScanPlanRevision: plan.Revision,
 		ExpiresAt: time.Now().UTC().Add(10 * time.Minute),
@@ -120,12 +120,12 @@ func (s *Store) ReserveScanPlan(ctx context.Context, scanPlanID, preflightID, ke
 		if active {
 			return ErrConflict
 		}
-		run = Run{SnapshotVersion: 1, Active: true, ID: newID(), ScanID: plan.ID, TargetID: target.ID, ScanPlanID: plan.ID, Plan: preflight, Phase: "accepted", CreatedAt: time.Now().UTC()}
+		run = Run{SnapshotVersion: 2, Active: true, ID: newID(), TargetID: target.ID, ScanPlanID: plan.ID, Plan: preflight, Phase: "accepted", CreatedAt: time.Now().UTC()}
 		data, e := json.Marshal(run)
 		if e != nil {
 			return e
 		}
-		_, e = tx.Exec(ctx, `INSERT INTO masscanr.runs(id,scan_id,request_key,target_id,scan_plan_id,data) VALUES($1,$2,$3,$4,$5,$6)`, run.ID, plan.ID, key, target.ID, plan.ID, data)
+		_, e = tx.Exec(ctx, `INSERT INTO masscanr.runs(id,target_id,scan_plan_id,request_key,data) VALUES($1,$2,$3,$4,$5)`, run.ID, target.ID, plan.ID, key, data)
 		return e
 	})
 	return run, err

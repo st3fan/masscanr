@@ -88,7 +88,7 @@ func runLines(r runSnapshot, tab, width int) []string {
 		status = "settled"
 	}
 	lines := []string{
-		fmt.Sprintf("Run %s | scan %s | revision %d", r.ID, r.ScanID, r.Plan.Revision),
+		fmt.Sprintf("Run %s | plan %s | target %s | revision %d", r.ID, r.ScanPlanID, r.TargetID, r.Plan.ScanPlanRevision),
 		fmt.Sprintf("%s | %s | stop requested: %t", status, r.Phase, r.StopRequested),
 		fmt.Sprintf("Scan: %s | Cleanup: %s", known(r.Summary.ScanOutcome), known(r.Summary.CleanupOutcome)),
 	}

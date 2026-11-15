@@ -2,39 +2,48 @@ package service
 
 import (
 	"context"
-	"github.com/st3fan/masscanr/internal/scan"
 	"testing"
+
+	"github.com/st3fan/masscanr/internal/scan"
 )
 
-func TestFrozenPlanAndApproval(t *testing.T) {
-	s := testStore(t)
+func TestFrozenScanPreflightAndConfirmation(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	target, err := store.CreateTarget(ctx, "External Network", []string{"192.0.2.0/24"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings := DefaultScanPlanSettings()
+	settings.Ports = "0-65535"
+	plan, err := store.CreateScanPlan(ctx, "Full TCP", target.ID, settings)
+	if err != nil {
+		t.Fatal(err)
+	}
 	calls := 0
-	a := &API{Store: s, Resolve: func(_ context.Context, v []scan.Target) ([]scan.Target, error) { calls++; return v, nil }}
-	h := a.Handler()
-	w := request(h, "POST", "/v1/scans", `{"data":{"type":"scans","attributes":{"targets":["192.0.2.0/24"],"ports":"0-65535"}}}`)
-	var v Scan
-	decodeTestResource(w.Body.Bytes(), &v)
-	w = request(h, "POST", "/v1/scans/"+v.ID+"/preflight", "")
-	if w.Code != 201 {
-		t.Fatal(w.Code, w.Body)
+	app := (&API{Store: store, Resolve: func(_ context.Context, targets []scan.Target) ([]scan.Target, error) { calls++; return targets, nil }}).Handler()
+	response := request(app, "POST", "/v1/scan-plans/"+plan.ID+"/preflight", "")
+	var preflight Plan
+	if response.Code != 201 || decodeTestResource(response.Body.Bytes(), &preflight) != nil || !preflight.RequiresConfirmation {
+		t.Fatal(response.Code, response.Body)
 	}
-	var p Plan
-	decodeTestResource(w.Body.Bytes(), &p)
-	if !p.RequiresConfirmation {
-		t.Fatal(p)
+	if _, err = store.ReserveScanPlan(ctx, plan.ID, preflight.ID, "key", false); err != ErrConflict {
+		t.Fatal(err)
 	}
-	if _, e := s.Reserve(context.Background(), v.ID, p.ID, "key", false); e != ErrConflict {
-		t.Fatal(e)
+	run, err := store.ReserveScanPlan(ctx, plan.ID, preflight.ID, "key", true)
+	if err != nil {
+		t.Fatal(err)
 	}
-	run, e := s.Reserve(context.Background(), v.ID, p.ID, "key", true)
-	if e != nil {
-		t.Fatal(e)
+	same, err := store.ReserveScanPlan(ctx, plan.ID, preflight.ID, "key", true)
+	if err != nil || same.ID != run.ID || calls != 1 {
+		t.Fatal(same, err, calls)
 	}
-	same, e := s.Reserve(context.Background(), v.ID, p.ID, "key", true)
-	if e != nil || same.ID != run.ID || calls != 1 {
-		t.Fatal(same, e, calls)
+	archive := true
+	if _, err = store.UpdateTarget(ctx, target.ID, target.Revision, TargetPatch{Archived: &archive}); err != nil {
+		t.Fatal(err)
 	}
-	if e = s.DeleteScan(context.Background(), v.ID); e != ErrConflict {
-		t.Fatal(e)
+	saved, err := store.GetRun(ctx, run.ID)
+	if err != nil || saved.Plan.Config.Targets[0].String() != "192.0.2.0/24" {
+		t.Fatal(saved, err)
 	}
 }

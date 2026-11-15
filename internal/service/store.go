@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -14,146 +15,86 @@ var ErrConflict = errors.New("conflict")
 
 type Store struct{ Pool *pgxpool.Pool }
 
+// Open initializes the current schema on a fresh development database.
+// Earlier schemas are deliberately unsupported and must be reset.
 func Open(ctx context.Context, url string) (*Store, error) {
-	p, err := pgxpool.New(ctx, url)
+	pool, err := pgxpool.New(ctx, url)
 	if err != nil {
 		return nil, fmt.Errorf("invalid database configuration")
 	}
-	s := &Store{p}
-	err = s.tx(ctx, func(tx pgx.Tx) error {
-		_, e := tx.Exec(ctx, `CREATE SCHEMA IF NOT EXISTS masscanr;
- CREATE TABLE IF NOT EXISTS masscanr.version (version integer PRIMARY KEY);
- INSERT INTO masscanr.version VALUES (2) ON CONFLICT DO NOTHING;`)
-		if e != nil {
-			return e
+	store := &Store{Pool: pool}
+	err = store.tx(ctx, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `CREATE SCHEMA IF NOT EXISTS masscanr;
+CREATE TABLE IF NOT EXISTS masscanr.version (version integer PRIMARY KEY);
+INSERT INTO masscanr.version VALUES (3) ON CONFLICT DO NOTHING;`); err != nil {
+			return err
 		}
 		var count, version int
-		if e = tx.QueryRow(ctx, `SELECT count(*), max(version) FROM masscanr.version`).Scan(&count, &version); e != nil {
-			return e
+		if err := tx.QueryRow(ctx, `SELECT count(*), max(version) FROM masscanr.version`).Scan(&count, &version); err != nil {
+			return err
 		}
-		if count != 1 || version != 2 {
+		if count != 1 || version != 3 {
 			return fmt.Errorf("unsupported database schema: use a fresh development database")
-		}
-		_, e = tx.Exec(ctx, `CREATE TABLE IF NOT EXISTS masscanr.scans(id text PRIMARY KEY, data jsonb NOT NULL);
- CREATE TABLE IF NOT EXISTS masscanr.plans(id text PRIMARY KEY, scan_id text NOT NULL REFERENCES masscanr.scans(id) ON DELETE CASCADE, data jsonb NOT NULL);
- CREATE TABLE IF NOT EXISTS masscanr.runs(id text PRIMARY KEY, scan_id text NOT NULL, request_key text UNIQUE NOT NULL, active boolean NOT NULL DEFAULT true, attempted boolean NOT NULL DEFAULT false, stop boolean NOT NULL DEFAULT false, data jsonb NOT NULL);
- CREATE UNIQUE INDEX IF NOT EXISTS one_active_run ON masscanr.runs(active) WHERE active;`)
-		if e != nil {
-			return e
 		}
 		return initDomainSchema(ctx, tx)
 	})
 	if err != nil {
-		p.Close()
+		pool.Close()
 		return nil, err
 	}
-	return s, nil
+	return store, nil
 }
+
 func (s *Store) tx(ctx context.Context, f func(pgx.Tx) error) error {
-	tx, e := s.Pool.Begin(ctx)
-	if e != nil {
-		return e
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return err
 	}
 	defer tx.Rollback(context.Background())
-	if _, e = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(746592016)`); e != nil {
-		return e
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(746592016)`); err != nil {
+		return err
 	}
-	if e = f(tx); e != nil {
-		return e
+	if err = f(tx); err != nil {
+		return err
 	}
 	return tx.Commit(ctx)
 }
+
 func readJSON[T any](ctx context.Context, q interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }, sql string, args ...any) (T, error) {
-	var v T
-	var b []byte
-	e := q.QueryRow(ctx, sql, args...).Scan(&b)
-	if errors.Is(e, pgx.ErrNoRows) {
-		return v, ErrNotFound
+	var value T
+	var data []byte
+	err := q.QueryRow(ctx, sql, args...).Scan(&data)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return value, ErrNotFound
 	}
-	if e == nil {
-		e = json.Unmarshal(b, &v)
+	if err == nil {
+		err = json.Unmarshal(data, &value)
 	}
-	return v, e
+	return value, err
 }
-func (s *Store) GetScan(ctx context.Context, id string) (Scan, error) {
-	return readJSON[Scan](ctx, s.Pool, `SELECT data FROM masscanr.scans WHERE id=$1`, id)
-}
+
 func (s *Store) GetRun(ctx context.Context, id string) (Run, error) {
 	return readJSON[Run](ctx, s.Pool, `SELECT `+runSnapshotSQL+` FROM masscanr.runs WHERE id=$1`, id)
 }
-func (s *Store) SaveScan(ctx context.Context, v Scan, revision int64, create bool) error {
-	return s.tx(ctx, func(tx pgx.Tx) error {
-		if !create {
-			old, e := readJSON[Scan](ctx, tx, `SELECT data FROM masscanr.scans WHERE id=$1`, v.ID)
-			if e != nil {
-				return e
-			}
-			if old.Revision != revision {
-				return ErrConflict
-			}
-			var active bool
-			if e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM masscanr.runs WHERE scan_id=$1 AND active)`, v.ID).Scan(&active); e != nil {
-				return e
-			}
-			if active {
-				return ErrConflict
-			}
-			v.CreatedAt = old.CreatedAt
-		}
-		b, e := json.Marshal(v)
-		if e != nil {
-			return e
-		}
-		_, e = tx.Exec(ctx, `INSERT INTO masscanr.scans VALUES($1,$2) ON CONFLICT(id) DO UPDATE SET data=excluded.data`, v.ID, b)
-		return e
-	})
-}
-func (s *Store) DeleteScan(ctx context.Context, id string) error {
-	return s.tx(ctx, func(tx pgx.Tx) error {
-		var active bool
-		e := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM masscanr.runs WHERE scan_id=$1 AND active)`, id).Scan(&active)
-		if e != nil {
-			return e
-		}
-		if active {
-			return ErrConflict
-		}
-		r, e := tx.Exec(ctx, `DELETE FROM masscanr.scans WHERE id=$1`, id)
-		if e == nil && r.RowsAffected() == 0 {
-			return ErrNotFound
-		}
-		return e
-	})
-}
-func (s *Store) List(ctx context.Context, table, scanID, after string, limit int) ([]json.RawMessage, error) {
-	if table != "scans" && table != "runs" {
-		return nil, fmt.Errorf("invalid table")
+
+func (s *Store) ListRunsForPlan(ctx context.Context, scanPlanID, after string, limit int) ([]json.RawMessage, error) {
+	if limit < 1 || limit > 1000 {
+		return nil, fmt.Errorf("limit must be 1..1000")
 	}
-	selection := "data"
-	if table == "runs" {
-		selection = runSnapshotSQL
-	}
-	query := `SELECT ` + selection + ` FROM masscanr.` + table + ` WHERE id>$1`
-	args := []any{after, limit}
-	if table == "runs" {
-		query += ` AND scan_id=$3`
-		args = append(args, scanID)
-	}
-	query += ` ORDER BY id LIMIT $2`
-	rows, e := s.Pool.Query(ctx, query, args...)
-	if e != nil {
-		return nil, e
+	rows, err := s.Pool.Query(ctx, `SELECT `+runSnapshotSQL+` FROM masscanr.runs WHERE id>$1 AND scan_plan_id=$3 ORDER BY id LIMIT $2`, after, limit, scanPlanID)
+	if err != nil {
+		return nil, err
 	}
 	defer rows.Close()
 	out := []json.RawMessage{}
 	for rows.Next() {
-		var b []byte
-		if e = rows.Scan(&b); e != nil {
-			return nil, e
+		var data []byte
+		if err = rows.Scan(&data); err != nil {
+			return nil, err
 		}
-		out = append(out, json.RawMessage(b))
+		out = append(out, json.RawMessage(data))
 	}
 	return out, rows.Err()
 }

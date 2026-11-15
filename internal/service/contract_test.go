@@ -69,7 +69,7 @@ func TestHTTPContractRejectsBodyOverJSONLimit(t *testing.T) {
 	go func() { _ = app.Listener(ln) }()
 	t.Cleanup(func() { _ = app.Shutdown() })
 	client := &http.Client{Timeout: 5 * time.Second}
-	req, err := http.NewRequestWithContext(t.Context(), "POST", "http://"+ln.Addr().String()+"/v1/scans", strings.NewReader(strings.Repeat("x", (1<<20)+8192)))
+	req, err := http.NewRequestWithContext(t.Context(), "POST", "http://"+ln.Addr().String()+"/v1/targets", strings.NewReader(strings.Repeat("x", (1<<20)+8192)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,8 +87,7 @@ func TestHTTPContractRejectsBodyOverJSONLimit(t *testing.T) {
 	}
 }
 
-// These assertions describe the public boundary before the router is changed.
-// They intentionally use the same API entry point as the existing service tests.
+// These assertions describe the public router boundary.
 func TestHTTPContractRoutes(t *testing.T) {
 	h := (&API{Catalog: &catalogFixture{}}).Handler()
 	for _, tc := range []struct {
@@ -118,12 +117,12 @@ func TestHTTPContractRoutes(t *testing.T) {
 func TestHTTPContractInvalidJSON(t *testing.T) {
 	h := (&API{}).Handler()
 	for name, body := range map[string]string{
-		"unknown field": `{"data":{"type":"scans","attributes":{"targets":["192.0.2.1"],"unknown":true}}}`,
-		"two objects":   `{"data":{"type":"scans","attributes":{"targets":["192.0.2.1"]}}}{"data":{"type":"scans"}}`,
-		"oversized":     `{"data":{"type":"scans","attributes":{"targets":["192.0.2.1"]}}}` + strings.Repeat(" ", 1<<20),
+		"unknown field": `{"data":{"type":"targets","attributes":{"name":"External Network","entries":["192.0.2.1"],"unknown":true}}}`,
+		"two objects":   `{"data":{"type":"targets","attributes":{"name":"External Network","entries":["192.0.2.1"]}}}{"data":{"type":"targets"}}`,
+		"oversized":     `{"data":{"type":"targets","attributes":{"name":"External Network","entries":["192.0.2.1"]}}}` + strings.Repeat(" ", 1<<20),
 	} {
 		t.Run(name, func(t *testing.T) {
-			w := request(h, "POST", "/v1/scans", body)
+			w := request(h, "POST", "/v1/targets", body)
 			var problem struct {
 				Errors []jsonAPIError `json:"errors"`
 			}
@@ -156,7 +155,7 @@ func TestJSONAPIMediaNegotiation(t *testing.T) {
 			t.Fatalf("Accept %q: status=%d type=%q", tc.accept, resp.StatusCode, resp.Header.Get("Content-Type"))
 		}
 	}
-	req := httptest.NewRequest("POST", "/v1/scans", strings.NewReader(`{"data":{"type":"scans","attributes":{}}}`))
+	req := httptest.NewRequest("POST", "/v1/targets", strings.NewReader(`{"data":{"type":"targets","attributes":{}}}`))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := h.Test(req)
 	if err != nil {

@@ -212,3 +212,15 @@ func (a *API) patchScanPlan(c fiber.Ctx) error {
 	}
 	return respond(c, 200, plan)
 }
+
+func (a *API) listPlanRuns(c fiber.Ctx) error {
+	limit, err := resourceLimit(c)
+	if err != nil {
+		return bad(c, err)
+	}
+	runs, err := a.Store.ListRunsForPlan(c.Context(), c.Params("id"), c.Query("after"), limit)
+	if err != nil {
+		return problem(c, err)
+	}
+	return respond(c, 200, runs)
+}

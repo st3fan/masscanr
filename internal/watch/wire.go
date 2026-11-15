@@ -8,7 +8,7 @@ import (
 
 // These types describe only the fields watch reads from the server's JSON API.
 // Keeping them here prevents the client binary from importing scan execution code.
-const snapshotVersion = 1
+const snapshotVersion = 2
 const maxShards = 65535
 
 type runSnapshot struct {
@@ -18,8 +18,9 @@ type runSnapshot struct {
 	StopRequested   bool                      `json:"stop_requested"`
 	WorkerSnapshots map[string]workerSnapshot `json:"worker_snapshots"`
 	ID              string                    `json:"id"`
-	ScanID          string                    `json:"scan_id"`
-	Plan            planSnapshot              `json:"plan"`
+	TargetID        string                    `json:"target_id"`
+	ScanPlanID      string                    `json:"scan_plan_id"`
+	Plan            planSnapshot              `json:"preflight"`
 	Phase           string                    `json:"phase"`
 	CreatedAt       time.Time                 `json:"created_at"`
 	Artifact        string                    `json:"artifact"`
@@ -28,9 +29,9 @@ type runSnapshot struct {
 }
 
 type planSnapshot struct {
-	Revision int64           `json:"revision"`
-	Config   configSnapshot  `json:"config"`
-	Timeouts timeoutSnapshot `json:"timeouts"`
+	ScanPlanRevision int64           `json:"scan_plan_revision"`
+	Config           configSnapshot  `json:"config"`
+	Timeouts         timeoutSnapshot `json:"timeouts"`
 }
 
 type timeoutSnapshot struct {

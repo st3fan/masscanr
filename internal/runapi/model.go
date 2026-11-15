@@ -7,12 +7,10 @@ import (
 	"time"
 )
 
-const SnapshotVersion = 1
+const SnapshotVersion = 2
 
-type Plan struct {
+type Preflight struct {
 	ID                   string              `json:"id"`
-	ScanID               string              `json:"scan_id,omitempty"`
-	Revision             int64               `json:"revision"`
 	TargetID             string              `json:"target_id,omitempty"`
 	TargetRevision       int64               `json:"target_revision,omitempty"`
 	ScanPlanID           string              `json:"scan_plan_id,omitempty"`
@@ -23,6 +21,8 @@ type Plan struct {
 	Workload             scan.Workload       `json:"workload"`
 	RequiresConfirmation bool                `json:"requires_confirmation"`
 }
+type Plan = Preflight
+
 type Run struct {
 	SnapshotVersion int               `json:"snapshot_version"`
 	Active          bool              `json:"active"`
@@ -31,10 +31,9 @@ type Run struct {
 	WorkerSnapshots map[string]Worker `json:"worker_snapshots"`
 
 	ID         string                   `json:"id"`
-	ScanID     string                   `json:"scan_id,omitempty"`
 	TargetID   string                   `json:"target_id,omitempty"`
 	ScanPlanID string                   `json:"scan_plan_id,omitempty"`
-	Plan       Plan                     `json:"plan"`
+	Plan       Preflight                `json:"preflight"`
 	Phase      string                   `json:"phase"`
 	CreatedAt  time.Time                `json:"created_at"`
 	Artifact   string                   `json:"artifact"`

@@ -64,7 +64,7 @@ func TestWatchClientAgainstPersistentService(t *testing.T) {
 	if _, err := s.Pool.Exec(ctx, `UPDATE masscanr.runs SET active=false WHERE id=$1`, a.ID); err != nil {
 		t.Fatal(err)
 	}
-	b, err := s.Reserve(ctx, a.ScanID, a.Plan.ID, "newer-run", false)
+	b, err := s.ReserveScanPlan(ctx, a.ScanPlanID, a.Plan.ID, "newer-run", false)
 	if err != nil {
 		t.Fatal(err)
 	}

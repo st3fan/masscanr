@@ -111,8 +111,8 @@ func decodeRun(b []byte) (runSnapshot, error) {
 			return r, &clientError{message: "incompatible run snapshot: missing " + key}
 		}
 	}
-	if r.SnapshotVersion != snapshotVersion || r.Active == r.Settled || !validID(r.ID) || !validID(r.ScanID) || r.Plan.Config.Shards < 1 || r.Plan.Config.Shards > maxShards || r.Plan.Revision < 1 || r.Phase == "" {
-		return r, &clientError{message: "incompatible run snapshot; upgrade the service to V10"}
+	if r.SnapshotVersion != snapshotVersion || r.Active == r.Settled || !validID(r.ID) || !validID(r.ScanPlanID) || r.Plan.Config.Shards < 1 || r.Plan.Config.Shards > maxShards || r.Plan.ScanPlanRevision < 1 || r.Phase == "" {
+		return r, &clientError{message: "incompatible run snapshot; update masscanr-server"}
 	}
 	return r, nil
 }
@@ -152,7 +152,7 @@ func (c *Client) Active(ctx context.Context) ([]runSnapshot, error) {
 		Data []json.RawMessage `json:"data"`
 	}
 	if json.Unmarshal(b, &envelope) != nil || envelope.Meta.SnapshotVersion != snapshotVersion || envelope.Data == nil {
-		return nil, &clientError{message: "incompatible active-run response; upgrade the service to V10"}
+		return nil, &clientError{message: "incompatible active-run response; update masscanr-server"}
 	}
 	runs := make([]runSnapshot, 0, len(envelope.Data))
 	seen := map[string]bool{}

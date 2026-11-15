@@ -53,7 +53,7 @@ func TestFreshDomainSchemaConstraints(t *testing.T) {
 	store := testStore(t)
 	ctx := context.Background()
 	var version int
-	if err := store.Pool.QueryRow(ctx, `SELECT version FROM masscanr.version`).Scan(&version); err != nil || version != 2 {
+	if err := store.Pool.QueryRow(ctx, `SELECT version FROM masscanr.version`).Scan(&version); err != nil || version != 3 {
 		t.Fatalf("schema version %d: %v", version, err)
 	}
 	now := time.Now().UTC()

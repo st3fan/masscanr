@@ -78,14 +78,10 @@ func acceptsResponse(header string, download bool) bool {
 
 func resourceType(c fiber.Ctx, v any) string {
 	switch v.(type) {
-	case Scan:
-		return "scans"
 	case Target:
 		return "targets"
 	case ScanPlan:
 		return "scan-plans"
-	case ScanPreflight:
-		return "scan-preflights"
 	case Plan:
 		if strings.HasPrefix(c.Path(), "/v1/scan-plans/") {
 			return "scan-preflights"
@@ -140,12 +136,8 @@ func makeResource(typ string, value any) (jsonAPIResource, error) {
 	}
 	delete(attributes, "id")
 	resource := jsonAPIResource{Type: typ, ID: id, Attributes: attributes}
-	var scanID, scanPlanID string
-	_ = json.Unmarshal(attributes["scan_id"], &scanID)
+	var scanPlanID string
 	_ = json.Unmarshal(attributes["scan_plan_id"], &scanPlanID)
-	if scanID != "" && scanPlanID == "" {
-		resource.Relationships = map[string]any{"scan": map[string]any{"data": map[string]string{"type": "scans", "id": scanID}}}
-	}
 	if scanPlanID != "" {
 		resource.Relationships = map[string]any{"scan-plan": map[string]any{"data": map[string]string{"type": "scan-plans", "id": scanPlanID}}}
 	}
@@ -159,18 +151,14 @@ func makeResource(typ string, value any) (jsonAPIResource, error) {
 	}
 	if typ == "runs" {
 		var plan map[string]json.RawMessage
-		if json.Unmarshal(attributes["plan"], &plan) == nil {
+		if json.Unmarshal(attributes["preflight"], &plan) == nil {
 			var planID string
 			_ = json.Unmarshal(plan["id"], &planID)
 			if planID != "" {
 				if resource.Relationships == nil {
 					resource.Relationships = map[string]any{}
 				}
-				if scanPlanID != "" {
-					resource.Relationships["preflight"] = map[string]any{"data": map[string]string{"type": "scan-preflights", "id": planID}}
-				} else {
-					resource.Relationships["plan"] = map[string]any{"data": map[string]string{"type": "plans", "id": planID}}
-				}
+				resource.Relationships["preflight"] = map[string]any{"data": map[string]string{"type": "scan-preflights", "id": planID}}
 			}
 		}
 	}

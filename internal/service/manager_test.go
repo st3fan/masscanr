@@ -94,24 +94,31 @@ func (r *runnerFixture) Scan(ctx context.Context, _ cloud.Worker, _ backend.Plan
 }
 func reserveFixture(t *testing.T, s *Store, name string) Run {
 	t.Helper()
-	a := &API{Store: s}
-	h := a.Handler()
-	w := request(h, "POST", "/v1/scans", `{"data":{"type":"scans","attributes":{"targets":["192.0.2.1"],"shards":1,"ports":"80","backend":"`+name+`"}}}`)
-	var v Scan
-	if e := decodeTestResource(w.Body.Bytes(), &v); e != nil {
-		t.Fatal(e)
+	ctx := context.Background()
+	target, err := s.CreateTarget(ctx, "Fixture network", []string{"192.0.2.1"})
+	if err != nil {
+		t.Fatal(err)
 	}
-	w = request(h, "POST", "/v1/scans/"+v.ID+"/preflight", "")
-	if w.Code != 201 {
-		t.Fatal(w.Code, w.Body)
+	settings := DefaultScanPlanSettings()
+	settings.Backend, settings.Shards, settings.Ports = name, 1, "80"
+	scanPlan, err := s.CreateScanPlan(ctx, "Fixture plan", target.ID, settings)
+	if err != nil {
+		t.Fatal(err)
 	}
-	var p Plan
-	decodeTestResource(w.Body.Bytes(), &p)
-	r, e := s.Reserve(context.Background(), v.ID, p.ID, newID(), true)
-	if e != nil {
-		t.Fatal(e)
+	api := &API{Store: s, Resolve: func(_ context.Context, targets []scan.Target) ([]scan.Target, error) { return targets, nil }}
+	response := request(api.Handler(), "POST", "/v1/scan-plans/"+scanPlan.ID+"/preflight", "")
+	if response.Code != 201 {
+		t.Fatal(response.Code, response.Body)
 	}
-	return r
+	var preflight Plan
+	if err := decodeTestResource(response.Body.Bytes(), &preflight); err != nil {
+		t.Fatal(err)
+	}
+	run, err := s.ReserveScanPlan(ctx, scanPlan.ID, preflight.ID, newID(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return run
 }
 func waitRun(t *testing.T, s *Store, id string) Run {
 	t.Helper()

@@ -6,8 +6,8 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// domainSchema is initialized only on a fresh development database. Version 1
-// databases are deliberately unsupported; no legacy backfill is performed.
+// domainSchema is initialized only on a fresh development database. Earlier
+// databases are deliberately unsupported; no backfill is performed.
 const domainSchema = `
 CREATE TABLE IF NOT EXISTS masscanr.targets (
     id text PRIMARY KEY,
@@ -49,10 +49,19 @@ CREATE TABLE IF NOT EXISTS masscanr.scan_preflights (
     data jsonb NOT NULL CHECK (jsonb_typeof(data) = 'object')
 );
 CREATE INDEX IF NOT EXISTS scan_preflights_plan ON masscanr.scan_preflights(scan_plan_id, expires_at);
-ALTER TABLE masscanr.runs ADD COLUMN IF NOT EXISTS target_id text REFERENCES masscanr.targets(id);
-ALTER TABLE masscanr.runs ADD COLUMN IF NOT EXISTS scan_plan_id text REFERENCES masscanr.scan_plans(id);
-ALTER TABLE masscanr.runs ADD COLUMN IF NOT EXISTS result_checkpoint bigint NOT NULL DEFAULT 0 CHECK (result_checkpoint >= 0);
-ALTER TABLE masscanr.runs ADD COLUMN IF NOT EXISTS result_state text NOT NULL DEFAULT 'none' CHECK (result_state IN ('none', 'live', 'partial', 'complete', 'error'));
+CREATE TABLE IF NOT EXISTS masscanr.runs (
+    id text PRIMARY KEY,
+    target_id text NOT NULL REFERENCES masscanr.targets(id),
+    scan_plan_id text NOT NULL REFERENCES masscanr.scan_plans(id),
+    request_key text NOT NULL UNIQUE,
+    active boolean NOT NULL DEFAULT true,
+    attempted boolean NOT NULL DEFAULT false,
+    stop boolean NOT NULL DEFAULT false,
+    result_checkpoint bigint NOT NULL DEFAULT 0 CHECK (result_checkpoint >= 0),
+    result_state text NOT NULL DEFAULT 'none' CHECK (result_state IN ('none', 'live', 'partial', 'complete', 'error')),
+    data jsonb NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS one_active_run ON masscanr.runs(active) WHERE active;
 CREATE INDEX IF NOT EXISTS runs_target ON masscanr.runs(target_id, id);
 CREATE INDEX IF NOT EXISTS runs_scan_plan ON masscanr.runs(scan_plan_id, id);
 CREATE TABLE IF NOT EXISTS masscanr.scan_results (
