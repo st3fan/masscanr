@@ -24,7 +24,7 @@ func parse(args []string, out io.Writer) (options, error) {
 	var o options
 	fs := flag.NewFlagSet("watch", flag.ContinueOnError)
 	fs.SetOutput(out)
-	fs.StringVar(&o.Server, "server", "http://127.0.0.1:8080", "service URL")
+	fs.StringVar(&o.Server, "server", "http://127.0.0.1:18080", "service URL")
 	fs.DurationVar(&o.Interval, "interval", 2*time.Second, "poll interval (100ms..1m)")
 	fs.BoolVar(&o.All, "all", false, "continuously watch all active runs, including while idle")
 	fs.BoolVar(&o.Plain, "plain", false, "plain status output (automatic when redirected)")

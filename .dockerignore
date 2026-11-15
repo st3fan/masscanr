@@ -7,6 +7,12 @@
 !cmd/**
 !internal/
 !internal/**
+!web/
+!web/**
+!package.json
+!package-lock.json
+**/node_modules
+**/dist
 **/.env
 **/.env.*
 **/*.scan

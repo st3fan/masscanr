@@ -25,14 +25,14 @@ services:
       PGPASSWORD: ${MASSCANR_POSTGRES_PASSWORD:?Set MASSCANR_POSTGRES_PASSWORD in .env or the environment}
       VULTR_API_TOKEN: ${VULTR_API_TOKEN:-}
     ports:
-      - "${MASSCANR_BIND_ADDRESS:-127.0.0.1}:${MASSCANR_PORT:-8080}:8080"
+      - "${MASSCANR_BIND_ADDRESS:-127.0.0.1}:${MASSCANR_PORT:-18080}:18080"
     volumes:
       - scan-data:/data
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1:8080/healthz"]
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1:18080/healthz"]
       interval: 10s
       timeout: 5s
       retries: 12

@@ -42,3 +42,10 @@ go.work.sum
 !.env.example
 /masscanr-data/
 /preflight.json
+/web/node_modules/
+/web/dist/
+/internal/webui/dist/
+/web/playwright-report/
+/web/test-results/
+
+/web/*.tsbuildinfo

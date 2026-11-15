@@ -1,11 +1,19 @@
 # syntax=docker/dockerfile:1
+FROM node:24-alpine AS frontend
+WORKDIR /src/web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+COPY web/ ./
+RUN npm run build
+
 FROM golang:1.26-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd/ ./cmd/
 COPY internal/ ./internal/
-RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/masscanr-server ./cmd/masscanr-server
+COPY --from=frontend /src/internal/webui/dist/ ./internal/webui/dist/
+RUN CGO_ENABLED=0 go build -tags webui -trimpath -ldflags='-s -w' -o /out/masscanr-server ./cmd/masscanr-server
 
 FROM alpine:3.24
 RUN apk add --no-cache ca-certificates \
@@ -17,6 +25,6 @@ RUN apk add --no-cache ca-certificates \
 COPY --from=build /out/masscanr-server /usr/local/bin/masscanr-server
 USER 10001:10001
 WORKDIR /data
-EXPOSE 8080
+EXPOSE 18080
 ENTRYPOINT ["/usr/local/bin/masscanr-server"]
-CMD ["--listen", "0.0.0.0:8080", "--data-dir", "/data"]
+CMD ["--listen", "0.0.0.0:18080", "--data-dir", "/data"]

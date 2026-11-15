@@ -126,7 +126,7 @@ def seconds(value):
 def arguments(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("targets", nargs="+", help="explicit authorized IPv4/CIDR/AS targets")
-    p.add_argument("--server", default="http://127.0.0.1:8080")
+    p.add_argument("--server", default="http://127.0.0.1:18080")
     p.add_argument("--ports", help="TCP ports/ranges; omitted uses service defaults")
     p.add_argument("--backend", choices=("masscan", "zmap"))
     p.add_argument("--shards", type=int)
