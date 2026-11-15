@@ -32,7 +32,8 @@ class StartScanTests(unittest.TestCase):
 
             def handle_request(self):
                 body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
-                requests.append((self.command, self.path, json.loads(body) if body else None,
+                parsed_body = json.loads(body) if body else None
+                requests.append((self.command, self.path, parsed_body,
                                  dict(self.headers)))
                 if delay == self.path:
                     time.sleep(.1)
@@ -41,13 +42,16 @@ class StartScanTests(unittest.TestCase):
                     status, response = 201, {"data": {"type": "targets", "id": "target-1",
                         "attributes": {"revision": 1, "entries": [{"input": "192.0.2.1"}]}}}
                 elif self.path == "/v1/scan-plans" or self.path == "/v1/scan-plans/plan-1":
-                    status = 200 if self.command == "PATCH" else 201
-                    response = {"data": {"type": "scan-plans", "id": "plan-1",
-                        "attributes": {"target_id": "target-1", "revision": 2 if status == 200 else 1,
-                                       "settings": {"backend": "masscan", "ports": "22", "provider": "vultr",
-                                                    "shards": 1, "rate": 1000, "region": "atl",
-                                                    "instance_type": "vc2-1c-1gb", "timeout": "24h",
-                                                    "cleanup_timeout": "5m"}}}}
+                    if self.command == "PATCH" and parsed_body.get("data", {}).get("id") != "plan-1":
+                        status, response = 400, {"errors": [{"status": "400", "detail": "resource ID is required or mismatched"}]}
+                    else:
+                        status = 200 if self.command == "PATCH" else 201
+                        response = {"data": {"type": "scan-plans", "id": "plan-1",
+                            "attributes": {"target_id": "target-1", "revision": 2 if status == 200 else 1,
+                                           "settings": {"backend": "masscan", "ports": "22", "provider": "vultr",
+                                                        "shards": 1, "rate": 1000, "region": "atl",
+                                                        "instance_type": "vc2-1c-1gb", "timeout": "24h",
+                                                        "cleanup_timeout": "5m"}}}}
                 elif self.path.endswith("/preflight"):
                     addresses = 1000001 if large else 1
                     status, response = 201, {"data": {"type": "scan-preflights", "id": "preflight-1",
@@ -100,6 +104,7 @@ class StartScanTests(unittest.TestCase):
         self.assertEqual([c[1] for c in calls[:6]],
                          ["/healthz", "/v1/targets", "/v1/scan-plans", "/v1/scan-plans/plan-1",
                           "/v1/scan-plans/plan-1/preflight", "/v1/scan-plans/plan-1/start"])
+        self.assertEqual(calls[3][2]["data"]["id"], "plan-1")
         start = calls[5]
         self.assertEqual(start[2], {"data": {"type": "runs", "attributes": {"preflight_id": "preflight-1", "confirm": False}}})
         key = next(v for k, v in start[3].items() if k.lower() == "idempotency-key")

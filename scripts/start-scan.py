@@ -45,12 +45,17 @@ class Client:
         self.timeout = timeout
         self.opener = request.build_opener(NoRedirect)
 
-    def call(self, stage, method, path, expected, body=None, headers=None):
+    def call(self, stage, method, path, expected, body=None, headers=None, resource_id=None):
         url = self.server + path
         log(f"\n[{stage}] {method} {url}")
         if body is not None and path.startswith("/v1/"):
             kind = "runs" if path.endswith("/start") else ("targets" if path == "/v1/targets" else "scan-plans")
-            body = {"data": {"type": kind, "attributes": body}}
+            resource = {"type": kind, "attributes": body}
+            if method == "PATCH":
+                if not resource_id:
+                    raise Failure(f"{stage}: PATCH resource ID is required")
+                resource["id"] = resource_id
+            body = {"data": resource}
         data = None if body is None else json.dumps(body).encode()
         if body is not None:
             log("Request: " + json.dumps(body, sort_keys=True))
@@ -181,7 +186,8 @@ def run(a):
     path = "/v1/scan-plans/" + segment(scan_plan_id)
     if changed:
         created = client.call("update scan plan", "PATCH", path, 200,
-                              {"revision": created.get("revision"), "settings": settings})
+                              {"revision": created.get("revision"), "settings": settings},
+                              resource_id=scan_plan_id)
     log(f"Target ID: {target_id}\nScanPlan ID: {scan_plan_id}\nSaved settings: {json.dumps(created.get('settings'), sort_keys=True)}")
     plan = client.call("preflight", "POST", path + "/preflight", 201)
     plan_id = identifier(plan, "id", "preflight")
