@@ -23,22 +23,25 @@ func Open(ctx context.Context, url string) (*Store, error) {
 	err = s.tx(ctx, func(tx pgx.Tx) error {
 		_, e := tx.Exec(ctx, `CREATE SCHEMA IF NOT EXISTS masscanr;
  CREATE TABLE IF NOT EXISTS masscanr.version (version integer PRIMARY KEY);
- INSERT INTO masscanr.version VALUES (1) ON CONFLICT DO NOTHING;`)
+ INSERT INTO masscanr.version VALUES (2) ON CONFLICT DO NOTHING;`)
 		if e != nil {
 			return e
 		}
-		var v int
-		if e = tx.QueryRow(ctx, `SELECT max(version) FROM masscanr.version`).Scan(&v); e != nil {
+		var count, version int
+		if e = tx.QueryRow(ctx, `SELECT count(*), max(version) FROM masscanr.version`).Scan(&count, &version); e != nil {
 			return e
 		}
-		if v != 1 {
-			return fmt.Errorf("unsupported database schema")
+		if count != 1 || version != 2 {
+			return fmt.Errorf("unsupported database schema: use a fresh development database")
 		}
 		_, e = tx.Exec(ctx, `CREATE TABLE IF NOT EXISTS masscanr.scans(id text PRIMARY KEY, data jsonb NOT NULL);
  CREATE TABLE IF NOT EXISTS masscanr.plans(id text PRIMARY KEY, scan_id text NOT NULL REFERENCES masscanr.scans(id) ON DELETE CASCADE, data jsonb NOT NULL);
  CREATE TABLE IF NOT EXISTS masscanr.runs(id text PRIMARY KEY, scan_id text NOT NULL, request_key text UNIQUE NOT NULL, active boolean NOT NULL DEFAULT true, attempted boolean NOT NULL DEFAULT false, stop boolean NOT NULL DEFAULT false, data jsonb NOT NULL);
  CREATE UNIQUE INDEX IF NOT EXISTS one_active_run ON masscanr.runs(active) WHERE active;`)
-		return e
+		if e != nil {
+			return e
+		}
+		return initDomainSchema(ctx, tx)
 	})
 	if err != nil {
 		p.Close()
