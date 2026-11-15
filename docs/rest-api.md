@@ -180,6 +180,9 @@ The server uses Fiber v3 for incoming requests. Handler work has explicit
 timeouts and is cancelled during server shutdown. Client disconnects do not
 cancel a handler; if a scan start is uncertain, retry with the same
 `Idempotency-Key`.
+JSON request bodies remain limited to 1 MiB and receive a JSON 400 error when
+they exceed that limit. Fiber has a 2 MiB transport cap; larger requests may
+be closed before the handler can return a JSON error.
 
 ## Provider catalog
 

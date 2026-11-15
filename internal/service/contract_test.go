@@ -60,7 +60,7 @@ func TestHTTPContractShutdownCancelsHandler(t *testing.T) {
 	}
 }
 
-func TestHTTPContractRejectsVeryLargeBody(t *testing.T) {
+func TestHTTPContractRejectsBodyOverJSONLimit(t *testing.T) {
 	app := (&API{}).Handler()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
