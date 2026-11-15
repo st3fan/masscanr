@@ -201,7 +201,7 @@ func (m *Manager) Routes(a *API, app *fiber.App) {
 	artifacts := artifactAPI{dir: m.Dir, base: a.Base, getRun: m.Store.GetRun}
 	a.register("POST", "/v1/scan-plans/:id/start", "startScanPlan", "Start a confirmed scan plan", Run{}, m.startScanPlan)
 	a.register("POST", "/v1/runs/:id/stop", "stopRun", "Request run stop", Run{}, m.stopRun)
-	a.register("GET", "/v1/runs", "listActiveRuns", "List active runs", Run{}, m.activeRuns)
+	a.register("GET", "/v1/runs", "listRuns", "List run history or active runs", Run{}, m.listRuns)
 	a.register("GET", "/v1/runs/:id", "getRun", "Get a run", Run{}, func(c fiber.Ctx) error {
 		v, e := m.Store.GetRun(c.Context(), c.Params("id"))
 		if e != nil {

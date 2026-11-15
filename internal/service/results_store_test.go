@@ -81,6 +81,23 @@ func TestLiveResultsDeduplicateAndExposeCoverage(t *testing.T) {
 	if response = request(app, "GET", "/v1/scan-results?filter[run_id]=missing", ""); response.Code != 404 {
 		t.Fatal(response.Code, response.Body)
 	}
+	for _, sortKey := range []string{"ip", "-ip", "port", "-port"} {
+		w := request(app, "GET", "/v1/scan-results?sort="+sortKey+"&limit=1", "")
+		var sorted struct {
+			Links map[string]string `json:"links"`
+		}
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &sorted) != nil || sorted.Links["next"] == "" {
+			t.Fatal(sortKey, w.Code, w.Body)
+		}
+		w = request(app, "GET", sorted.Links["next"], "")
+		var next []ScanResult
+		if w.Code != 200 || decodeTestList(w.Body.Bytes(), &next) != nil || len(next) != 1 {
+			t.Fatal(sortKey, w.Code, w.Body)
+		}
+	}
+	if w := request(app, "GET", "/v1/scan-results?sort=unknown", ""); w.Code != 400 {
+		t.Fatal(w.Code, w.Body)
+	}
 }
 
 func journalForRun(t *testing.T, run Run) []byte {

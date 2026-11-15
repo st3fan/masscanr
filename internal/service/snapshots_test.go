@@ -103,7 +103,25 @@ func TestActiveDiscoveryAndHistoricalRunStop(t *testing.T) {
 	if w := request(h, "POST", "/v1/runs/missing/stop", ""); w.Code != 404 {
 		t.Fatal(w.Code)
 	}
-	if w := request(h, "GET", "/v1/runs", ""); w.Code != 400 {
+	historyPage := request(h, "GET", "/v1/runs?limit=1", "")
+	var page struct {
+		Links map[string]string `json:"links"`
+	}
+	var firstPage []Run
+	if historyPage.Code != 200 || json.Unmarshal(historyPage.Body.Bytes(), &page) != nil || decodeTestList(historyPage.Body.Bytes(), &firstPage) != nil || len(firstPage) != 1 || page.Links["next"] == "" {
+		t.Fatal(historyPage.Code, historyPage.Body)
+	}
+	nextPage := request(h, "GET", page.Links["next"], "")
+	var secondPage []Run
+	if nextPage.Code != 200 || decodeTestList(nextPage.Body.Bytes(), &secondPage) != nil || len(secondPage) != 1 || firstPage[0].ID == secondPage[0].ID {
+		t.Fatal(nextPage.Code, nextPage.Body)
+	}
+	filtered := request(h, "GET", "/v1/runs?filter[scan_plan_id]="+a.ScanPlanID, "")
+	var filteredRuns []Run
+	if filtered.Code != 200 || decodeTestList(filtered.Body.Bytes(), &filteredRuns) != nil || len(filteredRuns) != 2 {
+		t.Fatal(filtered.Code, filtered.Body)
+	}
+	if w := request(h, "GET", "/v1/runs?active=false", ""); w.Code != 400 {
 		t.Fatal(w.Code)
 	}
 	history := request(h, "GET", "/v1/scan-plans/"+a.ScanPlanID+"/runs", "")

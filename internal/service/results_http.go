@@ -14,7 +14,7 @@ func (a *API) listScanResults(c fiber.Ctx) error {
 	if err != nil {
 		return bad(c, err)
 	}
-	filter := ResultFilter{RunID: c.Query("filter[run_id]"), TargetID: c.Query("filter[target_id]"), After: c.Query("after"), Limit: limit}
+	filter := ResultFilter{RunID: c.Query("filter[run_id]"), TargetID: c.Query("filter[target_id]"), After: c.Query("after"), Sort: c.Query("sort"), Limit: limit}
 	if text := c.Query("filter[ip]"); text != "" {
 		filter.IP, err = netip.ParseAddr(text)
 		if err != nil || !filter.IP.Is4() {
@@ -56,6 +56,9 @@ func (a *API) listScanResults(c fiber.Ctx) error {
 		q := url.Values{}
 		q.Set("limit", strconv.Itoa(limit))
 		q.Set("after", resources[len(resources)-1].ID)
+		if filter.Sort != "" {
+			q.Set("sort", filter.Sort)
+		}
 		if filter.RunID != "" {
 			q.Set("filter[run_id]", filter.RunID)
 		}

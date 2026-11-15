@@ -17,6 +17,7 @@ type ResultFilter struct {
 	IP       netip.Addr
 	Port     *uint16
 	After    string
+	Sort     string
 	Limit    int
 }
 
@@ -51,6 +52,9 @@ func (s *Store) ListScanResults(ctx context.Context, filter ResultFilter) ([]Sca
 	if filter.IP.IsValid() && !filter.IP.Is4() {
 		return nil, fmt.Errorf("filter IP must be IPv4")
 	}
+	if filter.Sort != "" && filter.Sort != "ip" && filter.Sort != "-ip" && filter.Sort != "port" && filter.Sort != "-port" {
+		return nil, fmt.Errorf("sort must be ip, -ip, port, or -port")
+	}
 	query := `SELECT r.run_id,r.target_id,host(r.ip),r.port,r.protocol,r.first_seen::text,r.last_seen::text,r.observations::text,r.selector,r.origin_prefix,run.result_state
 FROM masscanr.scan_results r JOIN masscanr.runs run ON run.id=r.run_id WHERE true`
 	args := []any{}
@@ -70,14 +74,41 @@ FROM masscanr.scan_results r JOIN masscanr.runs run ON run.id=r.run_id WHERE tru
 	if filter.Port != nil {
 		query += ` AND r.port=` + add(int(*filter.Port))
 	}
+	order := `r.run_id,r.ip,r.port`
+	compare := `>`
+	cursorColumns := `r.run_id,r.ip,r.port`
+	if filter.Sort == "ip" || filter.Sort == "-ip" {
+		order = `r.ip,r.port,r.run_id`
+		cursorColumns = `r.ip,r.port,r.run_id`
+	}
+	if filter.Sort == "port" || filter.Sort == "-port" {
+		order = `r.port,r.ip,r.run_id`
+		cursorColumns = `r.port,r.ip,r.run_id`
+	}
+	if strings.HasPrefix(filter.Sort, "-") {
+		compare = `<`
+	}
 	if filter.After != "" {
 		runID, ip, port, err := parseResultID(filter.After)
 		if err != nil {
 			return nil, err
 		}
-		query += ` AND (r.run_id,r.ip,r.port)>(` + add(runID) + `,` + add(ip.String()) + `::inet,` + add(int(port)) + `)`
+		cursorValues := ""
+		switch filter.Sort {
+		case "ip", "-ip":
+			cursorValues = add(ip.String()) + `::inet,` + add(int(port)) + `,` + add(runID)
+		case "port", "-port":
+			cursorValues = add(int(port)) + `,` + add(ip.String()) + `::inet,` + add(runID)
+		default:
+			cursorValues = add(runID) + `,` + add(ip.String()) + `::inet,` + add(int(port))
+		}
+		query += ` AND (` + cursorColumns + `)` + compare + `(` + cursorValues + `)`
 	}
-	query += ` ORDER BY r.run_id,r.ip,r.port LIMIT ` + add(filter.Limit)
+	if strings.HasPrefix(filter.Sort, "-") {
+		query += ` ORDER BY ` + strings.ReplaceAll(order, ",", ` DESC,`) + ` DESC LIMIT ` + add(filter.Limit)
+	} else {
+		query += ` ORDER BY ` + order + ` LIMIT ` + add(filter.Limit)
+	}
 	rows, err := s.Pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -37,17 +38,54 @@ func (s *Store) ActiveRuns(ctx context.Context) ([]Run, error) {
 	return out, rows.Err()
 }
 
-func (m *Manager) activeRuns(c fiber.Ctx) error {
+func (m *Manager) listRuns(c fiber.Ctx) error {
 	q := make(map[string][]string)
 	c.Request().URI().QueryArgs().VisitAll(func(k, v []byte) { q[string(k)] = append(q[string(k)], string(v)) })
-	if len(q) != 1 || len(q["active"]) != 1 || q["active"][0] != "true" {
-		return bad(c, fmt.Errorf("active=true is required; historical runs are listed per scan"))
+	if _, ok := q["active"]; ok {
+		if len(q) != 1 || len(q["active"]) != 1 || q["active"][0] != "true" {
+			return bad(c, fmt.Errorf("active=true cannot be combined with history filters"))
+		}
+		runs, err := m.Store.ActiveRuns(c.Context())
+		if err != nil {
+			return problem(c, err)
+		}
+		return respond(c, 200, runapi.ActiveRuns{SnapshotVersion: runapi.SnapshotVersion, Runs: runs})
 	}
-	runs, err := m.Store.ActiveRuns(c.Context())
+	for key, values := range q {
+		if len(values) != 1 || (key != "limit" && key != "after" && key != "filter[target_id]" && key != "filter[scan_plan_id]" && key != "filter[phase]") {
+			return bad(c, fmt.Errorf("invalid run query parameter: %s", key))
+		}
+	}
+	limit, err := resourceLimit(c)
 	if err != nil {
-		return problem(c, err)
+		return bad(c, err)
 	}
-	return respond(c, 200, runapi.ActiveRuns{SnapshotVersion: runapi.SnapshotVersion, Runs: runs})
+	filter := RunFilter{TargetID: c.Query("filter[target_id]"), ScanPlanID: c.Query("filter[scan_plan_id]"), Phase: c.Query("filter[phase]"), After: c.Query("after"), Limit: limit}
+	runs, err := m.Store.ListRuns(c.Context(), filter)
+	if err != nil {
+		return bad(c, err)
+	}
+	resources := make([]jsonAPIResource, 0, len(runs))
+	for _, run := range runs {
+		resource, err := makeResource("runs", run)
+		if err != nil {
+			return problem(c, err)
+		}
+		resources = append(resources, resource)
+	}
+	links := map[string]any{"self": string(c.Request().URI().RequestURI())}
+	if len(runs) == limit {
+		values := url.Values{}
+		values.Set("limit", strconv.Itoa(limit))
+		values.Set("after", runs[len(runs)-1].ID)
+		for _, key := range []string{"filter[target_id]", "filter[scan_plan_id]", "filter[phase]"} {
+			if len(q[key]) > 0 && q[key][0] != "" {
+				values.Set(key, q[key][0])
+			}
+		}
+		links["next"] = c.Path() + "?" + values.Encode()
+	}
+	return sendJSONAPI(c, 200, map[string]any{"data": resources, "links": links, "meta": map[string]any{"snapshot_version": runapi.SnapshotVersion}})
 }
 func (m *Manager) stopRun(c fiber.Ctx) error {
 	id := c.Params("id")
