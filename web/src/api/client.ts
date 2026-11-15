@@ -94,6 +94,19 @@ function url(path: string, query: Record<string, string | number | undefined> = 
 }
 
 export const api = {
+  ping: async (signal?: AbortSignal) => {
+    const response = await fetch('/healthz', { credentials: 'same-origin', signal })
+    if (!response.ok) throw new ApiError(response.status, 'Server unavailable')
+    const body: unknown = await response.json()
+    if (
+      !body ||
+      typeof body !== 'object' ||
+      !('status' in body) ||
+      (body as { status: unknown }).status !== 'ready'
+    )
+      throw new ApiError(502, 'Invalid health response')
+    return 'Ready' as const
+  },
   targets: (query?: Record<string, string | number | undefined>, signal?: AbortSignal) =>
     request<ListTargets>(url('/v1/targets', query), 'targets', true, signal),
   target: (id: string, signal?: AbortSignal) =>

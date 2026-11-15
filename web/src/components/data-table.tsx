@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import {
   flexRender,
   getCoreRowModel,
@@ -41,18 +40,17 @@ export function DataTable<T>({
   sort?: SortingState
   onSort?: (value: SortingState) => void
 }) {
-  const [localSort, setLocalSort] = useState<SortingState>([])
-  const sorting = sort ?? localSort
+  const sorting = sort ?? []
   const table = useReactTable({
     data,
     columns,
     state: { sorting },
     onSortingChange: (updater) => {
       const next = typeof updater === 'function' ? updater(sorting) : updater
-      if (onSort) onSort(next)
-      else setLocalSort(next)
+      onSort?.(next)
     },
-    manualSorting: !!onSort,
+    enableSorting: !!onSort,
+    manualSorting: true,
     getCoreRowModel: getCoreRowModel(),
   })
   if (!data.length) return <EmptyState title={emptyTitle} description={emptyDescription} />
