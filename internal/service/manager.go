@@ -7,10 +7,10 @@ import (
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	"github.com/jackc/pgx/v5"
 	"github.com/st3fan/masscanr/internal/backend/registry"
-	"github.com/st3fan/masscanr/internal/cli"
 	"github.com/st3fan/masscanr/internal/cloud/vultr"
 	"github.com/st3fan/masscanr/internal/controller"
 	"github.com/st3fan/masscanr/internal/remote"
+	"github.com/st3fan/masscanr/internal/results"
 	"github.com/st3fan/masscanr/internal/scanfile"
 	"net/http"
 	"os"
@@ -151,7 +151,7 @@ func (m *Manager) execute(ctx context.Context, id string) error {
 		phase = "cancelled"
 	}
 	if runErr == nil && syncErr == nil && closeErr == nil {
-		if e = cli.ExportResults(path); e != nil {
+		if e = results.ExportResults(path); e != nil {
 			message = "export failed; journal retained"
 		}
 	}

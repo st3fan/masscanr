@@ -14,7 +14,7 @@ import (
 )
 
 func Serve(ctx context.Context, args []string, out io.Writer) (result error) {
-	fs := flag.NewFlagSet("masscanr serve", flag.ContinueOnError)
+	fs := flag.NewFlagSet("masscanr-server", flag.ContinueOnError)
 	fs.SetOutput(out)
 	listen := fs.String("listen", "127.0.0.1:8080", "HTTP listen address")
 	dir := fs.String("data-dir", "masscanr-data", "artifact directory")
