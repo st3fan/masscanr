@@ -17,6 +17,29 @@ export type Collection<T> = {
   links?: Record<string, unknown>
   meta?: Record<string, unknown>
 }
+export type IncludedResource = {
+  type: string
+  id: string
+  attributes: Record<string, unknown>
+  relationships?: Record<string, unknown>
+}
+
+export function relatedResources(
+  document: { data: unknown; included?: IncludedResource[] },
+  resource: { relationships?: Record<string, unknown> },
+  name: string,
+): IncludedResource[] {
+  const relation = resource.relationships?.[name]
+  if (!relation || typeof relation !== 'object' || !('data' in relation)) return []
+  const identifiers = Array.isArray(relation.data) ? relation.data : [relation.data]
+  return identifiers.flatMap((identifier) => {
+    if (!identifier || typeof identifier !== 'object') return []
+    const found = document.included?.find(
+      (item) => item.type === identifier.type && item.id === identifier.id,
+    )
+    return found ? [found] : []
+  })
+}
 
 export class ApiError extends Error {
   constructor(
@@ -45,6 +68,21 @@ function expectDocument<T>(value: unknown, type: string, collection: boolean): T
     )
   ) {
     throw new ApiError(502, 'Invalid API resource')
+  }
+  if ('included' in document) {
+    if (
+      !Array.isArray(document.included) ||
+      document.included.some(
+        (item) =>
+          !item ||
+          typeof item !== 'object' ||
+          typeof item.type !== 'string' ||
+          typeof item.id !== 'string' ||
+          !item.attributes ||
+          typeof item.attributes !== 'object',
+      )
+    )
+      throw new ApiError(502, 'Invalid included resource')
   }
   return value as T
 }

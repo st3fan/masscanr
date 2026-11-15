@@ -19,6 +19,39 @@ func resultFinding(timestamp uint64) scanfile.Finding {
 	return scanfile.Finding{Shard: 1, IP: netip.MustParseAddr("192.0.2.1"), Port: 80, Protocol: "tcp", State: "open", Timestamp: timestamp, Target: "192.0.2.1/32"}
 }
 
+func TestResultSortOrderAndCursor(t *testing.T) {
+	store := testStore(t)
+	run := reserveFixture(t, store, "masscan")
+	ctx := context.Background()
+	for _, row := range []struct {
+		ip   string
+		port int
+	}{{"192.0.2.9", 80}, {"192.0.2.1", 82}, {"192.0.2.5", 81}} {
+		_, err := store.Pool.Exec(ctx, `INSERT INTO masscanr.scan_results(run_id,target_id,ip,port,protocol,first_seen,last_seen,observations) VALUES($1,$2,$3::inet,$4,'tcp',1,1,1)`, run.ID, run.TargetID, row.ip, row.port)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct {
+		sort string
+		want []string
+	}{
+		{"ip", []string{"192.0.2.1", "192.0.2.5", "192.0.2.9"}},
+		{"-ip", []string{"192.0.2.9", "192.0.2.5", "192.0.2.1"}},
+		{"port", []string{"192.0.2.9", "192.0.2.5", "192.0.2.1"}},
+		{"-port", []string{"192.0.2.1", "192.0.2.5", "192.0.2.9"}},
+	} {
+		cursor := ""
+		for _, want := range tc.want {
+			page, err := store.ListScanResults(ctx, ResultFilter{RunID: run.ID, Sort: tc.sort, After: cursor, Limit: 1})
+			if err != nil || len(page) != 1 || page[0].IP.String() != want {
+				t.Fatalf("sort %s after %q: %+v, %v", tc.sort, cursor, page, err)
+			}
+			cursor = page[0].ID
+		}
+	}
+}
+
 func TestLiveResultsDeduplicateAndExposeCoverage(t *testing.T) {
 	store := testStore(t)
 	run := reserveFixture(t, store, "masscan")

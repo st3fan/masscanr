@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, api, nextCursor } from './client'
+import { ApiError, api, nextCursor, relatedResources } from './client'
 
 afterEach(() => vi.unstubAllGlobals())
 function reply(body: unknown, status = 200, contentType = 'application/vnd.api+json') {
@@ -8,14 +8,12 @@ function reply(body: unknown, status = 200, contentType = 'application/vnd.api+j
 
 describe('JSON:API client', () => {
   it('requests same-origin typed resources and preserves pagination links', async () => {
-    const fetch = vi
-      .fn()
-      .mockResolvedValue(
-        reply({
-          data: [{ type: 'targets', id: 't-1', attributes: { name: 'External', entries: [] } }],
-          links: { next: '/v1/targets?after=t-1' },
-        }),
-      )
+    const fetch = vi.fn().mockResolvedValue(
+      reply({
+        data: [{ type: 'targets', id: 't-1', attributes: { name: 'External', entries: [] } }],
+        links: { next: '/v1/targets?after=t-1' },
+      }),
+    )
     vi.stubGlobal('fetch', fetch)
     const result = await api.targets({ limit: 1 })
     expect(fetch).toHaveBeenCalledWith(
@@ -45,5 +43,27 @@ describe('JSON:API client', () => {
     )
     await expect(api.targets()).rejects.toThrow('Invalid API resource')
     await expect(api.targets()).rejects.toThrow('Unexpected API response type')
+  })
+  it('resolves JSON:API included relationships without extra requests', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        reply({
+          data: [
+            {
+              type: 'scan-plans',
+              id: 'p-1',
+              attributes: { name: 'Routine' },
+              relationships: { target: { data: { type: 'targets', id: 't-1' } } },
+            },
+          ],
+          included: [{ type: 'targets', id: 't-1', attributes: { name: 'External' } }],
+        }),
+      ),
+    )
+    const document = await api.plans()
+    expect(relatedResources(document, document.data[0], 'target')[0].attributes.name).toBe(
+      'External',
+    )
   })
 })

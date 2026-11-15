@@ -30,5 +30,8 @@ func TestRoutesAndAssetIsolation(t *testing.T) {
 		if response.StatusCode != tc.status || tc.status == 200 && string(body) != tc.body {
 			t.Fatalf("%s: %d %q", tc.path, response.StatusCode, body)
 		}
+		if tc.path == "/assets/app.js" && response.Header.Get("Content-Type") != "text/javascript; charset=utf-8" && response.Header.Get("Content-Type") != "text/javascript" {
+			t.Fatalf("asset content type: %q", response.Header.Get("Content-Type"))
+		}
 	}
 }

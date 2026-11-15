@@ -31,6 +31,9 @@ contains unrelated projects.
 
 - Write idiomatic Go and keep changes focused on the issue being addressed.
   Run `gofmt`, `go test ./...`, and checks appropriate to the change.
+- For dashboard changes, use the `web/` workspace, regenerate OpenAPI types when
+  the API changes, and run typecheck, lint, formatting, unit tests, and build.
+  Reuse shared JSON:API client and shadcn components; keep browser views read-only.
 - Ask before running the actual app. Existing user authorization in the current
   session remains valid for the approved run and necessary retries.
 - Tests may target the authorized IPv4 prefix `64.98.138.0/22` (masked:

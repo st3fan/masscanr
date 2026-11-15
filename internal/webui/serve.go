@@ -33,7 +33,11 @@ func Register(app *fiber.App, files fs.FS) {
 				return c.Next()
 			}
 			c.Set("Cache-Control", "public, max-age=31536000, immutable")
-			c.Type(path.Ext(name))
+			contentType := mime.TypeByExtension(path.Ext(name))
+			if contentType == "" {
+				contentType = "application/octet-stream"
+			}
+			c.Set("Content-Type", contentType)
 			return c.Send(data)
 		}
 		if requested != "/index.html" && strings.Contains(path.Base(name), ".") {

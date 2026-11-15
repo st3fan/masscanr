@@ -1,7 +1,8 @@
 import { lazy, Suspense } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { BrowserRouter, Route, Routes } from 'react-router-dom'
-import { AppLayout } from '@/components/layout'
+import { BrowserRouter, Link, Route, Routes } from 'react-router-dom'
+import { ThemeProvider } from 'next-themes'
+import { AppLayout, PageHeader } from '@/components/layout'
 import { LoadingState } from '@/components/states'
 import { Toaster } from '@/components/ui/sonner'
 
@@ -29,36 +30,57 @@ const client = new QueryClient({
 export function App() {
   return (
     <QueryClientProvider client={client}>
-      <BrowserRouter>
-        <a
-          href="#main-content"
-          className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:bg-background focus:p-3"
-        >
-          Skip to content
-        </a>
-        <Suspense
-          fallback={
-            <div className="p-8">
-              <LoadingState />
-            </div>
-          }
-        >
-          <Routes>
-            <Route element={<AppLayout />}>
-              <Route index element={<DashboardPage />} />
-              <Route path="targets" element={<TargetsPage />} />
-              <Route path="targets/:id" element={<TargetDetailPage />} />
-              <Route path="scan-plans" element={<PlansPage />} />
-              <Route path="scan-plans/:id" element={<PlanDetailPage />} />
-              <Route path="runs" element={<RunsPage />} />
-              <Route path="runs/:id" element={<RunDetailPage />} />
-              <Route path="results" element={<ResultsPage />} />
-              <Route path="patterns" element={<PatternsPage />} />
-            </Route>
-          </Routes>
-        </Suspense>
-        <Toaster />
-      </BrowserRouter>
+      <ThemeProvider
+        attribute="class"
+        defaultTheme="system"
+        enableSystem
+        storageKey="masscanr-theme"
+      >
+        <BrowserRouter>
+          <a
+            href="#main-content"
+            className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:bg-background focus:p-3"
+          >
+            Skip to content
+          </a>
+          <Suspense
+            fallback={
+              <div className="p-8">
+                <LoadingState />
+              </div>
+            }
+          >
+            <Routes>
+              <Route element={<AppLayout />}>
+                <Route index element={<DashboardPage />} />
+                <Route path="targets" element={<TargetsPage />} />
+                <Route path="targets/:id" element={<TargetDetailPage />} />
+                <Route path="scan-plans" element={<PlansPage />} />
+                <Route path="scan-plans/:id" element={<PlanDetailPage />} />
+                <Route path="runs" element={<RunsPage />} />
+                <Route path="runs/:id" element={<RunDetailPage />} />
+                <Route path="results" element={<ResultsPage />} />
+                <Route path="patterns" element={<PatternsPage />} />
+                <Route
+                  path="*"
+                  element={
+                    <>
+                      <PageHeader
+                        title="Page not found"
+                        description="This dashboard route does not exist."
+                      />
+                      <Link className="text-primary hover:underline" to="/">
+                        Return to overview
+                      </Link>
+                    </>
+                  }
+                />
+              </Route>
+            </Routes>
+          </Suspense>
+          <Toaster />
+        </BrowserRouter>
+      </ThemeProvider>
     </QueryClientProvider>
   )
 }

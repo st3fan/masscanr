@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
+import { useTheme } from 'next-themes'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
   Activity,
@@ -24,20 +25,11 @@ const navigation = [
   { to: '/results', label: 'Results', icon: ListFilter },
 ]
 
-function initialTheme() {
-  const saved = localStorage.getItem('masscanr-theme')
-  if (saved === 'dark' || saved === 'light') return saved
-  return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-}
-
 export function AppLayout() {
-  const [theme, setTheme] = useState<'light' | 'dark'>(initialTheme)
+  const { resolvedTheme, setTheme } = useTheme()
+  const dark = resolvedTheme === 'dark'
   const [mobileOpen, setMobileOpen] = useState(false)
   const location = useLocation()
-  useEffect(() => {
-    document.documentElement.classList.toggle('dark', theme === 'dark')
-    localStorage.setItem('masscanr-theme', theme)
-  }, [theme])
   useEffect(() => setMobileOpen(false), [location.pathname])
   return (
     <div className="min-h-screen bg-background text-foreground lg:grid lg:grid-cols-[250px_minmax(0,1fr)]">
@@ -127,10 +119,10 @@ export function AppLayout() {
             <Button
               variant="ghost"
               size="icon"
-              aria-label={theme === 'dark' ? 'Use light theme' : 'Use dark theme'}
-              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+              aria-label={dark ? 'Use light theme' : 'Use dark theme'}
+              onClick={() => setTheme(dark ? 'light' : 'dark')}
             >
-              {theme === 'dark' ? <Sun /> : <Moon />}
+              {dark ? <Sun /> : <Moon />}
             </Button>
           </div>
         </header>

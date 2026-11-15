@@ -8,6 +8,30 @@ permissions:
   contents: read
 
 jobs:
+  web:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: npm ci
+        working-directory: web
+      - run: npm run generate:api && git diff --exit-code -- src/api/schema.ts
+        working-directory: web
+      - run: npm run typecheck && npm run lint && npm run format:check && npm run test && npm run build
+        working-directory: web
+      - run: npm audit --omit=dev --audit-level=moderate
+        working-directory: web
+      - run: go test -tags webui ./internal/webui && go build -tags webui -o /tmp/masscanr-server-web ./cmd/masscanr-server
+
   test:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
