@@ -1,4 +1,5 @@
-package cli
+// Package results converts completed scan journals to portable result exports.
+package results
 
 import (
 	"encoding/csv"
@@ -14,7 +15,7 @@ import (
 	"strings"
 )
 
-type finding struct {
+type Finding struct {
 	Target    string `json:"target,omitempty"`
 	Prefix    string `json:"prefix,omitempty"`
 	IP        string `json:"ip"`
@@ -25,20 +26,20 @@ type finding struct {
 	Timestamp uint64 `json:"timestamp"`
 }
 
-func exportPaths(output string) [2]string {
+func Paths(output string) [2]string {
 	base := strings.TrimSuffix(output, ".scan")
 	return [2]string{base + ".csv", base + ".jsonl"}
 }
 
 // Stage both exports beside their destinations. Publish with exclusive hard links
 // so an existing file (including a concurrent export) is never overwritten.
-func exportResults(source, output string) (err error) {
+func Export(source, output string) (err error) {
 	in, err := os.Open(source)
 	if err != nil {
 		return err
 	}
 	defer in.Close()
-	paths := exportPaths(output)
+	paths := Paths(output)
 	var staged [2]*os.File
 	var published []string
 	defer func() {
@@ -60,7 +61,7 @@ func exportResults(source, output string) (err error) {
 			return err
 		}
 	}
-	if err = writeExports(in, staged[0], staged[1]); err != nil {
+	if err = Write(in, staged[0], staged[1]); err != nil {
 		return err
 	}
 	for _, file := range staged {
@@ -77,15 +78,15 @@ func exportResults(source, output string) (err error) {
 	return nil
 }
 
-func writeExports(in io.Reader, csvOut, jsonlOut io.Writer) error {
+func Write(in io.Reader, csvOut, jsonlOut io.Writer) error {
 	cw := csv.NewWriter(csvOut)
-	if err := cw.Write(exportColumns); err != nil {
+	if err := cw.Write(Columns); err != nil {
 		return err
 	}
 	jw := json.NewEncoder(jsonlOut)
 	state, err := scanfile.Replay(in, func(f scanfile.Finding) error {
-		row := exportFinding(f)
-		if err := cw.Write(exportRow(row)); err != nil {
+		row := FromScan(f)
+		if err := cw.Write(Row(row)); err != nil {
 			return err
 		}
 		return jw.Encode(row)
@@ -100,15 +101,15 @@ func writeExports(in io.Reader, csvOut, jsonlOut io.Writer) error {
 	return cw.Error()
 }
 
-func exportFinding(f scanfile.Finding) finding {
-	return finding{IP: f.IP.String(), Port: f.Port, Addr: netip.AddrPortFrom(f.IP, f.Port).String(), Protocol: f.Protocol, State: f.State, Timestamp: f.Timestamp, Target: f.Target, Prefix: f.Prefix}
+func FromScan(f scanfile.Finding) Finding {
+	return Finding{IP: f.IP.String(), Port: f.Port, Addr: netip.AddrPortFrom(f.IP, f.Port).String(), Protocol: f.Protocol, State: f.State, Timestamp: f.Timestamp, Target: f.Target, Prefix: f.Prefix}
 }
 
-var exportColumns = []string{"ip", "port", "addr", "protocol", "state", "timestamp", "target", "prefix"}
+var Columns = []string{"ip", "port", "addr", "protocol", "state", "timestamp", "target", "prefix"}
 
-func exportRow(row finding) []string {
+func Row(row Finding) []string {
 	return []string{row.IP, strconv.FormatUint(uint64(row.Port), 10), row.Addr, row.Protocol, row.State, strconv.FormatUint(row.Timestamp, 10), row.Target, row.Prefix}
 }
 
 // ExportResults creates the standard exports for a completed journal.
-func ExportResults(path string) error { return exportResults(path, path) }
+func ExportResults(path string) error { return Export(path, path) }

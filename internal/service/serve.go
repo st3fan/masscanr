@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
+	"github.com/st3fan/masscanr/internal/cloud/vultr"
 	"io"
 	"net"
 	"net/http"
@@ -14,7 +15,7 @@ import (
 )
 
 func Serve(ctx context.Context, args []string, out io.Writer) (result error) {
-	fs := flag.NewFlagSet("masscanr serve", flag.ContinueOnError)
+	fs := flag.NewFlagSet("masscanr-server", flag.ContinueOnError)
 	fs.SetOutput(out)
 	listen := fs.String("listen", "127.0.0.1:8080", "HTTP listen address")
 	dir := fs.String("data-dir", "masscanr-data", "artifact directory")
@@ -70,7 +71,7 @@ func Serve(ctx context.Context, args []string, out io.Writer) (result error) {
 	if e = manager.ResumeReserved(recovery); e != nil {
 		return fmt.Errorf("workflow recovery failed")
 	}
-	api := &API{Store: s, Ready: func() bool { manager.mu.Lock(); defer manager.mu.Unlock(); return !manager.closing }}
+	api := &API{Store: s, Catalog: vultr.New(""), Ready: func() bool { manager.mu.Lock(); defer manager.mu.Unlock(); return !manager.closing }}
 	api.Extra = func(m *http.ServeMux) { manager.Routes(api, m) }
 	srv := &http.Server{Handler: api.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second}
 	ln, e := net.Listen("tcp", *listen)

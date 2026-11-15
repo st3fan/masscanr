@@ -1,9 +1,10 @@
-# REST service (V9 with V10 watch additions)
+# REST service
 
-V9 runs as `masscanr serve --listen 127.0.0.1:8080 --data-dir ./masscanr-data`.
-The interactive `scan` command is retired. `inspect`, `export`, and provider
-catalog commands remain available for maintenance. V9 has no authentication,
-authorization, users, or application TLS. Supply only authorized scan scope.
+Start `masscanr-server --listen 127.0.0.1:8080 --data-dir ./masscanr-data`.
+The separate `masscanr-cli` executable offers only `watch` over this API. The
+service has no built-in authentication, authorization, users, or application TLS.
+Keep access on loopback or an existing private network, and supply only
+authorized scan scope.
 
 ## PostgreSQL and deployment
 
@@ -20,7 +21,8 @@ the artifact directory on persistent storage and reuse it with the same database
 on restart. The database contains definitions, frozen plans, run state, and DBOS
 checkpoints. `.scan` files contain detailed findings; successful runs also produce
 CSV and JSONL. Back up both the database and artifact directory. Artifact paths in
-API responses refer to the service's filesystem; downloads/search are not included.
+run snapshots refer to the service's filesystem. Run-ID inspection and saved
+CSV/JSONL downloads are available through the API.
 
 DBOS Go is pinned to v1.8.0. The workflow application version is `masscanr-v9-1`.
 Workflow changes require an explicit version/recovery review; auto-upgrade and
@@ -28,7 +30,8 @@ Conductor are not enabled. App migrations reject unknown schema versions.
 
 ## JSON API
 
-All requests and responses use JSON. Request bodies are limited to 1 MiB and
+Requests and responses use JSON except for saved CSV/JSONL downloads. Request
+bodies are limited to 1 MiB and
 unknown fields are rejected. Errors have the form `{"error":"message"}`. Invalid
 input returns 400; absent resources return 404; stale revisions, stale plans,
 missing required approval, and active-run conflicts return 409. Target lookup
@@ -71,6 +74,11 @@ strings. The response contains `id`, `revision`, `created_at`, `updated_at`, and
 | `GET /v1/runs?active=true` | 200 versioned active-run snapshot envelope; includes cleanup |
 | `POST /v1/runs/{id}/stop` | 202 exact immutable run; settled run is a no-op, unknown ID is 404 |
 | `GET /v1/runs/{id}` | 200 run, including after its definition is deleted |
+| `GET /v1/runs/{id}/inspection` | 200 validated journal state, including partial runs |
+| `GET /v1/runs/{id}/exports/csv` | 200 saved CSV for a complete scan |
+| `GET /v1/runs/{id}/exports/jsonl` | 200 saved findings JSONL for a complete scan |
+| `GET /v1/catalog/regions` | 200 public provider region catalog |
+| `GET /v1/catalog/instance-types?region=atl` | 200 plans available in the region; `atl` is the default |
 | `GET /v1/scans/{id}/runs` | 200 history array |
 
 Definition and per-scan history list routes accept `limit` (1–1000, default 100) and `after` (last ID from the
@@ -149,6 +157,32 @@ cancels only its local execution context. A settled historical run returns its
 snapshot without changing a newer run of the same definition. Repeating the call
 is harmless. The existing scan-level stop route remains available for V9 clients,
 but viewers must use the run-specific route to avoid a stale-view race.
+
+## Artifact inspection and saved exports
+
+The artifact routes identify data by a server run ID only. They validate that
+the journal belongs to that run and resides in the configured artifact directory.
+Inspection replays the journal and returns `run_id`, `format`, `schema`,
+`created_at`, `config`, `accepted_findings`, `records`, `workers`,
+`scan_outcome`, `cleanup_outcome`, `complete`, `truncated`, and `undeleted`.
+The worker list reports the last validated state, not current cloud state.
+For unfinished or truncated journals, completion and unobserved coverage are
+unconfirmed. Invalid journal content fails rather than silently skipping records.
+
+CSV and JSONL routes stream existing saved files only when the journal confirms
+a complete scan. Cleanup can be incomplete while scan results remain complete.
+Incomplete results or a missing saved export return HTTP 409; neither route
+creates or repairs files. Unknown runs return 404. Only `csv` and `jsonl` are
+supported, with download content types and `no-store` cache headers. No local
+artifact path is accepted from an API client.
+
+## Provider catalog
+
+The catalog routes query Vultr's public catalog without a token. Regions include
+ID, name, country, and continent. Instance types include ID, family, vCPU, memory,
+disk, storage, and CPU details. Results are sorted by ID. Unknown regions return
+404; provider failures return 502. Catalog lookup does not reserve capacity and
+may differ from availability at scan start.
 
 ## Run lifecycle
 

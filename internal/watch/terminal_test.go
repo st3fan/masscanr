@@ -14,7 +14,6 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/st3fan/masscanr/internal/runapi"
 	"golang.org/x/term"
 )
 
@@ -68,7 +67,7 @@ for line in sys.stdin:
 			api := &fakeSource{}
 			done := make(chan error, 1)
 			go func() {
-				done <- runTerminal(ctx, cancel, api, options{Interval: time.Hour}, snapshot{Runs: []runapi.Run{fixtureRun("a", false)}}, slave, slave, tea.WithEnvironment([]string{"TERM=xterm-256color"}))
+				done <- runTerminal(ctx, cancel, api, options{Interval: time.Hour}, snapshot{Runs: []runSnapshot{fixtureRun("a", false)}}, slave, slave, tea.WithEnvironment([]string{"TERM=xterm-256color"}))
 			}()
 			deadline := time.Now().Add(3 * time.Second)
 			for {

@@ -2,13 +2,79 @@ package watch
 
 import (
 	"fmt"
+	"github.com/charmbracelet/x/ansi"
+	"math/big"
+	"net/netip"
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/st3fan/masscanr/internal/runapi"
-	"github.com/st3fan/masscanr/internal/tui"
 )
+
+func configLines(r runSnapshot, width int) []string {
+	c := r.Plan.Config
+	var addresses uint64
+	for _, target := range c.Targets {
+		if p, err := netip.ParsePrefix(target); err == nil && p.Addr().Is4() {
+			addresses += uint64(1) << (32 - p.Bits())
+		}
+	}
+	requestedRate := new(big.Int).Mul(new(big.Int).SetUint64(c.Rate), big.NewInt(int64(c.Shards)))
+	version, build := known(r.Summary.Identity.Version), known(r.Summary.Identity.Build)
+	seed := "pending"
+	if r.Summary.RunID != "" {
+		seed = fmt.Sprint(r.Summary.Seed)
+	}
+	output := r.Artifact
+	if output == "" {
+		output = "pending"
+	}
+	lines := []string{
+		fmt.Sprintf("EFFECTIVE IPv4 TARGETS  %d CIDRs · %d IPs", len(c.Targets), addresses),
+	}
+	for _, requested := range c.RequestedTargets {
+		lines = append(lines, requested.Target+" (input "+requested.Input+")")
+		if requested.Resolution != nil {
+			lines = append(lines, "RIPE snapshot "+requested.Resolution.SnapshotAt.UTC().Format(time.RFC3339)+" · fetched "+requested.Resolution.FetchedAt.UTC().Format(time.RFC3339), requested.Resolution.Source)
+		}
+		for _, prefix := range requested.Prefixes {
+			lines = append(lines, "  "+prefix)
+		}
+	}
+	for _, target := range c.Targets {
+		lines = append(lines, "  "+target)
+	}
+	lines = append(lines,
+		"", "SCAN",
+		"Backend               "+c.Backend,
+		"Scanner version       "+version,
+		"Scanner build         "+build,
+		"Protocol              TCP SYN",
+		fmt.Sprintf("Port count            %d", len(c.Ports)),
+		"Effective ports       "+c.PortSpec(),
+		fmt.Sprintf("Shards                %d", c.Shards),
+		fmt.Sprintf("Rate / shard          %d pps", c.Rate),
+		"Requested total rate  "+requestedRate.String()+" pps",
+		"Shared seed           "+seed,
+		"Scan timeout          "+r.Plan.Timeouts.Scan.String(),
+		"Cleanup timeout       "+r.Plan.Timeouts.Cleanup.String(),
+		"", "WORKERS",
+		"Provider              Vultr",
+		"Region                "+c.Region,
+		"Instance type         "+c.InstanceType,
+		"", "OUTPUT",
+		"Scan document         "+output,
+	)
+	if r.Artifact != "" {
+		base := strings.TrimSuffix(r.Artifact, ".scan")
+		lines = append(lines, "Expected CSV          "+base+".csv", "Expected JSONL        "+base+".jsonl")
+	}
+	lines = append(lines, "Exports are produced only after a successful scan.")
+	var wrapped []string
+	for _, line := range lines {
+		wrapped = append(wrapped, strings.Split(ansi.Wrap(clean(line), width, ""), "\n")...)
+	}
+	return wrapped
+}
 
 func known(s string) string {
 	if s == "" {
@@ -16,7 +82,7 @@ func known(s string) string {
 	}
 	return s
 }
-func runLines(r runapi.Run, tab, width int) []string {
+func runLines(r runSnapshot, tab, width int) []string {
 	status := "active"
 	if r.Settled {
 		status = "settled"
@@ -36,7 +102,7 @@ func runLines(r runapi.Run, tab, width int) []string {
 		lines = append(lines, "Worker reconciliation unresolved")
 	}
 	if tab == 1 {
-		return append(lines, tui.SnapshotConfigLines(r, max(1, width))...)
+		return append(lines, configLines(r, max(1, width))...)
 	}
 	cfg := r.Plan.Config
 	lines = append(lines, fmt.Sprintf("Backend %s | shards %d | requested %d pps/worker", cfg.Backend, cfg.Shards, cfg.Rate), "Ports: "+cfg.PortSpec())
@@ -91,7 +157,7 @@ func runLines(r runapi.Run, tab, width int) []string {
 	return lines
 }
 func renderPlain(server string, s snapshot, stale string) string {
-	lines := []string{"masscanr watch | " + server}
+	lines := []string{"masscanr-cli watch | " + server}
 	if stale != "" {
 		lines = append(lines, stale)
 	}

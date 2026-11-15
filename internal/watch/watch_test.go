@@ -15,12 +15,32 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/st3fan/masscanr/internal/controller"
 	"github.com/st3fan/masscanr/internal/runapi"
 	"github.com/st3fan/masscanr/internal/scan"
 )
 
-func fixtureRun(id string, active bool) runapi.Run {
-	return runapi.Run{SnapshotVersion: 1, ID: id, ScanID: "scan", Active: active, Settled: !active, Phase: "scanning", CreatedAt: time.Now(), Plan: runapi.Plan{Revision: 1, Config: scan.Defaults()}}
+type activeRunsFixture struct {
+	SnapshotVersion int           `json:"snapshot_version"`
+	Runs            []runSnapshot `json:"runs"`
+}
+
+func fixtureRun(id string, active bool) runSnapshot {
+	return runSnapshot{SnapshotVersion: 1, ID: id, ScanID: "scan", Active: active, Settled: !active, Phase: "scanning", CreatedAt: time.Now(), Plan: planSnapshot{Revision: 1, Config: configSnapshot{Backend: "masscan", Shards: 2, Ports: []uint16{80, 443}}}}
+}
+
+func TestServerSnapshotWireCompatibility(t *testing.T) {
+	cfg := scan.Defaults()
+	cfg.Targets, _ = scan.ParseTargets([]string{"192.0.2.0/24"})
+	r := runapi.Run{SnapshotVersion: runapi.SnapshotVersion, Active: true, ID: "run-a", ScanID: "scan-a", Phase: "scanning", Plan: runapi.Plan{Revision: 2, Config: cfg, Timeouts: controller.DefaultTimeouts()}, Summary: controller.Summary{RunID: "run-a", Seed: 17, Found: 3, ScanOutcome: "running"}, WorkerSnapshots: map[string]runapi.Worker{"1": {Shard: 1, ID: "worker-a", Progress: &scan.Progress{PercentUnknown: true}}}}
+	b, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := decodeRun(b)
+	if err != nil || got.Plan.Config.PortSpec() != cfg.PortSpec() || got.Plan.Config.Targets[0] != "192.0.2.0/24" || got.Summary.Seed != 17 || got.WorkerSnapshots["1"].Progress == nil || !got.WorkerSnapshots["1"].Progress.PercentUnknown {
+		t.Fatal(got, err)
+	}
 }
 func fixtureClient(t *testing.T, h http.HandlerFunc) *Client {
 	t.Helper()
@@ -84,7 +104,7 @@ func TestDiscoveryTransitionsAndStopRequest(t *testing.T) {
 			if r.Method != "GET" || r.URL.RawQuery != "active=true" {
 				t.Error(r.Method, r.URL)
 			}
-			runs := []runapi.Run{}
+			runs := []runSnapshot{}
 			if stage.Load() == 1 {
 				runs = append(runs, a)
 			}
@@ -95,7 +115,7 @@ func TestDiscoveryTransitionsAndStopRequest(t *testing.T) {
 				w.WriteHeader(503)
 				return
 			}
-			json.NewEncoder(w).Encode(runapi.ActiveRuns{SnapshotVersion: 1, Runs: runs})
+			json.NewEncoder(w).Encode(activeRunsFixture{SnapshotVersion: 1, Runs: runs})
 		case "/v1/runs/a":
 			v := a
 			v.Active = false
@@ -153,13 +173,13 @@ func TestDiscoveryTransitionsAndStopRequest(t *testing.T) {
 
 type fakeSource struct{ stopIDs []string }
 
-func (*fakeSource) Get(context.Context, string) (runapi.Run, error) {
-	return runapi.Run{}, fmt.Errorf("unexpected get")
+func (*fakeSource) Get(context.Context, string) (runSnapshot, error) {
+	return runSnapshot{}, fmt.Errorf("unexpected get")
 }
-func (*fakeSource) Active(context.Context) ([]runapi.Run, error) {
+func (*fakeSource) Active(context.Context) ([]runSnapshot, error) {
 	return nil, fmt.Errorf("unexpected discovery")
 }
-func (s *fakeSource) Stop(_ context.Context, id string) (runapi.Run, error) {
+func (s *fakeSource) Stop(_ context.Context, id string) (runSnapshot, error) {
 	s.stopIDs = append(s.stopIDs, id)
 	return fixtureRun(id, true), nil
 }
@@ -181,7 +201,7 @@ func TestDetachAndImmutableConfirmation(t *testing.T) {
 	for _, exit := range []string{"q", "ctrl+c"} {
 		ctx, cancel := context.WithCancel(t.Context())
 		api := &fakeSource{}
-		m := newModel(ctx, cancel, api, options{All: true}, snapshot{Runs: []runapi.Run{fixtureRun("a", true)}})
+		m := newModel(ctx, cancel, api, options{All: true}, snapshot{Runs: []runSnapshot{fixtureRun("a", true)}})
 		_, cmd := update(m, key(exit))
 		if cmd == nil || ctx.Err() == nil || len(api.stopIDs) > 0 {
 			t.Fatal(exit)
@@ -190,7 +210,7 @@ func TestDetachAndImmutableConfirmation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	api := &fakeSource{}
-	m := newModel(ctx, cancel, api, options{All: true}, snapshot{Runs: []runapi.Run{fixtureRun("a", true)}})
+	m := newModel(ctx, cancel, api, options{All: true}, snapshot{Runs: []runSnapshot{fixtureRun("a", true)}})
 	m, _ = update(m, key("s"))
 	m, cmd := update(m, key("enter"))
 	if cmd != nil || len(api.stopIDs) > 0 {
@@ -202,7 +222,7 @@ func TestDetachAndImmutableConfirmation(t *testing.T) {
 		t.Fatal("confirmation Ctrl-C did not dismiss")
 	}
 	m, _ = update(m, key("s"))
-	m, _ = update(m, pollMsg{snapshot: snapshot{Runs: []runapi.Run{fixtureRun("b", true)}}})
+	m, _ = update(m, pollMsg{snapshot: snapshot{Runs: []runSnapshot{fixtureRun("b", true)}}})
 	if m.selected != "b" || m.confirmID != "a" {
 		t.Fatal(m.selected, m.confirmID)
 	}
@@ -221,8 +241,8 @@ func TestRenderUnknownNarrowAndPlain(t *testing.T) {
 		r := fixtureRun("a", true)
 		r.Plan.Config.Backend = backend
 		r.Error = "bad\x1b[31m\nrow"
-		r.WorkerSnapshots = map[string]runapi.Worker{"1": {Shard: 1, ID: "w", State: "booting"}}
-		s := snapshot{Runs: []runapi.Run{r}}
+		r.WorkerSnapshots = map[string]workerSnapshot{"1": {Shard: 1, ID: "w", State: "booting"}}
+		s := snapshot{Runs: []runSnapshot{r}}
 		text := renderPlain("http://server", s, "")
 		if strings.Contains(text, "\x1b") || !strings.Contains(text, "Progress unknown") || !strings.Contains(text, backend) {
 			t.Fatal(text)
@@ -254,7 +274,7 @@ func TestPlainAllIdleAndDedup(t *testing.T) {
 			mutations.Add(1)
 		}
 		gets.Add(1)
-		json.NewEncoder(w).Encode(runapi.ActiveRuns{SnapshotVersion: 1, Runs: []runapi.Run{}})
+		json.NewEncoder(w).Encode(activeRunsFixture{SnapshotVersion: 1, Runs: []runSnapshot{}})
 	})
 	s, err := poll(ctx, c, "", snapshot{})
 	if err != nil {
@@ -283,7 +303,7 @@ func TestPlainAllIdleAndDedup(t *testing.T) {
 func TestTerminalEOFFromFixture(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	err := runTerminal(ctx, cancel, &fakeSource{}, options{Interval: time.Hour}, snapshot{Runs: []runapi.Run{fixtureRun("a", false)}}, strings.NewReader(""), io.Discard, tea.WithoutRenderer(), tea.WithEnvironment([]string{"TERM=dumb"}))
+	err := runTerminal(ctx, cancel, &fakeSource{}, options{Interval: time.Hour}, snapshot{Runs: []runSnapshot{fixtureRun("a", false)}}, strings.NewReader(""), io.Discard, tea.WithoutRenderer(), tea.WithEnvironment([]string{"TERM=dumb"}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +312,7 @@ func TestTerminalEOFFromFixture(t *testing.T) {
 func TestOldServiceExplainsDiscovery404(t *testing.T) {
 	c := fixtureClient(t, func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) })
 	_, err := c.Active(t.Context())
-	if err == nil || !strings.Contains(err.Error(), "rebuild and restart") || retryable(err) {
+	if err == nil || !strings.Contains(err.Error(), "update and restart masscanr-server") || retryable(err) {
 		t.Fatal(err)
 	}
 }
@@ -301,7 +321,7 @@ func TestStopCannotBeConfirmedInUnreadableTerminal(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	api := &fakeSource{}
-	m := newModel(ctx, cancel, api, options{}, snapshot{Runs: []runapi.Run{fixtureRun("a", true)}})
+	m := newModel(ctx, cancel, api, options{}, snapshot{Runs: []runSnapshot{fixtureRun("a", true)}})
 	m, _ = update(m, key("s"))
 	m.width = 10
 	m.height = 2

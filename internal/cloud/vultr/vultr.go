@@ -93,10 +93,10 @@ func (c *Client) Validate(ctx context.Context, spec cloud.Spec) error {
 	}
 	selected := slices.IndexFunc(plans, func(p cloud.InstanceType) bool { return p.ID == spec.InstanceType })
 	if selected < 0 {
-		return fmt.Errorf("instance type %q was not found in Vultr's global plan catalog\n  catalog: GET /v2/plans\n  next step: masscanr list-instance-types --region %s", c.redactKey(spec.InstanceType), c.redactKey(spec.Region))
+		return fmt.Errorf("instance type %q was not found in Vultr's global plan catalog\n  catalog: GET /v2/plans\n  next step: GET /v1/catalog/instance-types?region=%s", c.redactKey(spec.InstanceType), c.redactKey(spec.Region))
 	}
 	if !slices.Contains(available, spec.InstanceType) {
-		return fmt.Errorf("instance type %q exists in Vultr's catalog but is absent from its current regional availability response\n  region: %s\n  availability: GET /v2/regions/%s/availability (%d plans returned)\n  next step: masscanr list-instance-types --region %s", c.redactKey(spec.InstanceType), c.redactKey(spec.Region), c.redactKey(spec.Region), len(available), c.redactKey(spec.Region))
+		return fmt.Errorf("instance type %q exists in Vultr's catalog but is absent from its current regional availability response\n  region: %s\n  availability: GET /v2/regions/%s/availability (%d plans returned)\n  next step: GET /v1/catalog/instance-types?region=%s", c.redactKey(spec.InstanceType), c.redactKey(spec.Region), c.redactKey(spec.Region), len(available), c.redactKey(spec.Region))
 	}
 	if plans[selected].DiskGB < 1 {
 		return fmt.Errorf("instance type %s has no local boot disk; block-storage boot is not supported", spec.InstanceType)
