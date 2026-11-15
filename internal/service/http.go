@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/st3fan/masscanr/internal/cloud"
 	"github.com/st3fan/masscanr/internal/scan"
 	"io"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 
 type API struct {
 	Resolve func(context.Context, []scan.Target) ([]scan.Target, error)
+	Catalog cloud.Catalog
 	Store   *Store
 	Ready   func() bool
 	Extra   func(*http.ServeMux)
@@ -34,6 +36,8 @@ func (a *API) Handler() http.Handler {
 	m.HandleFunc("POST /v1/scans/{id}/preflight", a.preflight)
 	m.HandleFunc("GET /v1/scans", a.list)
 	m.HandleFunc("GET /v1/scans/{id}", a.get)
+	m.HandleFunc("GET /v1/catalog/regions", a.regions)
+	m.HandleFunc("GET /v1/catalog/instance-types", a.instanceTypes)
 	m.HandleFunc("PUT /v1/scans/{id}", a.replace)
 	m.HandleFunc("DELETE /v1/scans/{id}", a.remove)
 	if a.Extra != nil {
