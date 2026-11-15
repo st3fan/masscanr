@@ -2,11 +2,11 @@ package service
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
+	"net"
 	"testing"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/st3fan/masscanr/internal/controller"
 	"github.com/st3fan/masscanr/internal/scan"
 	"github.com/st3fan/masscanr/internal/watch"
@@ -17,10 +17,15 @@ func TestWatchClientAgainstPersistentService(t *testing.T) {
 	ctx := t.Context()
 	manager := &Manager{Store: s, cancel: map[string]context.CancelFunc{}}
 	api := &API{Store: s}
-	api.Extra = func(mux *http.ServeMux) { manager.Routes(api, mux) }
-	server := httptest.NewServer(api.Handler())
-	defer server.Close()
-	client, err := watch.NewClient(server.URL)
+	api.Extra = func(mux *fiber.App) { manager.Routes(api, mux) }
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := api.Handler()
+	go func() { _ = app.Listener(ln) }()
+	t.Cleanup(func() { _ = app.Shutdown() })
+	client, err := watch.NewClient("http://" + ln.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -3,55 +3,50 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"time"
+
+	"github.com/gofiber/fiber/v3"
 	"github.com/jackc/pgx/v5"
 	"github.com/st3fan/masscanr/internal/backend/registry"
 	"github.com/st3fan/masscanr/internal/ripe"
 	"github.com/st3fan/masscanr/internal/scan"
-	"net/http"
-	"time"
 )
 
-func (a *API) preflight(w http.ResponseWriter, r *http.Request) {
-	v, e := a.Store.GetScan(r.Context(), r.PathValue("id"))
+func (a *API) preflight(c fiber.Ctx) error {
+	v, e := a.Store.GetScan(c.Context(), c.Params("id"))
 	if e != nil {
-		problem(w, e)
-		return
+		return problem(c, e)
 	}
 	cfg, t, e := v.Definition.Config()
 	if e != nil {
-		bad(w, e)
-		return
+		return bad(c, e)
 	}
 	resolve := a.Resolve
 	if resolve == nil {
 		resolve = ripe.New().Resolve
 	}
-	cfg.RequestedTargets, e = resolve(r.Context(), cfg.RequestedTargets)
+	cfg.RequestedTargets, e = resolve(c.Context(), cfg.RequestedTargets)
 	if e != nil {
-		respond(w, 422, map[string]string{"error": "target resolution failed"})
-		return
+		return respond(c, 422, map[string]string{"error": "target resolution failed"})
 	}
 	cfg.Targets = scan.TargetUnion(cfg.RequestedTargets)
 	if e = cfg.Validate(); e != nil {
-		bad(w, e)
-		return
+		return bad(c, e)
 	}
 	b, e := registry.Resolve(cfg.Backend)
 	if e == nil {
 		e = b.Validate(cfg.Intent(), cfg.Shards)
 	}
 	if e != nil {
-		bad(w, e)
-		return
+		return bad(c, e)
 	}
 	work, e := cfg.Intent().Workload()
 	if e != nil {
-		bad(w, e)
-		return
+		return bad(c, e)
 	}
 	p := Plan{ID: newID(), ScanID: v.ID, Revision: v.Revision, ExpiresAt: time.Now().UTC().Add(10 * time.Minute), Config: cfg, Timeouts: t, Workload: work, RequiresConfirmation: work.RequiresConfirmation()}
-	e = a.Store.tx(r.Context(), func(tx pgx.Tx) error {
-		current, e := readJSON[Scan](r.Context(), tx, `SELECT data FROM masscanr.scans WHERE id=$1`, v.ID)
+	e = a.Store.tx(c.Context(), func(tx pgx.Tx) error {
+		current, e := readJSON[Scan](c.Context(), tx, `SELECT data FROM masscanr.scans WHERE id=$1`, v.ID)
 		if e != nil {
 			return e
 		}
@@ -62,14 +57,13 @@ func (a *API) preflight(w http.ResponseWriter, r *http.Request) {
 		if e != nil {
 			return e
 		}
-		_, e = tx.Exec(r.Context(), `INSERT INTO masscanr.plans VALUES($1,$2,$3)`, p.ID, p.ScanID, data)
+		_, e = tx.Exec(c.Context(), `INSERT INTO masscanr.plans VALUES($1,$2,$3)`, p.ID, p.ScanID, data)
 		return e
 	})
 	if e != nil {
-		problem(w, e)
-		return
+		return problem(c, e)
 	}
-	respond(w, 201, p)
+	return respond(c, 201, p)
 }
 func (s *Store) Reserve(ctx context.Context, scanID, planID, key string, confirm bool) (Run, error) {
 	var out Run

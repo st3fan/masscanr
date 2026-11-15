@@ -3,7 +3,7 @@
 ## Application and runtime
 
 - Go 1.26 is the application language and module toolchain. Build separate `masscanr-server` and `masscanr-cli` executables. The client offers only `watch` and communicates exclusively through server HTTP APIs.
-- The service uses Go HTTP handlers, PostgreSQL 17, DBOS workflows, and `pgx`. The watch terminal interface uses Bubble Tea. Keep the service and viewer compatible through the versioned HTTP API.
+- The service uses Fiber v3 for its incoming REST API, PostgreSQL 17, DBOS workflows, and `pgx`. The watch terminal interface uses Bubble Tea. The CLI and outbound provider clients use Go's `net/http`. Keep the service and viewer compatible through the versioned HTTP API.
 - Scan workers are temporary Vultr VPS instances running Alpine Linux. The controller executes masscan or ZMap over SSH and keeps provider credentials on the controller.
 
 ## Packaging and distribution

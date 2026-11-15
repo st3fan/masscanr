@@ -1,16 +1,19 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/gofiber/fiber/v3"
 	"github.com/st3fan/masscanr/internal/cloud"
 	"github.com/st3fan/masscanr/internal/scan"
-	"io"
-	"net/http"
-	"strconv"
-	"time"
 )
 
 type API struct {
@@ -18,36 +21,77 @@ type API struct {
 	Catalog cloud.Catalog
 	Store   *Store
 	Ready   func() bool
-	Extra   func(*http.ServeMux)
+	Extra   func(*fiber.App)
+	Base    context.Context
 }
 
-func (a *API) Handler() http.Handler {
-	m := http.NewServeMux()
-	m.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		ctx, c := context.WithTimeout(r.Context(), time.Second)
-		defer c()
-		if (a.Ready != nil && !a.Ready()) || a.Store.Pool.Ping(ctx) != nil {
-			respond(w, 503, map[string]string{"error": "unavailable"})
-			return
-		}
-		respond(w, 200, map[string]string{"status": "ready"})
-	})
-	m.HandleFunc("POST /v1/scans", a.create)
-	m.HandleFunc("POST /v1/scans/{id}/preflight", a.preflight)
-	m.HandleFunc("GET /v1/scans", a.list)
-	m.HandleFunc("GET /v1/scans/{id}", a.get)
-	m.HandleFunc("GET /v1/catalog/regions", a.regions)
-	m.HandleFunc("GET /v1/catalog/instance-types", a.instanceTypes)
-	m.HandleFunc("PUT /v1/scans/{id}", a.replace)
-	m.HandleFunc("DELETE /v1/scans/{id}", a.remove)
-	if a.Extra != nil {
-		a.Extra(m)
+func (a *API) Handler() *fiber.App {
+	base := a.Base
+	if base == nil {
+		base = context.Background()
 	}
-	return m
+	app := fiber.New(fiber.Config{
+		CaseSensitive: true,
+		StrictRouting: true,
+		// Allow a small transport margin; decode enforces the 1 MiB JSON limit.
+		BodyLimit:   2 << 20,
+		ReadTimeout: 10 * time.Second,
+		IdleTimeout: 60 * time.Second,
+		ErrorHandler: func(c fiber.Ctx, err error) error {
+			if errors.Is(err, fiber.ErrRequestEntityTooLarge) {
+				return respond(c, 400, map[string]string{"error": "invalid JSON body"})
+			}
+			if e, ok := err.(*fiber.Error); ok {
+				return respond(c, e.Code, map[string]string{"error": e.Message})
+			}
+			return respond(c, 500, map[string]string{"error": "internal error"})
+		},
+	})
+	app.Use(func(c fiber.Ctx) error {
+		// Fiber does not cancel handlers on disconnect. Bound operations and
+		// cancel them when the server shuts down.
+		duration := 30 * time.Second
+		if c.Path() == "/v1/catalog/regions" || c.Path() == "/v1/catalog/instance-types" {
+			duration = time.Minute
+		}
+		if c.Method() == fiber.MethodPost && strings.HasPrefix(c.Path(), "/v1/scans/") && strings.HasSuffix(c.Path(), "/preflight") {
+			duration = 2 * time.Minute
+		}
+		if c.Method() == fiber.MethodGet && strings.HasPrefix(c.Path(), "/v1/runs/") && strings.HasSuffix(c.Path(), "/inspection") {
+			duration = 2 * time.Minute
+		}
+		ctx, cancel := context.WithTimeout(base, duration)
+		defer cancel()
+		c.SetContext(ctx)
+		return c.Next()
+	})
+	app.Get("/healthz", func(c fiber.Ctx) error {
+		ctx, cancel := context.WithTimeout(c.Context(), time.Second)
+		defer cancel()
+		if (a.Ready != nil && !a.Ready()) || a.Store.Pool.Ping(ctx) != nil {
+			return respond(c, 503, map[string]string{"error": "unavailable"})
+		}
+		return respond(c, 200, map[string]string{"status": "ready"})
+	})
+	app.Post("/v1/scans", a.create)
+	app.Post("/v1/scans/:id/preflight", a.preflight)
+	app.Get("/v1/scans", a.list)
+	app.Get("/v1/scans/:id", a.get)
+	app.Get("/v1/catalog/regions", a.regions)
+	app.Get("/v1/catalog/instance-types", a.instanceTypes)
+	app.Put("/v1/scans/:id", a.replace)
+	app.Delete("/v1/scans/:id", a.remove)
+	if a.Extra != nil {
+		a.Extra(app)
+	}
+	return app
 }
-func decode(w http.ResponseWriter, r *http.Request, v any) error {
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-	d := json.NewDecoder(r.Body)
+
+func decode(c fiber.Ctx, v any) error {
+	if len(c.Body()) > 1<<20 {
+		return fmt.Errorf("invalid JSON body")
+	}
+	d := json.NewDecoder(bytes.NewReader(c.Body()))
 	d.DisallowUnknownFields()
 	if e := d.Decode(v); e != nil {
 		return fmt.Errorf("invalid JSON body")
@@ -57,101 +101,93 @@ func decode(w http.ResponseWriter, r *http.Request, v any) error {
 	}
 	return nil
 }
-func respond(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if v != nil {
-		_ = json.NewEncoder(w).Encode(v)
+
+func respond(c fiber.Ctx, status int, v any) error {
+	c.Set("Content-Type", "application/json")
+	c.Status(status)
+	if v == nil {
+		return nil
 	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	return c.Send(append(b, '\n'))
 }
-func problem(w http.ResponseWriter, e error) {
-	code := 500
-	message := "internal error"
+func problem(c fiber.Ctx, e error) error {
+	code, message := 500, "internal error"
 	if errors.Is(e, ErrNotFound) {
-		code = 404
-		message = e.Error()
+		code, message = 404, e.Error()
 	}
 	if errors.Is(e, ErrConflict) {
-		code = 409
-		message = e.Error()
+		code, message = 409, e.Error()
 	}
-	respond(w, code, map[string]string{"error": message})
+	return respond(c, code, map[string]string{"error": message})
 }
-func bad(w http.ResponseWriter, e error) { respond(w, 400, map[string]string{"error": e.Error()}) }
-func (a *API) create(w http.ResponseWriter, r *http.Request) {
+func bad(c fiber.Ctx, e error) error { return respond(c, 400, map[string]string{"error": e.Error()}) }
+func (a *API) create(c fiber.Ctx) error {
 	d := Defaults()
-	if e := decode(w, r, &d); e != nil {
-		bad(w, e)
-		return
+	if e := decode(c, &d); e != nil {
+		return bad(c, e)
 	}
 	if _, _, e := d.Config(); e != nil {
-		bad(w, e)
-		return
+		return bad(c, e)
 	}
 	now := time.Now().UTC()
 	v := Scan{ID: newID(), Revision: 1, CreatedAt: now, UpdatedAt: now, Definition: d}
-	if e := a.Store.SaveScan(r.Context(), v, 0, true); e != nil {
-		problem(w, e)
-		return
+	if e := a.Store.SaveScan(c.Context(), v, 0, true); e != nil {
+		return problem(c, e)
 	}
-	w.Header().Set("Location", "/v1/scans/"+v.ID)
-	respond(w, 201, v)
+	c.Set("Location", "/v1/scans/"+v.ID)
+	return respond(c, 201, v)
 }
-func (a *API) get(w http.ResponseWriter, r *http.Request) {
-	v, e := a.Store.GetScan(r.Context(), r.PathValue("id"))
+func (a *API) get(c fiber.Ctx) error {
+	v, e := a.Store.GetScan(c.Context(), c.Params("id"))
 	if e != nil {
-		problem(w, e)
-		return
+		return problem(c, e)
 	}
-	respond(w, 200, v)
+	return respond(c, 200, v)
 }
-func (a *API) replace(w http.ResponseWriter, r *http.Request) {
+func (a *API) replace(c fiber.Ctx) error {
 	var in struct {
 		Revision   int64      `json:"revision"`
 		Definition Definition `json:"definition"`
 	}
 	in.Definition = Defaults()
-	if e := decode(w, r, &in); e != nil {
-		bad(w, e)
-		return
+	if e := decode(c, &in); e != nil {
+		return bad(c, e)
 	}
 	if in.Revision < 1 {
-		bad(w, fmt.Errorf("revision must be positive"))
-		return
+		return bad(c, fmt.Errorf("revision must be positive"))
 	}
 	if _, _, e := in.Definition.Config(); e != nil {
-		bad(w, e)
-		return
+		return bad(c, e)
 	}
-	v := Scan{ID: r.PathValue("id"), Revision: in.Revision + 1, UpdatedAt: time.Now().UTC(), Definition: in.Definition}
-	if e := a.Store.SaveScan(r.Context(), v, in.Revision, false); e != nil {
-		problem(w, e)
-		return
+	v := Scan{ID: c.Params("id"), Revision: in.Revision + 1, UpdatedAt: time.Now().UTC(), Definition: in.Definition}
+	if e := a.Store.SaveScan(c.Context(), v, in.Revision, false); e != nil {
+		return problem(c, e)
 	}
-	a.get(w, r)
+	return a.get(c)
 }
-func (a *API) remove(w http.ResponseWriter, r *http.Request) {
-	if e := a.Store.DeleteScan(r.Context(), r.PathValue("id")); e != nil {
-		problem(w, e)
-		return
+func (a *API) remove(c fiber.Ctx) error {
+	if e := a.Store.DeleteScan(c.Context(), c.Params("id")); e != nil {
+		return problem(c, e)
 	}
-	respond(w, 204, nil)
+	return respond(c, 204, nil)
 }
-func (a *API) list(w http.ResponseWriter, r *http.Request) { a.listTable(w, r, "scans", "") }
-func (a *API) listTable(w http.ResponseWriter, r *http.Request, table, id string) {
+func (a *API) list(c fiber.Ctx) error { return a.listTable(c, "scans", "") }
+func (a *API) listTable(c fiber.Ctx, table, id string) error {
 	limit := 100
-	if s := r.URL.Query().Get("limit"); s != "" {
+	if s := c.Query("limit"); s != "" {
 		n, e := strconv.Atoi(s)
 		if e != nil || n < 1 || n > 1000 {
-			bad(w, fmt.Errorf("limit must be 1..1000"))
-			return
+			return bad(c, fmt.Errorf("limit must be 1..1000"))
 		}
 		limit = n
 	}
-	v, e := a.Store.List(r.Context(), table, id, r.URL.Query().Get("after"), limit)
+	v, e := a.Store.List(c.Context(), table, id, c.Query("after"), limit)
 	if e != nil {
-		problem(w, e)
-		return
+		return problem(c, e)
 	}
-	respond(w, 200, v)
+	return respond(c, 200, v)
 }

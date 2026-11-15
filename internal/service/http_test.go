@@ -3,15 +3,28 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"net/http"
+	"io"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/gofiber/fiber/v3"
 )
 
-func request(h http.Handler, method, path, body string) *httptest.ResponseRecorder {
+func request(h *fiber.App, method, path, body string) *httptest.ResponseRecorder {
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, httptest.NewRequest(method, path, strings.NewReader(body)))
+	resp, err := h.Test(httptest.NewRequest(method, path, strings.NewReader(body)))
+	if err != nil {
+		panic(err)
+	}
+	for k, values := range resp.Header {
+		for _, value := range values {
+			w.Header().Add(k, value)
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
+	_, _ = io.Copy(w, resp.Body)
+	_ = resp.Body.Close()
 	return w
 }
 func TestCRUD(t *testing.T) {

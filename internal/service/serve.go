@@ -5,13 +5,15 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/dbos-inc/dbos-transact-golang/dbos"
-	"github.com/st3fan/masscanr/internal/cloud/vultr"
 	"io"
 	"net"
-	"net/http"
 	"os"
 	"time"
+
+	"github.com/dbos-inc/dbos-transact-golang/dbos"
+	"github.com/st3fan/masscanr/internal/cloud/vultr"
+
+	"github.com/gofiber/fiber/v3"
 )
 
 func Serve(ctx context.Context, args []string, out io.Writer) (result error) {
@@ -71,15 +73,15 @@ func Serve(ctx context.Context, args []string, out io.Writer) (result error) {
 	if e = manager.ResumeReserved(recovery); e != nil {
 		return fmt.Errorf("workflow recovery failed")
 	}
-	api := &API{Store: s, Catalog: vultr.New(""), Ready: func() bool { manager.mu.Lock(); defer manager.mu.Unlock(); return !manager.closing }}
-	api.Extra = func(m *http.ServeMux) { manager.Routes(api, m) }
-	srv := &http.Server{Handler: api.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second}
+	api := &API{Store: s, Catalog: vultr.New(""), Base: ctx, Ready: func() bool { manager.mu.Lock(); defer manager.mu.Unlock(); return !manager.closing }}
+	api.Extra = func(app *fiber.App) { manager.Routes(api, app) }
+	srv := api.Handler()
 	ln, e := net.Listen("tcp", *listen)
 	if e != nil {
 		return e
 	}
 	done := make(chan error, 1)
-	go func() { done <- srv.Serve(ln) }()
+	go func() { done <- srv.Listener(ln) }()
 	fmt.Fprintln(out, "Listening on", ln.Addr())
 	select {
 	case e = <-done:
@@ -89,10 +91,7 @@ func Serve(ctx context.Context, args []string, out io.Writer) (result error) {
 		manager.mu.Unlock()
 		stop, c := context.WithTimeout(context.Background(), 30*time.Second)
 		defer c()
-		e = srv.Shutdown(stop)
-	}
-	if e == http.ErrServerClosed {
-		return nil
+		e = srv.ShutdownWithContext(stop)
 	}
 	return e
 }

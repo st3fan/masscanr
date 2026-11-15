@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"strconv"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/st3fan/masscanr/internal/controller"
 	"github.com/st3fan/masscanr/internal/runapi"
 )
@@ -37,31 +37,28 @@ func (s *Store) ActiveRuns(ctx context.Context) ([]Run, error) {
 	return out, rows.Err()
 }
 
-func (m *Manager) activeRuns(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	if len(q) != 1 || len(q["active"]) != 1 || q.Get("active") != "true" {
-		bad(w, fmt.Errorf("active=true is required; historical runs are listed per scan"))
-		return
+func (m *Manager) activeRuns(c fiber.Ctx) error {
+	q := make(map[string][]string)
+	c.Request().URI().QueryArgs().VisitAll(func(k, v []byte) { q[string(k)] = append(q[string(k)], string(v)) })
+	if len(q) != 1 || len(q["active"]) != 1 || q["active"][0] != "true" {
+		return bad(c, fmt.Errorf("active=true is required; historical runs are listed per scan"))
 	}
-	runs, err := m.Store.ActiveRuns(r.Context())
+	runs, err := m.Store.ActiveRuns(c.Context())
 	if err != nil {
-		problem(w, err)
-		return
+		return problem(c, err)
 	}
-	respond(w, 200, runapi.ActiveRuns{SnapshotVersion: runapi.SnapshotVersion, Runs: runs})
+	return respond(c, 200, runapi.ActiveRuns{SnapshotVersion: runapi.SnapshotVersion, Runs: runs})
 }
-func (m *Manager) stopRun(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if err := m.requestStop(r.Context(), id); err != nil {
-		problem(w, err)
-		return
+func (m *Manager) stopRun(c fiber.Ctx) error {
+	id := c.Params("id")
+	if err := m.requestStop(c.Context(), id); err != nil {
+		return problem(c, err)
 	}
-	v, err := m.Store.GetRun(r.Context(), id)
+	v, err := m.Store.GetRun(c.Context(), id)
 	if err != nil {
-		problem(w, err)
-		return
+		return problem(c, err)
 	}
-	respond(w, 202, v)
+	return respond(c, 202, v)
 }
 
 func applyEvent(r *Run, e controller.Event, now time.Time) {

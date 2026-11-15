@@ -5,20 +5,39 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/st3fan/masscanr/internal/scanfile"
 )
 
 type artifactAPI struct {
 	dir    string
+	base   context.Context
 	getRun func(context.Context, string) (Run, error)
+}
+
+type artifactStream struct {
+	context.Context
+	file   *os.File
+	cancel context.CancelFunc
+}
+
+func (s artifactStream) Read(p []byte) (int, error) {
+	if err := s.Context.Err(); err != nil {
+		return 0, err
+	}
+	return s.file.Read(p)
+}
+
+func (s artifactStream) Close() error {
+	s.cancel()
+	return s.file.Close()
 }
 
 type inspection struct {
@@ -90,12 +109,11 @@ func openArtifact(path string) (*os.File, error) {
 	return os.Open(path)
 }
 
-func (a artifactAPI) inspect(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
-	_, state, code, message := a.runJournal(r.Context(), r.PathValue("id"))
+func (a artifactAPI) inspect(c fiber.Ctx) error {
+	c.Set("Cache-Control", "no-store")
+	_, state, code, message := a.runJournal(c.Context(), c.Params("id"))
 	if code != 0 {
-		respond(w, code, map[string]string{"error": message})
-		return
+		return respond(c, code, map[string]string{"error": message})
 	}
 	workers := make([]scanfile.Worker, 0, len(state.Workers))
 	for _, worker := range state.Workers {
@@ -115,41 +133,40 @@ func (a artifactAPI) inspect(w http.ResponseWriter, r *http.Request) {
 	if state.Truncated {
 		result.ScanOutcome = "unconfirmed"
 	}
-	respond(w, 200, result)
+	return respond(c, 200, result)
 }
 
-func (a artifactAPI) export(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
-	format := r.PathValue("format")
+func (a artifactAPI) export(c fiber.Ctx) error {
+	c.Set("Cache-Control", "no-store")
+	format := c.Params("format")
 	if format != "csv" && format != "jsonl" {
-		bad(w, fmt.Errorf("format must be csv or jsonl"))
-		return
+		return bad(c, fmt.Errorf("format must be csv or jsonl"))
 	}
-	path, state, code, message := a.runJournal(r.Context(), r.PathValue("id"))
+	path, state, code, message := a.runJournal(c.Context(), c.Params("id"))
 	if code != 0 {
-		respond(w, code, map[string]string{"error": message})
-		return
+		return respond(c, code, map[string]string{"error": message})
 	}
 	if !state.Complete() {
-		respond(w, 409, map[string]string{"error": "scan results incomplete"})
-		return
+		return respond(c, 409, map[string]string{"error": "scan results incomplete"})
 	}
 	path = strings.TrimSuffix(path, ".scan") + "." + format
 	f, err := openArtifact(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			respond(w, 409, map[string]string{"error": "saved export missing"})
-			return
+			return respond(c, 409, map[string]string{"error": "saved export missing"})
 		}
-		respond(w, 500, map[string]string{"error": "saved export unavailable"})
-		return
+		return respond(c, 500, map[string]string{"error": "saved export unavailable"})
 	}
-	defer f.Close()
 	if format == "csv" {
-		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+		c.Set("Content-Type", "text/csv; charset=utf-8")
 	} else {
-		w.Header().Set("Content-Type", "application/x-ndjson")
+		c.Set("Content-Type", "application/x-ndjson")
 	}
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", r.PathValue("id")+"."+format))
-	_, _ = io.Copy(w, f)
+	c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", c.Params("id")+"."+format))
+	base := a.base
+	if base == nil {
+		base = context.Background()
+	}
+	streamCtx, cancel := context.WithTimeout(base, 30*time.Minute)
+	return c.SendStream(artifactStream{Context: streamCtx, file: f, cancel: cancel})
 }
