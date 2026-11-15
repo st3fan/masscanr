@@ -10,8 +10,8 @@ import (
 	"github.com/gofiber/fiber/v3"
 )
 
-// The application routes form the migration inventory. The Huma cutover adds
-// documentation endpoints, but each of these operations must remain present.
+// The application routes must match the Huma OpenAPI document. The resource
+// routes are additive until the ScanPlan preflight cutover.
 var applicationRoutes = []string{
 	"DELETE /v1/scans/:id",
 	"GET /healthz",
@@ -21,15 +21,23 @@ var applicationRoutes = []string{
 	"GET /v1/runs/:id",
 	"GET /v1/runs/:id/exports/:format",
 	"GET /v1/runs/:id/inspection",
+	"GET /v1/scan-plans",
+	"GET /v1/scan-plans/:id",
 	"GET /v1/scans",
 	"GET /v1/scans/:id",
 	"GET /v1/scans/:id/runs",
+	"GET /v1/targets",
+	"GET /v1/targets/:id",
+	"PATCH /v1/scan-plans/:id",
 	"PATCH /v1/scans/:id",
+	"PATCH /v1/targets/:id",
 	"POST /v1/runs/:id/stop",
+	"POST /v1/scan-plans",
 	"POST /v1/scans",
 	"POST /v1/scans/:id/preflight",
 	"POST /v1/scans/:id/start",
 	"POST /v1/scans/:id/stop",
+	"POST /v1/targets",
 }
 
 func TestOpenAPICoversApplicationRoutes(t *testing.T) {
