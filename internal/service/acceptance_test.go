@@ -11,12 +11,12 @@ import (
 func TestAdmissionIsAtomicAndHistorySurvivesDelete(t *testing.T) {
 	s := testStore(t)
 	h := (&API{Store: s}).Handler()
-	w := request(h, "POST", "/v1/scans", `{"targets":["192.0.2.1"]}`)
+	w := request(h, "POST", "/v1/scans", `{"data":{"type":"scans","attributes":{"targets":["192.0.2.1"]}}}`)
 	var v Scan
-	json.Unmarshal(w.Body.Bytes(), &v)
+	decodeTestResource(w.Body.Bytes(), &v)
 	w = request(h, "POST", "/v1/scans/"+v.ID+"/preflight", "")
 	var p Plan
-	json.Unmarshal(w.Body.Bytes(), &p)
+	decodeTestResource(w.Body.Bytes(), &p)
 	ctx := context.Background()
 	var wg sync.WaitGroup
 	out := make(chan Run, 8)
@@ -58,12 +58,12 @@ func TestStaleAndExpiredPlansCannotStart(t *testing.T) {
 		t.Run(time.Now().String(), func(t *testing.T) {
 			s := testStore(t)
 			h := (&API{Store: s}).Handler()
-			w := request(h, "POST", "/v1/scans", `{"targets":["192.0.2.1"]}`)
+			w := request(h, "POST", "/v1/scans", `{"data":{"type":"scans","attributes":{"targets":["192.0.2.1"]}}}`)
 			var v Scan
-			json.Unmarshal(w.Body.Bytes(), &v)
+			decodeTestResource(w.Body.Bytes(), &v)
 			w = request(h, "POST", "/v1/scans/"+v.ID+"/preflight", "")
 			var p Plan
-			json.Unmarshal(w.Body.Bytes(), &p)
+			decodeTestResource(w.Body.Bytes(), &p)
 			ctx := context.Background()
 			if edit {
 				v.Revision++

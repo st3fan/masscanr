@@ -8,7 +8,6 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/st3fan/masscanr/internal/controller"
-	"github.com/st3fan/masscanr/internal/runapi"
 	"github.com/st3fan/masscanr/internal/scan"
 )
 
@@ -48,11 +47,16 @@ func TestActiveDiscoveryAndHistoricalRunStop(t *testing.T) {
 	list := func() []Run {
 		t.Helper()
 		w := request(h, "GET", "/v1/runs?active=true", "")
-		var out runapi.ActiveRuns
-		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &out) != nil || out.SnapshotVersion != 1 {
+		var out struct {
+			Meta struct {
+				SnapshotVersion int `json:"snapshot_version"`
+			} `json:"meta"`
+		}
+		var runs []Run
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &out) != nil || out.Meta.SnapshotVersion != 1 || decodeTestList(w.Body.Bytes(), &runs) != nil {
 			t.Fatal(w.Code, w.Body)
 		}
-		return out.Runs
+		return runs
 	}
 	if got := list(); len(got) != 1 || got[0].ID != a.ID || !got[0].Active || got[0].Settled {
 		t.Fatal(got)
@@ -80,7 +84,7 @@ func TestActiveDiscoveryAndHistoricalRunStop(t *testing.T) {
 	for range 2 {
 		w := request(h, "POST", "/v1/runs/"+a.ID+"/stop", "")
 		var got Run
-		if w.Code != 202 || json.Unmarshal(w.Body.Bytes(), &got) != nil || !got.Settled || got.Active || got.StopRequested {
+		if w.Code != 202 || decodeTestResource(w.Body.Bytes(), &got) != nil || !got.Settled || got.Active || got.StopRequested {
 			t.Fatal(w.Code, w.Body)
 		}
 	}
@@ -104,7 +108,7 @@ func TestActiveDiscoveryAndHistoricalRunStop(t *testing.T) {
 	}
 	history := request(h, "GET", "/v1/scans/"+a.ScanID+"/runs", "")
 	var runs []Run
-	if json.Unmarshal(history.Body.Bytes(), &runs) != nil || len(runs) != 2 {
+	if decodeTestList(history.Body.Bytes(), &runs) != nil || len(runs) != 2 {
 		t.Fatal(history.Body)
 	}
 	for _, r := range runs {

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"strings"
@@ -60,7 +61,7 @@ func (c *Client) request(ctx context.Context, method, path string, status int) (
 	if err != nil {
 		return nil, &clientError{message: "invalid API request"}
 	}
-	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept", "application/vnd.api+json")
 	resp, err := c.http.Do(req)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -73,6 +74,10 @@ func (c *Client) request(ctx context.Context, method, path string, status int) (
 	if resp.StatusCode != status {
 		return nil, &clientError{status: resp.StatusCode, message: fmt.Sprintf("%s %s: HTTP %d %s", method, path, resp.StatusCode, http.StatusText(resp.StatusCode)), retry: resp.StatusCode == 408 || resp.StatusCode == 429 || resp.StatusCode >= 500}
 	}
+	media, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	if err != nil || media != "application/vnd.api+json" {
+		return nil, &clientError{message: "incompatible run response content type; update masscanr-server"}
+	}
 	b, err := io.ReadAll(io.LimitReader(resp.Body, maxResponse+1))
 	if err != nil {
 		return nil, &clientError{message: "reading API response failed", retry: true}
@@ -84,10 +89,22 @@ func (c *Client) request(ctx context.Context, method, path string, status int) (
 }
 func decodeRun(b []byte) (runSnapshot, error) {
 	var r runSnapshot
+	var document struct {
+		Data struct {
+			Type       string          `json:"type"`
+			ID         string          `json:"id"`
+			Attributes json.RawMessage `json:"attributes"`
+		} `json:"data"`
+	}
+	if json.Unmarshal(b, &document) != nil || document.Data.Type != "runs" || !validID(document.Data.ID) || len(document.Data.Attributes) == 0 {
+		return r, &clientError{message: "invalid run JSON:API document"}
+	}
+	b = document.Data.Attributes
 	var fields map[string]json.RawMessage
 	if json.Unmarshal(b, &r) != nil || json.Unmarshal(b, &fields) != nil {
 		return r, &clientError{message: "invalid run JSON"}
 	}
+	r.ID = document.Data.ID
 	for _, key := range []string{"active", "settled", "stop_requested"} {
 		var v bool
 		if len(fields[key]) == 0 || string(fields[key]) == "null" || json.Unmarshal(fields[key], &v) != nil {
@@ -129,16 +146,22 @@ func (c *Client) Active(ctx context.Context) ([]runSnapshot, error) {
 		return nil, err
 	}
 	var envelope struct {
-		SnapshotVersion int               `json:"snapshot_version"`
-		Runs            []json.RawMessage `json:"runs"`
+		Meta struct {
+			SnapshotVersion int `json:"snapshot_version"`
+		} `json:"meta"`
+		Data []json.RawMessage `json:"data"`
 	}
-	if json.Unmarshal(b, &envelope) != nil || envelope.SnapshotVersion != snapshotVersion || envelope.Runs == nil {
+	if json.Unmarshal(b, &envelope) != nil || envelope.Meta.SnapshotVersion != snapshotVersion || envelope.Data == nil {
 		return nil, &clientError{message: "incompatible active-run response; upgrade the service to V10"}
 	}
-	runs := make([]runSnapshot, 0, len(envelope.Runs))
+	runs := make([]runSnapshot, 0, len(envelope.Data))
 	seen := map[string]bool{}
-	for _, raw := range envelope.Runs {
-		r, err := decodeRun(raw)
+	for _, raw := range envelope.Data {
+		document, marshalErr := json.Marshal(map[string]json.RawMessage{"data": raw})
+		if marshalErr != nil {
+			return nil, &clientError{message: "invalid active-run response"}
+		}
+		r, err := decodeRun(document)
 		if err != nil {
 			return nil, err
 		}

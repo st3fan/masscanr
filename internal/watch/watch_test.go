@@ -25,6 +25,23 @@ type activeRunsFixture struct {
 	Runs            []runSnapshot `json:"runs"`
 }
 
+func wireRun(r any) any {
+	b, _ := json.Marshal(r)
+	var attributes map[string]any
+	_ = json.Unmarshal(b, &attributes)
+	id, _ := attributes["id"].(string)
+	delete(attributes, "id")
+	return map[string]any{"data": map[string]any{"type": "runs", "id": id, "attributes": attributes}}
+}
+
+func (f activeRunsFixture) MarshalJSON() ([]byte, error) {
+	data := make([]any, 0, len(f.Runs))
+	for _, run := range f.Runs {
+		data = append(data, wireRun(run).(map[string]any)["data"])
+	}
+	return json.Marshal(map[string]any{"meta": map[string]int{"snapshot_version": f.SnapshotVersion}, "data": data})
+}
+
 func fixtureRun(id string, active bool) runSnapshot {
 	return runSnapshot{SnapshotVersion: 1, ID: id, ScanID: "scan", Active: active, Settled: !active, Phase: "scanning", CreatedAt: time.Now(), Plan: planSnapshot{Revision: 1, Config: configSnapshot{Backend: "masscan", Shards: 2, Ports: []uint16{80, 443}}}}
 }
@@ -33,7 +50,7 @@ func TestServerSnapshotWireCompatibility(t *testing.T) {
 	cfg := scan.Defaults()
 	cfg.Targets, _ = scan.ParseTargets([]string{"192.0.2.0/24"})
 	r := runapi.Run{SnapshotVersion: runapi.SnapshotVersion, Active: true, ID: "run-a", ScanID: "scan-a", Phase: "scanning", Plan: runapi.Plan{Revision: 2, Config: cfg, Timeouts: controller.DefaultTimeouts()}, Summary: controller.Summary{RunID: "run-a", Seed: 17, Found: 3, ScanOutcome: "running"}, WorkerSnapshots: map[string]runapi.Worker{"1": {Shard: 1, ID: "worker-a", Progress: &scan.Progress{PercentUnknown: true}}}}
-	b, err := json.Marshal(r)
+	b, err := json.Marshal(wireRun(r))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +61,10 @@ func TestServerSnapshotWireCompatibility(t *testing.T) {
 }
 func fixtureClient(t *testing.T, h http.HandlerFunc) *Client {
 	t.Helper()
-	srv := httptest.NewServer(h)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/vnd.api+json")
+		h(w, r)
+	}))
 	t.Cleanup(srv.Close)
 	c, err := NewClient(srv.URL)
 	if err != nil {
@@ -71,7 +91,7 @@ func TestArgumentsAndURLs(t *testing.T) {
 }
 func TestClientProtocolValidation(t *testing.T) {
 	good := fixtureRun("a", true)
-	b, _ := json.Marshal(good)
+	b, _ := json.Marshal(wireRun(good))
 	for name, body := range map[string]string{"invalid": "{", "oversize": strings.Repeat(" ", maxResponse+1), "old-service": `{"id":"a"}`, "wrong-run": strings.Replace(string(b), `"id":"a"`, `"id":"b"`, 1), "missing-active": strings.Replace(string(b), `"active":true,`, "", 1), "null-active": strings.Replace(string(b), `"active":true`, `"active":null`, 1)} {
 		t.Run(name, func(t *testing.T) {
 			c := fixtureClient(t, func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, body) })
@@ -81,6 +101,13 @@ func TestClientProtocolValidation(t *testing.T) {
 		})
 	}
 	c := fixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, string(b))
+	})
+	if _, err := c.Get(t.Context(), "a"); err == nil {
+		t.Fatal("accepted legacy response content type")
+	}
+	c = fixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Location", "http://localhost/secret")
 		w.WriteHeader(302)
 	})
@@ -122,14 +149,14 @@ func TestDiscoveryTransitionsAndStopRequest(t *testing.T) {
 			v.Settled = true
 			v.Summary.ScanOutcome = "failed"
 			v.Summary.CleanupOutcome = "incomplete"
-			json.NewEncoder(w).Encode(v)
+			json.NewEncoder(w).Encode(wireRun(v))
 		case "/v1/runs/a/stop":
 			if r.Method != "POST" {
 				t.Error(r.Method)
 			}
 			stops.Add(1)
 			w.WriteHeader(202)
-			json.NewEncoder(w).Encode(a)
+			json.NewEncoder(w).Encode(wireRun(a))
 		default:
 			t.Error(r.URL)
 			w.WriteHeader(404)

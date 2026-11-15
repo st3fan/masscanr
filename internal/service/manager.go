@@ -188,20 +188,20 @@ func (m *Manager) finish(ctx context.Context, id string) error {
 }
 func (m *Manager) Routes(a *API, app *fiber.App) {
 	artifacts := artifactAPI{dir: m.Dir, base: a.Base, getRun: m.Store.GetRun}
-	app.Post("/v1/scans/:id/start", m.start)
-	app.Post("/v1/scans/:id/stop", m.stop)
-	app.Post("/v1/runs/:id/stop", m.stopRun)
-	app.Get("/v1/runs", m.activeRuns)
-	app.Get("/v1/runs/:id", func(c fiber.Ctx) error {
+	a.register("POST", "/v1/scans/:id/start", "startScan", "Start a confirmed scan", Run{}, m.start)
+	a.register("POST", "/v1/scans/:id/stop", "stopScan", "Request scan stop", Run{}, m.stop)
+	a.register("POST", "/v1/runs/:id/stop", "stopRun", "Request run stop", Run{}, m.stopRun)
+	a.register("GET", "/v1/runs", "listActiveRuns", "List active runs", Run{}, m.activeRuns)
+	a.register("GET", "/v1/runs/:id", "getRun", "Get a run", Run{}, func(c fiber.Ctx) error {
 		v, e := m.Store.GetRun(c.Context(), c.Params("id"))
 		if e != nil {
 			return problem(c, e)
 		}
 		return respond(c, 200, v)
 	})
-	app.Get("/v1/runs/:id/inspection", artifacts.inspect)
-	app.Get("/v1/runs/:id/exports/:format", artifacts.export)
-	app.Get("/v1/scans/:id/runs", func(c fiber.Ctx) error { return a.listTable(c, "runs", c.Params("id")) })
+	a.register("GET", "/v1/runs/:id/inspection", "inspectRun", "Inspect saved run journal", inspection{}, artifacts.inspect)
+	a.register("GET", "/v1/runs/:id/exports/:format", "exportRun", "Download a complete export", nil, artifacts.export)
+	a.register("GET", "/v1/scans/:id/runs", "listScanRuns", "List runs for a scan", Run{}, func(c fiber.Ctx) error { return a.listTable(c, "runs", c.Params("id")) })
 }
 func (m *Manager) start(c fiber.Ctx) error {
 	m.mu.Lock()

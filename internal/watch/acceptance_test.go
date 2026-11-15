@@ -29,7 +29,7 @@ func TestPlainReconnectAndSettledFailure(t *testing.T) {
 			run.Summary.CleanupOutcome = "incomplete"
 			run.Summary.Undeleted = []string{"worker-a"}
 		}
-		json.NewEncoder(w).Encode(run)
+		json.NewEncoder(w).Encode(wireRun(run))
 	})
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
@@ -54,7 +54,7 @@ func TestMultipleViewersOnlyRead(t *testing.T) {
 		if r.Method != "GET" {
 			mutations.Add(1)
 		}
-		json.NewEncoder(w).Encode(fixtureRun("a", false))
+		json.NewEncoder(w).Encode(wireRun(fixtureRun("a", false)))
 	})
 	done := make(chan error, 2)
 	for range 2 {

@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	"github.com/st3fan/masscanr/internal/backend"
@@ -97,9 +96,9 @@ func reserveFixture(t *testing.T, s *Store, name string) Run {
 	t.Helper()
 	a := &API{Store: s}
 	h := a.Handler()
-	w := request(h, "POST", "/v1/scans", `{"targets":["192.0.2.1"],"shards":1,"ports":"80","backend":"`+name+`"}`)
+	w := request(h, "POST", "/v1/scans", `{"data":{"type":"scans","attributes":{"targets":["192.0.2.1"],"shards":1,"ports":"80","backend":"`+name+`"}}}`)
 	var v Scan
-	if e := json.Unmarshal(w.Body.Bytes(), &v); e != nil {
+	if e := decodeTestResource(w.Body.Bytes(), &v); e != nil {
 		t.Fatal(e)
 	}
 	w = request(h, "POST", "/v1/scans/"+v.ID+"/preflight", "")
@@ -107,7 +106,7 @@ func reserveFixture(t *testing.T, s *Store, name string) Run {
 		t.Fatal(w.Code, w.Body)
 	}
 	var p Plan
-	json.Unmarshal(w.Body.Bytes(), &p)
+	decodeTestResource(w.Body.Bytes(), &p)
 	r, e := s.Reserve(context.Background(), v.ID, p.ID, newID(), true)
 	if e != nil {
 		t.Fatal(e)

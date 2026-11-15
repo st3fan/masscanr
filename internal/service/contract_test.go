@@ -73,15 +73,16 @@ func TestHTTPContractRejectsBodyOverJSONLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	req.Header.Set("Content-Type", jsonAPIMediaType)
 	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
 	var result struct {
-		Error string `json:"error"`
+		Errors []jsonAPIError `json:"errors"`
 	}
-	if resp.StatusCode != 400 || json.NewDecoder(resp.Body).Decode(&result) != nil || result.Error != "invalid JSON body" {
+	if resp.StatusCode != 400 || json.NewDecoder(resp.Body).Decode(&result) != nil || len(result.Errors) != 1 || result.Errors[0].Detail != "invalid JSON body" {
 		t.Fatalf("status=%d, result=%+v", resp.StatusCode, result)
 	}
 }
@@ -107,7 +108,7 @@ func TestHTTPContractRoutes(t *testing.T) {
 			if w.Code != tc.status {
 				t.Fatalf("status=%d, want %d, body=%q", w.Code, tc.status, w.Body)
 			}
-			if tc.status == 200 && tc.method == http.MethodGet && w.Header().Get("Content-Type") != "application/json" {
+			if tc.status == 200 && tc.method == http.MethodGet && w.Header().Get("Content-Type") != jsonAPIMediaType {
 				t.Fatalf("content type = %q", w.Header().Get("Content-Type"))
 			}
 		})
@@ -117,18 +118,66 @@ func TestHTTPContractRoutes(t *testing.T) {
 func TestHTTPContractInvalidJSON(t *testing.T) {
 	h := (&API{}).Handler()
 	for name, body := range map[string]string{
-		"unknown field": `{"targets":["192.0.2.1"],"unknown":true}`,
-		"two objects":   `{"targets":["192.0.2.1"]}{"targets":["192.0.2.2"]}`,
-		"oversized":     `{"targets":["192.0.2.1"]}` + strings.Repeat(" ", 1<<20),
+		"unknown field": `{"data":{"type":"scans","attributes":{"targets":["192.0.2.1"],"unknown":true}}}`,
+		"two objects":   `{"data":{"type":"scans","attributes":{"targets":["192.0.2.1"]}}}{"data":{"type":"scans"}}`,
+		"oversized":     `{"data":{"type":"scans","attributes":{"targets":["192.0.2.1"]}}}` + strings.Repeat(" ", 1<<20),
 	} {
 		t.Run(name, func(t *testing.T) {
 			w := request(h, "POST", "/v1/scans", body)
 			var problem struct {
-				Error string `json:"error"`
+				Errors []jsonAPIError `json:"errors"`
 			}
-			if w.Code != 400 || w.Header().Get("Content-Type") != "application/json" || json.Unmarshal(w.Body.Bytes(), &problem) != nil || problem.Error == "" {
+			if w.Code != 400 || w.Header().Get("Content-Type") != jsonAPIMediaType || json.Unmarshal(w.Body.Bytes(), &problem) != nil || len(problem.Errors) != 1 || problem.Errors[0].Detail == "" {
 				t.Fatalf("status=%d type=%q body=%q", w.Code, w.Header().Get("Content-Type"), w.Body)
 			}
 		})
+	}
+}
+
+func TestJSONAPIMediaNegotiation(t *testing.T) {
+	h := (&API{Catalog: &catalogFixture{}}).Handler()
+	for _, tc := range []struct {
+		accept string
+		status int
+	}{
+		{jsonAPIMediaType, 200},
+		{"application/json", 406},
+		{jsonAPIMediaType + "; charset=utf-8", 406},
+		{jsonAPIMediaType + ";q=0", 406},
+	} {
+		req := httptest.NewRequest("GET", "/v1/catalog/regions", nil)
+		req.Header.Set("Accept", tc.accept)
+		resp, err := h.Test(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != tc.status || resp.Header.Get("Content-Type") != jsonAPIMediaType {
+			t.Fatalf("Accept %q: status=%d type=%q", tc.accept, resp.StatusCode, resp.Header.Get("Content-Type"))
+		}
+	}
+	req := httptest.NewRequest("POST", "/v1/scans", strings.NewReader(`{"data":{"type":"scans","attributes":{}}}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := h.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 415 || resp.Header.Get("Content-Type") != jsonAPIMediaType {
+		t.Fatalf("wrong content type: status=%d type=%q", resp.StatusCode, resp.Header.Get("Content-Type"))
+	}
+}
+
+func TestJSONAPIResourcePreservesLargeIntegers(t *testing.T) {
+	resource, err := makeResource("runs", struct {
+		ID   string `json:"id"`
+		Seed uint64 `json:"seed"`
+	}{ID: "run-id", Seed: 18446744073709551615})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := json.Marshal(resource)
+	if err != nil || !strings.Contains(string(b), `"seed":18446744073709551615`) {
+		t.Fatalf("large integer changed: %s %v", b, err)
 	}
 }

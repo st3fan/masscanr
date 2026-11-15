@@ -5,6 +5,7 @@ go 1.26.0
 require (
 	charm.land/bubbletea/v2 v2.1.1
 	github.com/charmbracelet/x/ansi v0.11.9
+	github.com/danielgtaylor/huma/v2 v2.40.0
 	github.com/dbos-inc/dbos-transact-golang v1.8.0
 	github.com/gofiber/fiber/v3 v3.7.0
 	github.com/google/uuid v1.6.0
@@ -24,6 +25,7 @@ require (
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
+	github.com/gofiber/fiber/v2 v2.52.16 // indirect
 	github.com/gofiber/schema v1.9.3 // indirect
 	github.com/gofiber/utils/v2 v2.6.4 // indirect
 	github.com/jackc/pgerrcode v0.0.0-20250907135507-afb5586c32a6 // indirect
@@ -34,7 +36,7 @@ require (
 	github.com/lucasb-eyer/go-colorful v1.4.1 // indirect
 	github.com/mattn/go-colorable v0.1.16 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
-	github.com/mattn/go-runewidth v0.0.30 // indirect
+	github.com/mattn/go-runewidth v0.0.31 // indirect
 	github.com/molecule-man/go-brrr v1.3.1 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/philhofer/fwd v1.2.1 // indirect

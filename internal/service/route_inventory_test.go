@@ -1,8 +1,10 @@
 package service
 
 import (
+	"encoding/json"
 	"net/http"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/gofiber/fiber/v3"
@@ -22,12 +24,68 @@ var applicationRoutes = []string{
 	"GET /v1/scans",
 	"GET /v1/scans/:id",
 	"GET /v1/scans/:id/runs",
+	"PATCH /v1/scans/:id",
 	"POST /v1/runs/:id/stop",
 	"POST /v1/scans",
 	"POST /v1/scans/:id/preflight",
 	"POST /v1/scans/:id/start",
 	"POST /v1/scans/:id/stop",
-	"PUT /v1/scans/:id",
+}
+
+func TestOpenAPICoversApplicationRoutes(t *testing.T) {
+	api := &API{Store: &Store{}}
+	manager := &Manager{Store: api.Store}
+	api.Extra = func(app *fiber.App) { manager.Routes(api, app) }
+	app := api.Handler()
+	w := request(app, "GET", "/openapi.json", "")
+	if w.Code != 200 {
+		t.Fatalf("OpenAPI status %d: %s", w.Code, w.Body)
+	}
+	var spec struct {
+		OpenAPI    string                                `json:"openapi"`
+		Paths      map[string]map[string]json.RawMessage `json:"paths"`
+		Components struct {
+			Schemas map[string]json.RawMessage `json:"schemas"`
+		} `json:"components"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &spec); err != nil || spec.OpenAPI != "3.1.0" {
+		t.Fatalf("invalid OpenAPI 3.1 document: %v", err)
+	}
+	seen := map[string]bool{}
+	for _, route := range applicationRoutes {
+		method, path, _ := strings.Cut(route, " ")
+		path = strings.ReplaceAll(strings.ReplaceAll(path, ":id", "{id}"), ":format", "{format}")
+		raw := spec.Paths[path][strings.ToLower(method)]
+		if len(raw) == 0 {
+			t.Errorf("missing OpenAPI operation %s %s", method, path)
+			continue
+		}
+		var operation struct {
+			ID        string                     `json:"operationId"`
+			Responses map[string]json.RawMessage `json:"responses"`
+		}
+		if err := json.Unmarshal(raw, &operation); err != nil || operation.ID == "" || seen[operation.ID] || len(operation.Responses) == 0 {
+			t.Errorf("invalid OpenAPI operation %s %s: %v", method, path, err)
+		}
+		seen[operation.ID] = true
+	}
+	if len(seen) != len(applicationRoutes) || len(spec.Components.Schemas) == 0 {
+		t.Errorf("OpenAPI has %d operation IDs and %d component schemas", len(seen), len(spec.Components.Schemas))
+	}
+}
+
+func TestOfflineStoplightDocs(t *testing.T) {
+	app := (&API{}).Handler()
+	w := request(app, "GET", "/docs", "")
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `/openapi.json`) || !strings.Contains(w.Body.String(), `stoplight-9.0.29`) || strings.Contains(w.Body.String(), "https://") {
+		t.Fatalf("offline docs: status=%d body=%q", w.Code, w.Body)
+	}
+	for _, name := range []string{"styles.min.css", "web-components.min.js"} {
+		asset := request(app, "GET", "/docs/assets/stoplight-9.0.29/"+name, "")
+		if asset.Code != 200 || asset.Body.Len() < 1000 {
+			t.Fatalf("bundled %s: status=%d bytes=%d", name, asset.Code, asset.Body.Len())
+		}
+	}
 }
 
 func TestApplicationRouteInventory(t *testing.T) {
@@ -37,7 +95,7 @@ func TestApplicationRouteInventory(t *testing.T) {
 	app := api.Handler()
 	var actual []string
 	for _, route := range app.GetRoutes(true) {
-		if route.Method == http.MethodHead {
+		if route.Method == http.MethodHead || !(route.Path == "/healthz" || strings.HasPrefix(route.Path, "/v1/")) {
 			continue // Fiber adds HEAD for each GET route.
 		}
 		actual = append(actual, route.Method+" "+route.Path)
