@@ -1,0 +1,9 @@
+node_modules/
+dist/
+test-results/
+playwright-report/
+package-lock.json
+src/api/schema.ts
+src/api/openapi.json
+src/components/ui/
+src/index.css

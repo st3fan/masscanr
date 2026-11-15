@@ -12,6 +12,7 @@ import (
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	"github.com/st3fan/masscanr/internal/cloud/vultr"
+	"github.com/st3fan/masscanr/internal/webui"
 
 	"github.com/gofiber/fiber/v3"
 )
@@ -19,7 +20,7 @@ import (
 func Serve(ctx context.Context, args []string, out io.Writer) (result error) {
 	fs := flag.NewFlagSet("masscanr-server", flag.ContinueOnError)
 	fs.SetOutput(out)
-	listen := fs.String("listen", "127.0.0.1:8080", "HTTP listen address")
+	listen := fs.String("listen", "127.0.0.1:18080", "HTTP listen address")
 	dir := fs.String("data-dir", "masscanr-data", "artifact directory")
 	if e := fs.Parse(args); e != nil {
 		if e == flag.ErrHelp {
@@ -76,6 +77,7 @@ func Serve(ctx context.Context, args []string, out io.Writer) (result error) {
 	api := &API{Store: s, Catalog: vultr.New(""), Base: ctx, Ready: func() bool { manager.mu.Lock(); defer manager.mu.Unlock(); return !manager.closing }}
 	api.Extra = func(app *fiber.App) { manager.Routes(api, app) }
 	srv := api.Handler()
+	webui.Register(srv, webui.Assets())
 	ln, e := net.Listen("tcp", *listen)
 	if e != nil {
 		return e

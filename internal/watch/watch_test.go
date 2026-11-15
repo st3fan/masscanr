@@ -78,10 +78,13 @@ func TestArgumentsAndURLs(t *testing.T) {
 			t.Fatal(args)
 		}
 	}
-	for _, args := range [][]string{{"a", "--interval", "1s"}, {"--all"}, {"--server", "http://localhost:8080", "a"}} {
+	for _, args := range [][]string{{"a", "--interval", "1s"}, {"--all"}, {"--server", "http://localhost:18081", "a"}} {
 		if _, err := parse(args, io.Discard); err != nil {
 			t.Fatal(args, err)
 		}
+	}
+	if options, err := parse([]string{"--all"}, io.Discard); err != nil || options.Server != "http://127.0.0.1:18080" {
+		t.Fatal("unexpected default server URL", options.Server, err)
 	}
 	for _, u := range []string{"file:///tmp/a", "http://user:secret@host", "http://host?token=x", "http://host/#x", ":bad"} {
 		if _, err := NewClient(u); err == nil {

@@ -1,6 +1,6 @@
 # REST service
 
-Start `masscanr-server --listen 127.0.0.1:8080 --data-dir ./masscanr-data`.
+Start `masscanr-server --listen 127.0.0.1:18080 --data-dir ./masscanr-data`.
 `masscanr-cli` offers only `watch` over this API. The service has no built-in
 authentication or TLS. Keep the listener on loopback or a private network and
 scan only authorized scope.
@@ -91,6 +91,7 @@ preflight. An active run keeps its frozen scope and configuration.
 | `POST /v1/scan-plans/{id}/start` | 202 accepted `runs` resource |
 | `GET /v1/scan-plans/{id}/runs` | 200 run history for the plan |
 | `GET /v1/runs?active=true` | 200 current active run list and snapshot version |
+| `GET /v1/runs` | 200 recent run history across all plans, newest first |
 | `GET /v1/runs/{id}` | 200 run snapshot |
 | `POST /v1/runs/{id}/stop` | 202 stop request for the exact run |
 | `GET /v1/scan-results` | 200 positive open-port results with coverage metadata |
@@ -99,10 +100,12 @@ preflight. An active run keeps its frozen scope and configuration.
 | `GET /v1/catalog/regions` | 200 region catalog |
 | `GET /v1/catalog/instance-types?region=atl` | 200 instance catalog |
 
-Target, ScanPlan, per-plan run, and result lists accept `limit` (1–1000,
-default 100) and an opaque `after` cursor from `links.next`. Results also accept
+Target, ScanPlan, run-history, per-plan run, and result lists accept `limit` (1–1000,
+default 100) and an opaque `after` cursor from `links.next`. Run history accepts
+`filter[target_id]`, `filter[scan_plan_id]`, and `filter[phase]`. Results also accept
 `filter[run_id]`, `filter[target_id]`, `filter[ip]` (IPv4), and `filter[port]`
-(TCP port). `GET /v1/runs?active=true` instead returns the one-active-run view;
+(TCP port), plus `sort=ip`, `-ip`, `port`, or `-port`. Sort order is stable across
+cursor pages with the run ID as a tie-breaker. `GET /v1/runs?active=true` instead returns the one-active-run view;
 other query parameters are rejected. Resource IDs and revision numbers are
 returned in the JSON:API resource. Stale revisions, stale preflights, active-run
 conflicts, and missing confirmation return 409. Invalid input returns 400;

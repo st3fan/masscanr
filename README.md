@@ -1,6 +1,6 @@
 # masscanr
 
-## Service and terminal viewer
+## Service, terminal viewer, and dashboard
 
 `masscanr-server` exposes Target and ScanPlan management, frozen preflight, start/stop, run history,
 inspection, saved exports, and provider catalogs through a REST API backed by
@@ -10,56 +10,65 @@ request examples, recovery semantics, and local test commands.
 The [project objective](OBJECTIVE.md) and [technology policy](TECHNOLOGY.md)
 explain the operating boundaries.
 
+The private, read-only dashboard is served at `/` by the Compose image. It shows
+targets, scan plans, run history, and positive open-port results. The browser
+does not start or stop scans, and missing results do not establish closed ports.
+The server has no built-in authentication; keep the dashboard on loopback or a
+private listener. See [frontend development](docs/frontend.md) for local build,
+API type generation, test commands, and component conventions.
+
 ### Running locally with Docker Compose
 
-Requires Docker Engine/Desktop with Docker Compose v2 or newer. Compose builds
-the Go service and starts PostgreSQL 17, so no local Go or PostgreSQL installation
-is needed. From the repository root, initialize a database password in the ignored
-`.env` file (this command leaves an existing `.env` untouched):
+Requires Docker Engine/Desktop with Docker Compose v2 or newer. From the
+repository root, start the dedicated `masscanr-local` Compose project in the
+foreground:
 
 ```sh
-test -e .env || (umask 077; printf 'MASSCANR_POSTGRES_PASSWORD=%s\n' "$(openssl rand -hex 24)" > .env)
-docker compose up --build -d --wait
-curl --fail-with-body http://127.0.0.1:8080/healthz
+./scripts/start.sh
 ```
 
-If `.env` already exists, add `MASSCANR_POSTGRES_PASSWORD` to it before starting;
-[.env.example](.env.example) lists the available settings with placeholders.
-Compose reads `.env` and passes configuration to the service as environment
-variables. Set `VULTR_API_TOKEN` in `.env` or the launching shell to enable scan
-starts; it can be empty for CRUD and preflight. Recreate the service after changing
-runtime variables: `docker compose up -d --force-recreate masscanr`. Never commit
-real tokens or passwords, and avoid printing resolved Compose configuration.
+The script builds the Go service and dashboard, starts PostgreSQL 17, and keeps
+both services attached to your terminal. If no `.env` or exported database
+password exists, it creates a private ignored `.env` with a random password. If
+`.env` already exists, provide `MASSCANR_POSTGRES_PASSWORD` there or in the
+launching environment; see
+[.env.example](.env.example). Set `VULTR_API_TOKEN` only if you intend to start a
+scan through the API or CLI. No scan starts automatically.
 
-The API is available at `http://127.0.0.1:8080`; use the [Manage a scan](#manage-a-scan)
-examples below. PostgreSQL is accessible only within the Compose network. Both
-database state and `/data` scan artifacts use persistent named volumes. The image
-runs the service as a non-root user, with no local scanner/root privileges needed.
+Open `http://127.0.0.1:18080/` for the dashboard, or check the API from another
+terminal:
 
 ```sh
-# Check readiness and follow service logs.
-docker compose ps
-docker compose logs -f masscanr
+curl --fail-with-body http://127.0.0.1:18080/healthz
+docker compose -p masscanr-local ps
+docker compose -p masscanr-local logs -f masscanr
+```
 
-# Copy retained artifacts to the host (also works with a stopped container).
+Port 18080 is the local default, leaving host port 8080 free. The scripts export
+this default even if an older ignored `.env` contains `MASSCANR_PORT=8080`. An
+explicitly exported `MASSCANR_PORT` overrides it. The scripts bind to loopback
+unless `MASSCANR_BIND_ADDRESS` is explicitly exported. For a different local
+project name, export `MASSCANR_LOCAL_PROJECT` and use the same value for all
+three scripts.
+
+To stop the local project from another terminal while keeping PostgreSQL and
+artifact volumes, run `./scripts/stop.sh`. Ctrl-C also stops the foreground
+session. To intentionally remove this project's containers, volumes, orphan
+containers, and eligible locally built service images, run
+`./scripts/stop.sh --prune` or the identical `./scripts/destroy.sh`. Both
+preserve `.env` and leave other Compose projects alone by default. Wait for
+active scan cleanup before pruning; shutdown can take up to 32 minutes.
+Changing the password in `.env` does not rotate an initialized PostgreSQL
+volume's password.
+
+The service image runs as a non-root user. PostgreSQL and `/data` are isolated
+in named volumes for this Compose project. To copy retained artifacts before
+stopping and pruning:
+
+```sh
 mkdir -p ./masscanr-data
-docker compose cp masscanr:/data/. ./masscanr-data/
-
-# Stop the service and database while preserving data volumes.
-docker compose down
-
-# Rebuild after updating this checkout; existing volumes are reused.
-docker compose up --build -d --wait
+docker compose -p masscanr-local cp masscanr:/data/. ./masscanr-data/
 ```
-
-Compose waits for PostgreSQL readiness before starting the service and stops the
-service before PostgreSQL. The service has up to 32 minutes to shut down and clean
-up workers; avoid shortening that timeout during active scans. Copy artifacts
-before `down` removes the container, or after starting it again. An explicit
-`docker compose down --volumes` permanently deletes this Compose project's
-database and artifacts; use it only for a deliberate reset after scans and cleanup
-have settled. Changing the password in `.env` does not rotate an initialized
-PostgreSQL volume's password—keep the original value when reusing that volume.
 
 For hosting, keep this checkout, `.env`, and volumes on the Docker host. The
 containers use `restart: unless-stopped`. Set `MASSCANR_PORT` to change the host
@@ -80,8 +89,9 @@ masscanr_db="masscanr_dev_$(openssl rand -hex 8)"
 createdb --host=/tmp "$masscanr_db"
 export DBOS_SYSTEM_DATABASE_URL="host=/tmp dbname=$masscanr_db sslmode=disable"
 
-go build -o masscanr-server ./cmd/masscanr-server
-./masscanr-server --listen 127.0.0.1:8080 --data-dir ./masscanr-data
+cd web && npm ci && npm run build && cd ..
+go build -tags webui -o masscanr-server ./cmd/masscanr-server
+./masscanr-server --listen 127.0.0.1:18080 --data-dir ./masscanr-data
 ```
 
 The service initializes its PostgreSQL and DBOS schemas automatically. Keep the
@@ -91,7 +101,7 @@ CRUD and preflight work without it. For example, with 1Password:
 
 ```sh
 VULTR_API_TOKEN='op://Company/Vultr/api-token' \
-  op run -- ./masscanr-server --listen 127.0.0.1:8080 --data-dir ./masscanr-data
+  op run -- ./masscanr-server --listen 127.0.0.1:18080 --data-dir ./masscanr-data
 ```
 
 Use Ctrl-C or SIGTERM to stop the service and wait for worker cleanup. Only one
@@ -103,21 +113,21 @@ In another terminal, create a Target containing only networks you are authorized
 to scan, then a reusable ScanPlan. These commands use `curl` and `jq`.
 
 ```sh
-curl --fail-with-body http://127.0.0.1:8080/healthz
+curl --fail-with-body http://127.0.0.1:18080/healthz
 
-target_id=$(curl --fail-with-body -sS http://127.0.0.1:8080/v1/targets \
+target_id=$(curl --fail-with-body -sS http://127.0.0.1:18080/v1/targets \
   -H 'Content-Type: application/vnd.api+json' \
   -d '{"data":{"type":"targets","attributes":{"name":"External network","entries":["YOUR_AUTHORIZED_IPV4_OR_CIDR"]}}}' \
   | jq -r .data.id)
 
-scan_plan_id=$(curl --fail-with-body -sS http://127.0.0.1:8080/v1/scan-plans \
+scan_plan_id=$(curl --fail-with-body -sS http://127.0.0.1:18080/v1/scan-plans \
   -H 'Content-Type: application/vnd.api+json' \
   -d "{\"data\":{\"type\":\"scan-plans\",\"attributes\":{\"name\":\"Routine inventory\",\"target_id\":\"$target_id\"}}}" \
   | jq -r .data.id)
 
 # Resolve and inspect the exact scope before starting.
 curl --fail-with-body -sS -X POST \
-  "http://127.0.0.1:8080/v1/scan-plans/$scan_plan_id/preflight" > preflight.json
+  "http://127.0.0.1:18080/v1/scan-plans/$scan_plan_id/preflight" > preflight.json
 jq . preflight.json
 preflight_id=$(jq -r .data.id preflight.json)
 
@@ -125,17 +135,17 @@ preflight_id=$(jq -r .data.id preflight.json)
 # Keep this request key when retrying a lost response.
 request_key=$(openssl rand -hex 16)
 run_id=$(curl --fail-with-body -sS \
-  "http://127.0.0.1:8080/v1/scan-plans/$scan_plan_id/start" \
+  "http://127.0.0.1:18080/v1/scan-plans/$scan_plan_id/start" \
   -H 'Content-Type: application/vnd.api+json' \
   -H 'Accept: application/vnd.api+json' \
   -H "Idempotency-Key: $request_key" \
   -d "{\"data\":{\"type\":\"runs\",\"attributes\":{\"preflight_id\":\"$preflight_id\",\"confirm\":true}}}" | jq -r .data.id)
 
-curl --fail-with-body -sS "http://127.0.0.1:8080/v1/runs/$run_id" | jq .
+curl --fail-with-body -sS "http://127.0.0.1:18080/v1/runs/$run_id" | jq .
 
 # Request stop when needed; poll run status until cleanup settles.
 curl --fail-with-body -sS -X POST \
-  "http://127.0.0.1:8080/v1/runs/$run_id/stop" | jq .
+  "http://127.0.0.1:18080/v1/runs/$run_id/stop" | jq .
 ```
 
 Preflights expire after ten minutes. Only one scan can run at a time, including
@@ -162,7 +172,7 @@ go build -o masscanr-cli ./cmd/masscanr-cli
 ./masscanr-cli watch --all
 
 # Choose a service and polling interval (100ms to 1m; default 2s).
-./masscanr-cli watch --all --server http://127.0.0.1:8080 --interval 1s
+./masscanr-cli watch --all --server http://127.0.0.1:18080 --interval 1s
 
 # Plain status output, also selected automatically when input/output is not a TTY.
 ./masscanr-cli watch "$run_id" --plain
@@ -225,7 +235,7 @@ python3 scripts/start-scan.py --ports 22,80,443 --wait 60 64.98.138.0/22
 
 The example uses the authorized company test prefix; substitute only networks you
 are authorized to scan. `--server` changes the API URL (default
-`http://127.0.0.1:8080`). Run `python3 scripts/start-scan.py --help` for backend,
+`http://127.0.0.1:18080`). Run `python3 scripts/start-scan.py --help` for backend,
 shard, rate, placement, and timeout options. It uses only Python's standard library.
 The Vultr token must be configured on the service, not on this client.
 
@@ -254,9 +264,9 @@ complete scan results, including when cleanup failed. The server reads existing
 CSV and JSONL files; it does not regenerate missing files.
 
 ```sh
-curl --fail-with-body -sS "http://127.0.0.1:8080/v1/runs/$run_id/inspection" | jq .
-curl --fail -o findings.csv "http://127.0.0.1:8080/v1/runs/$run_id/exports/csv"
-curl --fail -o findings.jsonl "http://127.0.0.1:8080/v1/runs/$run_id/exports/jsonl"
+curl --fail-with-body -sS "http://127.0.0.1:18080/v1/runs/$run_id/inspection" | jq .
+curl --fail -o findings.csv "http://127.0.0.1:18080/v1/runs/$run_id/exports/csv"
+curl --fail -o findings.jsonl "http://127.0.0.1:18080/v1/runs/$run_id/exports/jsonl"
 ```
 
 A missing saved export returns an error and leaves the artifact directory intact.
@@ -265,8 +275,8 @@ Use the [scan document format](docs/scan-format.md) for the journal contract.
 ### Provider catalog
 
 ```sh
-curl --fail-with-body -sS http://127.0.0.1:8080/v1/catalog/regions | jq .
-curl --fail-with-body -sS 'http://127.0.0.1:8080/v1/catalog/instance-types?region=atl' | jq .
+curl --fail-with-body -sS http://127.0.0.1:18080/v1/catalog/regions | jq .
+curl --fail-with-body -sS 'http://127.0.0.1:18080/v1/catalog/instance-types?region=atl' | jq .
 ```
 
 Catalog responses come from Vultr's public API. They are read-only and do not

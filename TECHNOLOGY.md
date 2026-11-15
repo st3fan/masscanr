@@ -4,17 +4,20 @@
 
 - Go 1.26 is the application language and module toolchain. Build separate `masscanr-server` and `masscanr-cli` executables. The client offers only `watch` and communicates exclusively through server HTTP APIs.
 - The service uses Fiber v3 with Huma v2.40.0 for its incoming documented REST API, JSON:API 1.1 resource and error documents, PostgreSQL 17, DBOS workflows, and `pgx`. It serves generated OpenAPI 3.1 and a locally bundled Stoplight Elements 9.0.29 interface on the same listener. The watch terminal interface uses Bubble Tea. The CLI and outbound provider clients use Go's `net/http`. Keep the service and viewer compatible through the versioned HTTP API.
+- The private, read-only browser dashboard is a React and TypeScript client-side application built with Vite. It uses shadcn/ui components, Tailwind CSS design tokens, TanStack Query and Table, and React Router. The Go JSON:API remains its source of truth. The browser has no token storage or independent authorization system; authentication is deferred to a separate intent.
 - Scan workers are temporary Vultr VPS instances running Alpine Linux. The controller executes masscan or ZMap over SSH and keeps provider credentials on the controller.
 
 ## Packaging and distribution
 
 - Build native executables with `go build ./cmd/masscanr-server ./cmd/masscanr-cli`. The repository also has a multi-stage Dockerfile; Docker Compose builds the service image locally and runs it with PostgreSQL.
+- Build the frontend with `cd web && npm ci && npm run build`, then embed the generated assets in a native server with `go build -tags webui ./cmd/masscanr-server`. The Dockerfile performs both build stages; Node.js is absent from the runtime image. Default Go builds remain API-only.
 - Distribute source through the GitHub repository and document delivered versions with Git tags and GitHub release notes. Existing releases contain no downloadable binary assets. Publishing binaries or a registry image is undecided.
 
 ## Hosting and deployment
 
 - Run the service locally or on a user-managed Docker host with Compose; native process hosting with a PostgreSQL database and artifact directory is also supported.
 - Compose binds the API to loopback by default and persists PostgreSQL data and scan artifacts in named volumes. The documented API remains on loopback or a private listener and has no built-in API authentication or TLS; exposure beyond loopback requires an existing private-network or reverse-proxy arrangement. Use one service instance per database.
+- Local service, Compose, CLI, and Vite proxy defaults use port 18080. Port 8080 is left for the developer's other applications; an explicit listen address or `MASSCANR_PORT` can override the default.
 - The terminal viewer is an HTTP client and needs no database, Vultr, SSH, or artifact access.
 
 ## Development and validation

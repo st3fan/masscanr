@@ -94,13 +94,16 @@ func (a *API) register(method, path, operationID, summary string, model any, han
 		op.Parameters = append(op.Parameters, &huma.Param{Name: "limit", In: "query", Schema: &huma.Schema{Type: "integer", Minimum: floatPtr(1), Maximum: floatPtr(1000)}}, &huma.Param{Name: "after", In: "query", Schema: &huma.Schema{Type: "string"}})
 	}
 	if operationID == "listScanResults" {
-		for _, name := range []string{"filter[run_id]", "filter[target_id]", "filter[ip]", "filter[port]", "after"} {
+		for _, name := range []string{"filter[run_id]", "filter[target_id]", "filter[ip]", "filter[port]", "after", "sort"} {
 			op.Parameters = append(op.Parameters, &huma.Param{Name: name, In: "query", Schema: &huma.Schema{Type: "string"}})
 		}
 		op.Parameters = append(op.Parameters, &huma.Param{Name: "limit", In: "query", Schema: &huma.Schema{Type: "integer", Minimum: floatPtr(1), Maximum: floatPtr(1000)}})
 	}
-	if operationID == "listActiveRuns" {
-		op.Parameters = append(op.Parameters, &huma.Param{Name: "active", In: "query", Required: true, Schema: &huma.Schema{Type: "string", Const: "true"}})
+	if operationID == "listRuns" {
+		for _, name := range []string{"active", "filter[target_id]", "filter[scan_plan_id]", "filter[phase]", "after"} {
+			op.Parameters = append(op.Parameters, &huma.Param{Name: name, In: "query", Schema: &huma.Schema{Type: "string"}})
+		}
+		op.Parameters = append(op.Parameters, &huma.Param{Name: "limit", In: "query", Schema: &huma.Schema{Type: "integer", Minimum: floatPtr(1), Maximum: floatPtr(1000)}})
 	}
 	if operationID == "listInstanceTypes" {
 		op.Parameters = append(op.Parameters, &huma.Param{Name: "region", In: "query", Schema: &huma.Schema{Type: "string"}})
@@ -165,7 +168,7 @@ func (a *API) register(method, path, operationID, summary string, model any, han
 			if strings.HasPrefix(operationID, "list") {
 				example["data"] = []any{exampleResource(typ, model)}
 			}
-			if operationID == "listActiveRuns" {
+			if operationID == "listRuns" {
 				example["meta"] = map[string]int{"snapshot_version": 2}
 			}
 			op.Responses[strconv.Itoa(status)] = &huma.Response{Description: "JSON:API resource document", Content: map[string]*huma.MediaType{jsonAPIMediaType: {Schema: schema, Example: example}}}

@@ -15,6 +15,61 @@ var ErrConflict = errors.New("conflict")
 
 type Store struct{ Pool *pgxpool.Pool }
 
+type RunFilter struct {
+	TargetID   string
+	ScanPlanID string
+	Phase      string
+	After      string
+	Limit      int
+}
+
+func (s *Store) ListRuns(ctx context.Context, f RunFilter) ([]Run, error) {
+	if f.Limit < 1 || f.Limit > 1000 {
+		return nil, fmt.Errorf("limit must be 1..1000")
+	}
+	query := `SELECT ` + runSnapshotSQL + ` FROM masscanr.runs WHERE true`
+	args := []any{}
+	add := func(v any) string { args = append(args, v); return fmt.Sprintf("$%d", len(args)) }
+	if f.TargetID != "" {
+		query += ` AND target_id=` + add(f.TargetID)
+	}
+	if f.ScanPlanID != "" {
+		query += ` AND scan_plan_id=` + add(f.ScanPlanID)
+	}
+	if f.Phase != "" {
+		query += ` AND data->>'phase'=` + add(f.Phase)
+	}
+	if f.After != "" {
+		var exists bool
+		if err := s.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM masscanr.runs WHERE id=$1)`, f.After).Scan(&exists); err != nil {
+			return nil, err
+		}
+		if !exists {
+			return nil, fmt.Errorf("invalid run cursor")
+		}
+		query += ` AND ((data->>'created_at')::timestamptz,id)<(SELECT (data->>'created_at')::timestamptz,id FROM masscanr.runs WHERE id=` + add(f.After) + `)`
+	}
+	query += ` ORDER BY (data->>'created_at')::timestamptz DESC,id DESC LIMIT ` + add(f.Limit)
+	rows, err := s.Pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Run{}
+	for rows.Next() {
+		var b []byte
+		if err := rows.Scan(&b); err != nil {
+			return nil, err
+		}
+		var run Run
+		if err := json.Unmarshal(b, &run); err != nil {
+			return nil, err
+		}
+		out = append(out, run)
+	}
+	return out, rows.Err()
+}
+
 // Open initializes the current schema on a fresh development database.
 // Earlier schemas are deliberately unsupported and must be reset.
 func Open(ctx context.Context, url string) (*Store, error) {
