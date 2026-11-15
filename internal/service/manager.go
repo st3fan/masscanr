@@ -186,6 +186,7 @@ func (m *Manager) finish(ctx context.Context, id string) error {
 	return e
 }
 func (m *Manager) Routes(a *API, mux *http.ServeMux) {
+	artifacts := artifactAPI{dir: m.Dir, getRun: m.Store.GetRun}
 	mux.HandleFunc("POST /v1/scans/{id}/start", m.start)
 	mux.HandleFunc("POST /v1/scans/{id}/stop", m.stop)
 	mux.HandleFunc("POST /v1/runs/{id}/stop", m.stopRun)
@@ -198,6 +199,8 @@ func (m *Manager) Routes(a *API, mux *http.ServeMux) {
 		}
 		respond(w, 200, v)
 	})
+	mux.HandleFunc("GET /v1/runs/{id}/inspection", artifacts.inspect)
+	mux.HandleFunc("GET /v1/runs/{id}/exports/{format}", artifacts.export)
 	mux.HandleFunc("GET /v1/scans/{id}/runs", func(w http.ResponseWriter, r *http.Request) { a.listTable(w, r, "runs", r.PathValue("id")) })
 }
 func (m *Manager) start(w http.ResponseWriter, r *http.Request) {
