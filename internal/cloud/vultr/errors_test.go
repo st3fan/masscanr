@@ -138,7 +138,7 @@ func TestAvailabilityExplainsCatalogVersusRegionalResponse(t *testing.T) {
 				t.Fatal("missing availability error")
 			}
 			if inCatalog {
-				for _, text := range []string{"exists in Vultr's catalog", "current regional availability response", "/v2/regions/yto/availability", "1 plans returned", "list-instance-types --region yto"} {
+				for _, text := range []string{"exists in Vultr's catalog", "current regional availability response", "/v2/regions/yto/availability", "1 plans returned", "GET /v1/catalog/instance-types?region=yto"} {
 					if !strings.Contains(err.Error(), text) {
 						t.Error(text, err)
 					}

@@ -2,13 +2,13 @@
 
 ## Application and runtime
 
-- Go 1.26 is the application language and module toolchain. Build one `masscanr` executable for the REST service, terminal viewer, and offline scan-document commands.
-- The service uses Go HTTP handlers, PostgreSQL 17, DBOS workflows, and `pgx`. The terminal interface uses Bubble Tea and Lip Gloss. Keep the service and viewer compatible through the versioned HTTP API.
+- Go 1.26 is the application language and module toolchain. Build separate `masscanr-server` and `masscanr-cli` executables. The client offers only `watch` and communicates exclusively through server HTTP APIs.
+- The service uses Go HTTP handlers, PostgreSQL 17, DBOS workflows, and `pgx`. The watch terminal interface uses Bubble Tea. Keep the service and viewer compatible through the versioned HTTP API.
 - Scan workers are temporary Vultr VPS instances running Alpine Linux. The controller executes masscan or ZMap over SSH and keeps provider credentials on the controller.
 
 ## Packaging and distribution
 
-- Build a native executable with `go build ./cmd/masscanr`. The repository also has a multi-stage Dockerfile; Docker Compose builds the service image locally and runs it with PostgreSQL.
+- Build native executables with `go build ./cmd/masscanr-server ./cmd/masscanr-cli`. The repository also has a multi-stage Dockerfile; Docker Compose builds the service image locally and runs it with PostgreSQL.
 - Distribute source through the GitHub repository and document delivered versions with Git tags and GitHub release notes. Existing releases contain no downloadable binary assets. Publishing binaries or a registry image is undecided.
 
 ## Hosting and deployment
@@ -26,4 +26,4 @@
 ## Engineering preferences and constraints
 
 - Keep Go code idiomatic, provider orchestration separated from scanner execution, and changes small enough to review. Preserve explicit preflight and confirmation of scan scope.
-- Prefer the existing native executable and Compose deployment for current needs. Additional hosting platforms, registries, and binary packaging remain undecided until a concrete requirement warrants a decision.
+- Prefer the two native executables and locally built Compose service image for current needs. Additional hosting platforms, registries, and binary packaging remain undecided until a concrete requirement warrants a decision.
