@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"net/http"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -12,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/st3fan/masscanr/internal/scanfile"
 )
 
@@ -50,16 +50,16 @@ func artifactFixture(t *testing.T, finished bool) string {
 	return out.String()
 }
 
-func artifactHandler(dir string) http.Handler {
+func artifactHandler(dir string) *fiber.App {
 	api := artifactAPI{dir: dir, getRun: func(_ context.Context, id string) (Run, error) {
 		if id != artifactRunID {
 			return Run{}, ErrNotFound
 		}
 		return Run{ID: id, Artifact: filepath.Join(dir, id+".scan")}, nil
 	}}
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /v1/runs/{id}/inspection", api.inspect)
-	mux.HandleFunc("GET /v1/runs/{id}/exports/{format}", api.export)
+	mux := fiber.New()
+	mux.Get("/v1/runs/:id/inspection", api.inspect)
+	mux.Get("/v1/runs/:id/exports/:format", api.export)
 	return mux
 }
 

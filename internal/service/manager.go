@@ -4,7 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
+	"github.com/gofiber/fiber/v3"
 	"github.com/jackc/pgx/v5"
 	"github.com/st3fan/masscanr/internal/backend/registry"
 	"github.com/st3fan/masscanr/internal/cloud/vultr"
@@ -12,12 +19,6 @@ import (
 	"github.com/st3fan/masscanr/internal/remote"
 	"github.com/st3fan/masscanr/internal/results"
 	"github.com/st3fan/masscanr/internal/scanfile"
-	"net/http"
-	"os"
-	"path/filepath"
-	"strings"
-	"sync"
-	"time"
 )
 
 type Manager struct {
@@ -185,58 +186,51 @@ func (m *Manager) finish(ctx context.Context, id string) error {
 	_, e = m.Store.Pool.Exec(ctx, `UPDATE masscanr.runs SET active=false WHERE id=$1`, id)
 	return e
 }
-func (m *Manager) Routes(a *API, mux *http.ServeMux) {
-	artifacts := artifactAPI{dir: m.Dir, getRun: m.Store.GetRun}
-	mux.HandleFunc("POST /v1/scans/{id}/start", m.start)
-	mux.HandleFunc("POST /v1/scans/{id}/stop", m.stop)
-	mux.HandleFunc("POST /v1/runs/{id}/stop", m.stopRun)
-	mux.HandleFunc("GET /v1/runs", m.activeRuns)
-	mux.HandleFunc("GET /v1/runs/{id}", func(w http.ResponseWriter, r *http.Request) {
-		v, e := m.Store.GetRun(r.Context(), r.PathValue("id"))
+func (m *Manager) Routes(a *API, app *fiber.App) {
+	artifacts := artifactAPI{dir: m.Dir, base: a.Base, getRun: m.Store.GetRun}
+	app.Post("/v1/scans/:id/start", m.start)
+	app.Post("/v1/scans/:id/stop", m.stop)
+	app.Post("/v1/runs/:id/stop", m.stopRun)
+	app.Get("/v1/runs", m.activeRuns)
+	app.Get("/v1/runs/:id", func(c fiber.Ctx) error {
+		v, e := m.Store.GetRun(c.Context(), c.Params("id"))
 		if e != nil {
-			problem(w, e)
-			return
+			return problem(c, e)
 		}
-		respond(w, 200, v)
+		return respond(c, 200, v)
 	})
-	mux.HandleFunc("GET /v1/runs/{id}/inspection", artifacts.inspect)
-	mux.HandleFunc("GET /v1/runs/{id}/exports/{format}", artifacts.export)
-	mux.HandleFunc("GET /v1/scans/{id}/runs", func(w http.ResponseWriter, r *http.Request) { a.listTable(w, r, "runs", r.PathValue("id")) })
+	app.Get("/v1/runs/:id/inspection", artifacts.inspect)
+	app.Get("/v1/runs/:id/exports/:format", artifacts.export)
+	app.Get("/v1/scans/:id/runs", func(c fiber.Ctx) error { return a.listTable(c, "runs", c.Params("id")) })
 }
-func (m *Manager) start(w http.ResponseWriter, r *http.Request) {
+func (m *Manager) start(c fiber.Ctx) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closing {
-		respond(w, 503, map[string]string{"error": "shutting down"})
-		return
+		return respond(c, 503, map[string]string{"error": "shutting down"})
 	}
 	var in struct {
 		PlanID  string `json:"plan_id"`
 		Confirm bool   `json:"confirm"`
 	}
-	if e := decode(w, r, &in); e != nil {
-		bad(w, e)
-		return
+	if e := decode(c, &in); e != nil {
+		return bad(c, e)
 	}
-	key := r.Header.Get("Idempotency-Key")
+	key := c.Get("Idempotency-Key")
 	if key == "" || len(key) > 200 {
-		bad(w, fmt.Errorf("Idempotency-Key of 1..200 bytes required"))
-		return
+		return bad(c, fmt.Errorf("Idempotency-Key of 1..200 bytes required"))
 	}
 	if os.Getenv("VULTR_API_TOKEN") == "" {
-		respond(w, 503, map[string]string{"error": "VULTR_API_TOKEN is required to start scans"})
-		return
+		return respond(c, 503, map[string]string{"error": "VULTR_API_TOKEN is required to start scans"})
 	}
-	v, e := m.Store.Reserve(r.Context(), r.PathValue("id"), in.PlanID, key, in.Confirm)
+	v, e := m.Store.Reserve(c.Context(), c.Params("id"), in.PlanID, key, in.Confirm)
 	if e != nil {
-		problem(w, e)
-		return
+		return problem(c, e)
 	}
 	if e = m.Launch(v.ID); e != nil {
-		respond(w, 503, map[string]string{"error": "workflow launch pending; retry with the same idempotency key"})
-		return
+		return respond(c, 503, map[string]string{"error": "workflow launch pending; retry with the same idempotency key"})
 	}
-	respond(w, 202, v)
+	return respond(c, 202, v)
 }
 
 type privateArtifact struct {

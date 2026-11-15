@@ -3,10 +3,10 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"net/http"
 	"testing"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/st3fan/masscanr/internal/controller"
 	"github.com/st3fan/masscanr/internal/runapi"
 	"github.com/st3fan/masscanr/internal/scan"
@@ -43,7 +43,7 @@ func TestActiveDiscoveryAndHistoricalRunStop(t *testing.T) {
 	a := reserveFixture(t, s, "masscan")
 	m := &Manager{Store: s, cancel: map[string]context.CancelFunc{}}
 	api := &API{Store: s}
-	api.Extra = func(mux *http.ServeMux) { m.Routes(api, mux) }
+	api.Extra = func(mux *fiber.App) { m.Routes(api, mux) }
 	h := api.Handler()
 	list := func() []Run {
 		t.Helper()

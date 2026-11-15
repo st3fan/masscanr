@@ -3,35 +3,32 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"github.com/dbos-inc/dbos-transact-golang/dbos"
-	"github.com/st3fan/masscanr/internal/scanfile"
-	"net/http"
 	"os"
 	"time"
+
+	"github.com/dbos-inc/dbos-transact-golang/dbos"
+	"github.com/gofiber/fiber/v3"
+	"github.com/st3fan/masscanr/internal/scanfile"
 )
 
-func (m *Manager) stop(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if _, e := m.Store.GetScan(r.Context(), id); e != nil {
-		problem(w, e)
-		return
+func (m *Manager) stop(c fiber.Ctx) error {
+	id := c.Params("id")
+	if _, e := m.Store.GetScan(c.Context(), id); e != nil {
+		return problem(c, e)
 	}
 	var runID string
-	e := m.Store.Pool.QueryRow(r.Context(), `SELECT id FROM masscanr.runs WHERE scan_id=$1 ORDER BY (data->>'created_at') DESC LIMIT 1`, id).Scan(&runID)
+	e := m.Store.Pool.QueryRow(c.Context(), `SELECT id FROM masscanr.runs WHERE scan_id=$1 ORDER BY (data->>'created_at') DESC LIMIT 1`, id).Scan(&runID)
 	if e != nil {
-		problem(w, ErrNotFound)
-		return
+		return problem(c, ErrNotFound)
 	}
-	if e = m.requestStop(r.Context(), runID); e != nil {
-		problem(w, e)
-		return
+	if e = m.requestStop(c.Context(), runID); e != nil {
+		return problem(c, e)
 	}
-	v, e := m.Store.GetRun(r.Context(), runID)
+	v, e := m.Store.GetRun(c.Context(), runID)
 	if e != nil {
-		problem(w, e)
-		return
+		return problem(c, e)
 	}
-	respond(w, 202, v)
+	return respond(c, 202, v)
 }
 func (m *Manager) requestStop(ctx context.Context, id string) error {
 	result, e := m.Store.Pool.Exec(ctx, `UPDATE masscanr.runs SET stop=true WHERE id=$1 AND active`, id)

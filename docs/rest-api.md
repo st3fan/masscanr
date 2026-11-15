@@ -176,6 +176,11 @@ creates or repairs files. Unknown runs return 404. Only `csv` and `jsonl` are
 supported, with download content types and `no-store` cache headers. No local
 artifact path is accepted from an API client.
 
+The server uses Fiber v3 for incoming requests. Handler work has explicit
+timeouts and is cancelled during server shutdown. Client disconnects do not
+cancel a handler; if a scan start is uncertain, retry with the same
+`Idempotency-Key`.
+
 ## Provider catalog
 
 The catalog routes query Vultr's public catalog without a token. Regions include
