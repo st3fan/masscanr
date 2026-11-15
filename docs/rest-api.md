@@ -28,96 +28,98 @@ DBOS Go is pinned to v1.8.0. The workflow application version is `masscanr-v9-1`
 Workflow changes require an explicit version/recovery review; auto-upgrade and
 Conductor are not enabled. App migrations reject unknown schema versions.
 
-## JSON API
+## Huma, JSON:API, and interactive docs
 
-Requests and responses use JSON except for saved CSV/JSONL downloads. Request
-bodies are limited to 1 MiB and
-unknown fields are rejected. Errors have the form `{"error":"message"}`. Invalid
-input returns 400; absent resources return 404; stale revisions, stale plans,
-missing required approval, and active-run conflicts return 409. Target lookup
-failure returns 422; missing runtime credentials or shutdown returns 503.
-Unexpected database errors return 500 without exposing connection details.
+Huma v2.40.0 registers the Fiber v3 routes and serves the generated OpenAPI 3.1
+contract at `/openapi.json`. Interactive Stoplight Elements documentation is at
+`/docs`. Its versioned JavaScript and CSS are bundled with the server and served
+from `/docs/assets/`; opening the docs requires no CDN.
+
+The `/v1` JSON operations use JSON:API 1.1 in place. Send `Content-Type:
+application/vnd.api+json` for JSON request bodies and `Accept:
+application/vnd.api+json` for JSON responses. Responses have a top-level `data`
+resource or `errors` array and use that media type. Resources expose `type`, `id`,
+and `attributes`; runs and plans include scan relationships, and runs include a
+plan relationship. List responses have a `data` array and `links.self`; definition
+and history pages can include `links.next`. Errors include HTTP `status` and
+`detail`, without leaking database or provider credentials. Invalid input returns
+400; absent resources return 404; stale revisions, stale plans, missing required
+approval, and active-run conflicts return 409. Target lookup failure returns 422;
+missing runtime credentials or shutdown returns 503.
+
+Request bodies are limited to 1 MiB and unknown fields are rejected. Fiber's
+transport limit is 2 MiB. A request beyond that limit may be closed before a
+JSON:API error can be sent. The server remains on loopback or a private listener;
+these documented APIs do not add authentication or public-internet exposure.
 
 Create a definition with `POST /v1/scans` (201):
 
+```http
+Content-Type: application/vnd.api+json
+Accept: application/vnd.api+json
+```
+
 ```json
-{
-  "targets": ["192.0.2.1"],
-  "backend": "masscan",
-  "ports": "22,80,443",
-  "shards": 2,
-  "rate": 500000,
-  "region": "atl",
-  "instance_type": "vc2-1c-1gb",
-  "timeout": "24h",
-  "cleanup_timeout": "5m"
-}
+{"data":{"type":"scans","attributes":{"targets":["192.0.2.1"],"ports":"22,80,443","shards":2,"rate":500000,"region":"atl","instance_type":"vc2-1c-1gb","timeout":"24h","cleanup_timeout":"5m"}}}
 ```
 
 The example address is documentation-only. Targets may also be IPv4 CIDRs or AS
-identities, with the V8 syntax/provenance rules. Only `targets` is required;
-omitted options use the existing defaults (including the Nmap top 100 TCP ports).
-Zero/empty values are validated, not silently defaulted. Timeouts use Go duration
-strings. The response contains `id`, `revision`, `created_at`, `updated_at`, and
+identities, with the existing syntax and provenance rules. Only `targets` is
+required; omitted create options use the existing defaults. Zero or empty values
+are validated. Timeouts use Go duration strings. The returned scan resource has
+its generated `id` and attributes `revision`, `created_at`, `updated_at`, and
 `definition` with effective defaults.
 
 | Request | Result |
 | --- | --- |
-| `GET /healthz` | 200 ready, or 503 when PostgreSQL is unavailable |
-| `GET /v1/scans` | 200 array of definitions |
-| `GET /v1/scans/{id}` | 200 definition |
-| `PUT /v1/scans/{id}` | 200 updated definition; body has `revision` and full `definition` |
+| `GET /healthz` | 200 `{"status":"ready"}` or 503 operational error; JSON format exception |
+| `GET /v1/scans` | 200 scan resource array |
+| `GET /v1/scans/{id}` | 200 scan resource |
+| `PATCH /v1/scans/{id}` | 200 partially updated scan resource; requires matching resource ID and revision |
 | `DELETE /v1/scans/{id}` | 204; retains historical runs and artifacts |
-| `POST /v1/scans/{id}/preflight` | 201 frozen plan; no body needed |
-| `POST /v1/scans/{id}/start` | 202 accepted run |
-| `POST /v1/scans/{id}/stop` | 202 latest run; repeated requests are harmless |
-| `GET /v1/runs?active=true` | 200 versioned active-run snapshot envelope; includes cleanup |
-| `POST /v1/runs/{id}/stop` | 202 exact immutable run; settled run is a no-op, unknown ID is 404 |
-| `GET /v1/runs/{id}` | 200 run, including after its definition is deleted |
-| `GET /v1/runs/{id}/inspection` | 200 validated journal state, including partial runs |
-| `GET /v1/runs/{id}/exports/csv` | 200 saved CSV for a complete scan |
-| `GET /v1/runs/{id}/exports/jsonl` | 200 saved findings JSONL for a complete scan |
-| `GET /v1/catalog/regions` | 200 public provider region catalog |
-| `GET /v1/catalog/instance-types?region=atl` | 200 plans available in the region; `atl` is the default |
-| `GET /v1/scans/{id}/runs` | 200 history array |
+| `POST /v1/scans/{id}/preflight` | 201 frozen plan resource; no body needed |
+| `POST /v1/scans/{id}/start` | 202 accepted run resource |
+| `POST /v1/scans/{id}/stop` | 202 latest run resource; repeated requests are harmless |
+| `GET /v1/runs?active=true` | 200 run resource array with `meta.snapshot_version` |
+| `POST /v1/runs/{id}/stop` | 202 exact run resource; settled run is a no-op, unknown ID is 404 |
+| `GET /v1/runs/{id}` | 200 run resource, including after its definition is deleted |
+| `GET /v1/runs/{id}/inspection` | 200 inspection resource with validated journal state |
+| `GET /v1/runs/{id}/exports/{format}` | 200 saved CSV or JSONL for a complete scan |
+| `GET /v1/catalog/regions` | 200 region resource array |
+| `GET /v1/catalog/instance-types?region=atl` | 200 instance-type resource array; `atl` is default |
+| `GET /v1/scans/{id}/runs` | 200 historical run resource array |
 
-Definition and per-scan history list routes accept `limit` (1–1000, default 100) and `after` (last ID from the
-previous page). IDs sort lexically. Replacement and deletion conflict while the
-definition has an active run. A replacement body is:
-
-```json
-{"revision":1,"definition":{"targets":["192.0.2.1"],"ports":"443"}}
-```
-
-Replacement uses defaults for omitted options and increments the revision.
-Preflight returns `id`, `scan_id`, `revision`, `expires_at`, `config`, `timeouts`,
-`workload`, and `requires_confirmation`. The nested effective Go scan structures
-currently use their exported field names: `config.RequestedTargets`,
-`config.Targets`, `config.Ports`, `workload.Addresses`, `workload.Ports`, and
-`workload.Probes`. Timeouts in this snapshot are integer nanoseconds. This is the
-V9-compatible representation; definition fields use the snake_case names above.
-
-Plans last 10 minutes and freeze the exact resolved AS mapping and provenance.
-Changing a definition invalidates older plans. Starting does not perform another
-RIPE lookup. Above 1,000,000 planned probes, explicit `confirm:true` is required.
-No worker or `.scan` artifact is created before plan acceptance.
-
-Start with `Idempotency-Key: <unique-request-key>` (1–200 bytes) and this body:
+Definition and per-scan history list routes accept `limit` (1–1000, default 100)
+and `after` (last ID from the previous page). IDs sort lexically. Updating and
+deleting a definition conflict while it has an active run. PATCH leaves omitted
+definition fields unchanged and increments the revision:
 
 ```json
-{"plan_id":"<preflight-id>","confirm":true}
+{"data":{"type":"scans","id":"<scan-id>","attributes":{"revision":1,"definition":{"ports":"443"}}}}
 ```
 
-Use the same key and plan when retrying a lost response. A different plan with the
-same key conflicts. A successful start returns the same run for later retries,
-even after completion. Only one run may be active, through cleanup; there is no
-scan queue. A 503 during dispatch may mean the reservation was persisted: retry
-the same key. Startup recovers reserved runs that were not dispatched.
+Preflight plans last 10 minutes and freeze the exact resolved AS mapping and
+provenance. Changing a definition invalidates older plans. Starting does not
+perform another RIPE lookup. Above 1,000,000 planned probes, explicit
+`confirm:true` is required. No worker or `.scan` artifact is created before
+plan acceptance.
+
+Start with `Idempotency-Key: <unique-request-key>` (1–200 bytes) and:
+
+```json
+{"data":{"type":"runs","attributes":{"plan_id":"<preflight-id>","confirm":true}}}
+```
+
+Use the same key and plan when retrying a lost response. A different plan with
+the same key conflicts. A successful start returns the same run for later retries,
+even after completion. Only one run may be active through cleanup; there is no
+scan queue. A 503 during dispatch may mean the reservation was persisted, so
+retry the same key. Startup recovers reserved runs that were not dispatched.
 
 ## V10 watch snapshots and discovery
 
-Every run response adds `snapshot_version:1`, `active`, `settled`,
-`stop_requested`, and `worker_snapshots`. The state booleans come from the database
+Every run resource includes `snapshot_version:1`, `active`, `settled`,
+`stop_requested`, and `worker_snapshots` in its attributes. The state booleans come from the database
 columns in the same SELECT as the run JSON, including for V9 historical rows.
 `settled` is the inverse of `active`: a terminal cleanup failure is settled but
 unsuccessful. A completed scanner may still be active during final reconciliation;
@@ -126,10 +128,10 @@ do not use `phase` or `summary.ScanOutcome` alone to decide when to detach.
 `GET /v1/runs?active=true` returns:
 
 ```json
-{"snapshot_version":1,"runs":[]}
+{"meta":{"snapshot_version":1},"data":[],"links":{"self":"/v1/runs?active=true"}}
 ```
 
-Each element is the same run snapshot returned by `GET /v1/runs/{id}`. The array
+Each element has the same run attributes returned by `GET /v1/runs/{id}`. The array
 contains all active rows, including provisioning, recovery, and cleanup; an empty
 array means idle, not an error. `active=true` is required and other query parameters
 are rejected with 400. No pagination is necessary under the existing one-active-run
@@ -155,14 +157,14 @@ an additive JSON/API change, not a replay or migration of past scan traffic.
 `POST /v1/runs/{id}/stop` records stop intent only for that exact active ID and
 cancels only its local execution context. A settled historical run returns its
 snapshot without changing a newer run of the same definition. Repeating the call
-is harmless. The existing scan-level stop route remains available for V9 clients,
+is harmless. The existing scan-level stop route remains available,
 but viewers must use the run-specific route to avoid a stale-view race.
 
 ## Artifact inspection and saved exports
 
 The artifact routes identify data by a server run ID only. They validate that
 the journal belongs to that run and resides in the configured artifact directory.
-Inspection replays the journal and returns `run_id`, `format`, `schema`,
+Inspection replays the journal and returns an `inspections` resource with `run_id`, `format`, `schema`,
 `created_at`, `config`, `accepted_findings`, `records`, `workers`,
 `scan_outcome`, `cleanup_outcome`, `complete`, `truncated`, and `undeleted`.
 The worker list reports the last validated state, not current cloud state.
@@ -171,7 +173,8 @@ unconfirmed. Invalid journal content fails rather than silently skipping records
 
 CSV and JSONL routes stream existing saved files only when the journal confirms
 a complete scan. Cleanup can be incomplete while scan results remain complete.
-Incomplete results or a missing saved export return HTTP 409; neither route
+Incomplete results or a missing saved export return HTTP 409 with a JSON:API
+`errors` body; neither route
 creates or repairs files. Unknown runs return 404. Only `csv` and `jsonl` are
 supported, with download content types and `no-store` cache headers. No local
 artifact path is accepted from an API client.
@@ -180,7 +183,7 @@ The server uses Fiber v3 for incoming requests. Handler work has explicit
 timeouts and is cancelled during server shutdown. Client disconnects do not
 cancel a handler; if a scan start is uncertain, retry with the same
 `Idempotency-Key`.
-JSON request bodies remain limited to 1 MiB and receive a JSON 400 error when
+JSON request bodies remain limited to 1 MiB and receive a JSON:API 400 error when
 they exceed that limit. Fiber has a 2 MiB transport cap; larger requests may
 be closed before the handler can return a JSON error.
 

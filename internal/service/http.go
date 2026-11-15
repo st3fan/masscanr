@@ -7,16 +7,19 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/danielgtaylor/huma/v2"
 	"github.com/gofiber/fiber/v3"
 	"github.com/st3fan/masscanr/internal/cloud"
 	"github.com/st3fan/masscanr/internal/scan"
 )
 
 type API struct {
+	Huma    huma.API
 	Resolve func(context.Context, []scan.Target) ([]scan.Target, error)
 	Catalog cloud.Catalog
 	Store   *Store
@@ -48,6 +51,17 @@ func (a *API) Handler() *fiber.App {
 		},
 	})
 	app.Use(func(c fiber.Ctx) error {
+		if strings.HasPrefix(c.Path(), "/v1/") {
+			if !acceptsResponse(c.Get("Accept"), strings.Contains(c.Path(), "/exports/")) {
+				return respond(c, 406, map[string]string{"error": "JSON:API response not acceptable"})
+			}
+			if len(c.Body()) > 0 {
+				contentType, params, err := mime.ParseMediaType(c.Get("Content-Type"))
+				if err != nil || contentType != jsonAPIMediaType || invalidJSONAPIParams(params) {
+					return respond(c, 415, map[string]string{"error": "JSON:API content type required"})
+				}
+			}
+		}
 		// Fiber does not cancel handlers on disconnect. Bound operations and
 		// cancel them when the server shuts down.
 		duration := 30 * time.Second
@@ -65,7 +79,8 @@ func (a *API) Handler() *fiber.App {
 		c.SetContext(ctx)
 		return c.Next()
 	})
-	app.Get("/healthz", func(c fiber.Ctx) error {
+	a.initHuma(app)
+	a.register("GET", "/healthz", "health", "Health and readiness", nil, func(c fiber.Ctx) error {
 		ctx, cancel := context.WithTimeout(c.Context(), time.Second)
 		defer cancel()
 		if (a.Ready != nil && !a.Ready()) || a.Store.Pool.Ping(ctx) != nil {
@@ -73,14 +88,14 @@ func (a *API) Handler() *fiber.App {
 		}
 		return respond(c, 200, map[string]string{"status": "ready"})
 	})
-	app.Post("/v1/scans", a.create)
-	app.Post("/v1/scans/:id/preflight", a.preflight)
-	app.Get("/v1/scans", a.list)
-	app.Get("/v1/scans/:id", a.get)
-	app.Get("/v1/catalog/regions", a.regions)
-	app.Get("/v1/catalog/instance-types", a.instanceTypes)
-	app.Put("/v1/scans/:id", a.replace)
-	app.Delete("/v1/scans/:id", a.remove)
+	a.register("POST", "/v1/scans", "createScan", "Create a scan definition", Scan{}, a.create)
+	a.register("POST", "/v1/scans/:id/preflight", "preflightScan", "Resolve an authorized scan plan", Plan{}, a.preflight)
+	a.register("GET", "/v1/scans", "listScans", "List scan definitions", Scan{}, a.list)
+	a.register("GET", "/v1/scans/:id", "getScan", "Get a scan definition", Scan{}, a.get)
+	a.register("GET", "/v1/catalog/regions", "listRegions", "List provider regions", regionResponse{}, a.regions)
+	a.register("GET", "/v1/catalog/instance-types", "listInstanceTypes", "List provider instance types", instanceTypeResponse{}, a.instanceTypes)
+	a.register("PATCH", "/v1/scans/:id", "updateScan", "Partially update a scan definition", Scan{}, a.patch)
+	a.register("DELETE", "/v1/scans/:id", "deleteScan", "Delete a scan definition", nil, a.remove)
 	if a.Extra != nil {
 		a.Extra(app)
 	}
@@ -91,18 +106,42 @@ func decode(c fiber.Ctx, v any) error {
 	if len(c.Body()) > 1<<20 {
 		return fmt.Errorf("invalid JSON body")
 	}
+	var envelope struct {
+		Data struct {
+			Type       string          `json:"type"`
+			ID         string          `json:"id"`
+			Attributes json.RawMessage `json:"attributes"`
+		} `json:"data"`
+	}
 	d := json.NewDecoder(bytes.NewReader(c.Body()))
 	d.DisallowUnknownFields()
-	if e := d.Decode(v); e != nil {
+	if e := d.Decode(&envelope); e != nil {
 		return fmt.Errorf("invalid JSON body")
 	}
 	if e := d.Decode(new(any)); e != io.EOF {
 		return fmt.Errorf("expected one JSON object")
 	}
+	if envelope.Data.Type != requestResourceType(c) || len(envelope.Data.Attributes) == 0 || string(envelope.Data.Attributes) == "null" {
+		return fmt.Errorf("invalid JSON:API resource")
+	}
+	if c.Method() == fiber.MethodPatch && envelope.Data.ID == "" {
+		return fmt.Errorf("resource ID is required")
+	}
+	if id := c.Params("id"); envelope.Data.ID != "" && envelope.Data.ID != id {
+		return fmt.Errorf("resource ID does not match URL")
+	}
+	d = json.NewDecoder(bytes.NewReader(envelope.Data.Attributes))
+	d.DisallowUnknownFields()
+	if e := d.Decode(v); e != nil {
+		return fmt.Errorf("invalid JSON:API attributes")
+	}
 	return nil
 }
 
 func respond(c fiber.Ctx, status int, v any) error {
+	if strings.HasPrefix(c.Path(), "/v1/") {
+		return respondJSONAPI(c, status, v)
+	}
 	c.Set("Content-Type", "application/json")
 	c.Status(status)
 	if v == nil {
@@ -148,26 +187,56 @@ func (a *API) get(c fiber.Ctx) error {
 	}
 	return respond(c, 200, v)
 }
-func (a *API) replace(c fiber.Ctx) error {
+func (a *API) patch(c fiber.Ctx) error {
 	var in struct {
-		Revision   int64      `json:"revision"`
-		Definition Definition `json:"definition"`
+		Revision   int64                      `json:"revision"`
+		Definition map[string]json.RawMessage `json:"definition"`
 	}
-	in.Definition = Defaults()
 	if e := decode(c, &in); e != nil {
 		return bad(c, e)
 	}
-	if in.Revision < 1 {
-		return bad(c, fmt.Errorf("revision must be positive"))
+	if in.Revision < 1 || len(in.Definition) == 0 {
+		return bad(c, fmt.Errorf("revision and changed definition attributes are required"))
 	}
-	if _, _, e := in.Definition.Config(); e != nil {
-		return bad(c, e)
-	}
-	v := Scan{ID: c.Params("id"), Revision: in.Revision + 1, UpdatedAt: time.Now().UTC(), Definition: in.Definition}
-	if e := a.Store.SaveScan(c.Context(), v, in.Revision, false); e != nil {
+	current, e := a.Store.GetScan(c.Context(), c.Params("id"))
+	if e != nil {
 		return problem(c, e)
 	}
-	return a.get(c)
+	if current.Revision != in.Revision {
+		return problem(c, ErrConflict)
+	}
+	b, e := json.Marshal(current.Definition)
+	if e != nil {
+		return problem(c, e)
+	}
+	var fields map[string]json.RawMessage
+	if e = json.Unmarshal(b, &fields); e != nil {
+		return problem(c, e)
+	}
+	for key, value := range in.Definition {
+		if _, ok := fields[key]; !ok {
+			return bad(c, fmt.Errorf("unknown definition attribute %q", key))
+		}
+		fields[key] = value
+	}
+	b, e = json.Marshal(fields)
+	if e != nil {
+		return problem(c, e)
+	}
+	var definition Definition
+	if e = json.Unmarshal(b, &definition); e != nil {
+		return bad(c, fmt.Errorf("invalid definition attributes"))
+	}
+	if _, _, e = definition.Config(); e != nil {
+		return bad(c, e)
+	}
+	current.Definition = definition
+	current.Revision++
+	current.UpdatedAt = time.Now().UTC()
+	if e = a.Store.SaveScan(c.Context(), current, in.Revision, false); e != nil {
+		return problem(c, e)
+	}
+	return respond(c, 200, current)
 }
 func (a *API) remove(c fiber.Ctx) error {
 	if e := a.Store.DeleteScan(c.Context(), c.Params("id")); e != nil {

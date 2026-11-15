@@ -3,7 +3,6 @@ package service
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -77,7 +76,7 @@ func TestArtifactInspectionAndDownloads(t *testing.T) {
 	h := artifactHandler(dir)
 	w := request(h, "GET", "/v1/runs/"+artifactRunID+"/inspection", "")
 	var v inspection
-	if err := json.Unmarshal(w.Body.Bytes(), &v); err != nil || w.Code != 200 || !v.Complete || v.AcceptedFindings != 1 || v.CleanupOutcome != "incomplete" || len(v.Workers) != 1 || w.Header().Get("Cache-Control") != "no-store" {
+	if err := decodeTestResource(w.Body.Bytes(), &v); err != nil || w.Code != 200 || !v.Complete || v.AcceptedFindings != 1 || v.CleanupOutcome != "incomplete" || len(v.Workers) != 1 || w.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("inspection: status=%d body=%s error=%v", w.Code, w.Body, err)
 	}
 	for format, content := range map[string]string{"csv": "ip,port\n192.0.2.1,80\n", "jsonl": "{\"ip\":\"192.0.2.1\"}\n"} {
@@ -104,7 +103,7 @@ func TestArtifactPartialCorruptAndPathSafety(t *testing.T) {
 	h := artifactHandler(dir)
 	w := request(h, "GET", "/v1/runs/"+artifactRunID+"/inspection", "")
 	var v inspection
-	if err := json.Unmarshal(w.Body.Bytes(), &v); err != nil || w.Code != 200 || v.Complete || !v.Truncated || v.ScanOutcome != "unconfirmed" || v.AcceptedFindings != 1 {
+	if err := decodeTestResource(w.Body.Bytes(), &v); err != nil || w.Code != 200 || v.Complete || !v.Truncated || v.ScanOutcome != "unconfirmed" || v.AcceptedFindings != 1 {
 		t.Fatalf("partial inspection: status=%d body=%s error=%v", w.Code, w.Body, err)
 	}
 	if w := request(h, "GET", "/v1/runs/"+artifactRunID+"/exports/csv", ""); w.Code != 409 || !strings.Contains(w.Body.String(), "incomplete") {

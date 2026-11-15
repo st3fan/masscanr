@@ -3,7 +3,7 @@
 ## Application and runtime
 
 - Go 1.26 is the application language and module toolchain. Build separate `masscanr-server` and `masscanr-cli` executables. The client offers only `watch` and communicates exclusively through server HTTP APIs.
-- The service uses Fiber v3 for its incoming REST API, PostgreSQL 17, DBOS workflows, and `pgx`. The watch terminal interface uses Bubble Tea. The CLI and outbound provider clients use Go's `net/http`. Keep the service and viewer compatible through the versioned HTTP API.
+- The service uses Fiber v3 with Huma v2.40.0 for its incoming documented REST API, JSON:API 1.1 resource and error documents, PostgreSQL 17, DBOS workflows, and `pgx`. It serves generated OpenAPI 3.1 and a locally bundled Stoplight Elements 9.0.29 interface on the same listener. The watch terminal interface uses Bubble Tea. The CLI and outbound provider clients use Go's `net/http`. Keep the service and viewer compatible through the versioned HTTP API.
 - Scan workers are temporary Vultr VPS instances running Alpine Linux. The controller executes masscan or ZMap over SSH and keeps provider credentials on the controller.
 
 ## Packaging and distribution
@@ -14,7 +14,7 @@
 ## Hosting and deployment
 
 - Run the service locally or on a user-managed Docker host with Compose; native process hosting with a PostgreSQL database and artifact directory is also supported.
-- Compose binds the API to loopback by default and persists PostgreSQL data and scan artifacts in named volumes. The service has no built-in API authentication or TLS; exposure beyond loopback requires an existing private-network or reverse-proxy arrangement. Use one service instance per database.
+- Compose binds the API to loopback by default and persists PostgreSQL data and scan artifacts in named volumes. The documented API remains on loopback or a private listener and has no built-in API authentication or TLS; exposure beyond loopback requires an existing private-network or reverse-proxy arrangement. Use one service instance per database.
 - The terminal viewer is an HTTP client and needs no database, Vultr, SSH, or artifact access.
 
 ## Development and validation

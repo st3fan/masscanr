@@ -107,24 +107,26 @@ placeholder below with a network you are authorized to scan. These commands use
 curl --fail-with-body http://127.0.0.1:8080/healthz
 
 scan_id=$(curl --fail-with-body -sS http://127.0.0.1:8080/v1/scans \
-  -H 'Content-Type: application/json' \
-  -d '{"targets":["YOUR_AUTHORIZED_IPV4_OR_CIDR"],"ports":"22,80,443"}' \
-  | jq -r .id)
+  -H 'Content-Type: application/vnd.api+json' \
+  -H 'Accept: application/vnd.api+json' \
+  -d '{"data":{"type":"scans","attributes":{"targets":["YOUR_AUTHORIZED_IPV4_OR_CIDR"],"ports":"22,80,443"}}}' \
+  | jq -r .data.id)
 
 # Resolve and inspect the exact scope before starting.
 curl --fail-with-body -sS -X POST \
   "http://127.0.0.1:8080/v1/scans/$scan_id/preflight" > preflight.json
 jq . preflight.json
-plan_id=$(jq -r .id preflight.json)
+plan_id=$(jq -r .data.id preflight.json)
 
 # Start only after reviewing the returned targets and planned probe count.
 # Keep this request key when retrying a lost response.
 request_key=$(openssl rand -hex 16)
 run_id=$(curl --fail-with-body -sS \
   "http://127.0.0.1:8080/v1/scans/$scan_id/start" \
-  -H 'Content-Type: application/json' \
+  -H 'Content-Type: application/vnd.api+json' \
+  -H 'Accept: application/vnd.api+json' \
   -H "Idempotency-Key: $request_key" \
-  -d "{\"plan_id\":\"$plan_id\",\"confirm\":true}" | jq -r .id)
+  -d "{\"data\":{\"type\":\"runs\",\"attributes\":{\"plan_id\":\"$plan_id\",\"confirm\":true}}}" | jq -r .data.id)
 
 curl --fail-with-body -sS "http://127.0.0.1:8080/v1/runs/$run_id" | jq .
 
@@ -138,6 +140,8 @@ cleanup. Results are saved in the artifact directory as `.scan` journals and,
 after successful completion, CSV/JSONL exports. The run response exposes artifact
 paths and separate scan/cleanup outcomes. See the [full API guide](docs/rest-api.md)
 for update/delete requests, pagination, recovery behavior, and test setup.
+The generated OpenAPI contract is at `/openapi.json`; interactive offline
+Stoplight documentation is at `/docs` on the same listener.
 
 ### Watch scans
 

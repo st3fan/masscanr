@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -30,12 +29,12 @@ func TestCatalogAPI(t *testing.T) {
 	h := (&API{Catalog: f}).Handler()
 	w := request(h, "GET", "/v1/catalog/regions", "")
 	var regions []regionResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &regions); err != nil || w.Code != 200 || len(regions) != 2 || regions[0].ID != "atl" || regions[0].Country != "US" {
+	if err := decodeTestList(w.Body.Bytes(), &regions); err != nil || w.Code != 200 || len(regions) != 2 || regions[0].ID != "atl" || regions[0].Country != "US" {
 		t.Fatalf("regions: status=%d body=%s error=%v", w.Code, w.Body, err)
 	}
 	w = request(h, "GET", "/v1/catalog/instance-types", "")
 	var plans []instanceTypeResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &plans); err != nil || w.Code != 200 || f.region != "atl" || len(plans) != 2 || plans[0].ID != "plan-a" || plans[0].MemoryMB != 1024 {
+	if err := decodeTestList(w.Body.Bytes(), &plans); err != nil || w.Code != 200 || f.region != "atl" || len(plans) != 2 || plans[0].ID != "plan-a" || plans[0].MemoryMB != 1024 {
 		t.Fatalf("plans: status=%d body=%s error=%v region=%s", w.Code, w.Body, err, f.region)
 	}
 	w = request(h, "GET", "/v1/catalog/instance-types?region=ewr", "")
