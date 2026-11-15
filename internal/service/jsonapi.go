@@ -87,6 +87,9 @@ func resourceType(c fiber.Ctx, v any) string {
 	case ScanPreflight:
 		return "scan-preflights"
 	case Plan:
+		if strings.HasPrefix(c.Path(), "/v1/scan-plans/") {
+			return "scan-preflights"
+		}
 		return "plans"
 	case Run:
 		return "runs"
@@ -137,10 +140,14 @@ func makeResource(typ string, value any) (jsonAPIResource, error) {
 	}
 	delete(attributes, "id")
 	resource := jsonAPIResource{Type: typ, ID: id, Attributes: attributes}
-	var scanID string
+	var scanID, scanPlanID string
 	_ = json.Unmarshal(attributes["scan_id"], &scanID)
-	if scanID != "" {
+	_ = json.Unmarshal(attributes["scan_plan_id"], &scanPlanID)
+	if scanID != "" && scanPlanID == "" {
 		resource.Relationships = map[string]any{"scan": map[string]any{"data": map[string]string{"type": "scans", "id": scanID}}}
+	}
+	if scanPlanID != "" {
+		resource.Relationships = map[string]any{"scan-plan": map[string]any{"data": map[string]string{"type": "scan-plans", "id": scanPlanID}}}
 	}
 	var targetID string
 	_ = json.Unmarshal(attributes["target_id"], &targetID)
@@ -159,7 +166,11 @@ func makeResource(typ string, value any) (jsonAPIResource, error) {
 				if resource.Relationships == nil {
 					resource.Relationships = map[string]any{}
 				}
-				resource.Relationships["plan"] = map[string]any{"data": map[string]string{"type": "plans", "id": planID}}
+				if scanPlanID != "" {
+					resource.Relationships["preflight"] = map[string]any{"data": map[string]string{"type": "scan-preflights", "id": planID}}
+				} else {
+					resource.Relationships["plan"] = map[string]any{"data": map[string]string{"type": "plans", "id": planID}}
+				}
 			}
 		}
 	}
@@ -198,7 +209,7 @@ func respondJSONAPI(c fiber.Ctx, status int, v any) error {
 			items = append(items, r)
 		}
 		doc := map[string]any{"data": items, "links": map[string]any{"self": string(c.Request().URI().RequestURI())}}
-		if c.Path() == "/v1/scans" || c.Path() == "/v1/targets" || c.Path() == "/v1/scan-plans" || strings.HasSuffix(c.Path(), "/runs") && strings.HasPrefix(c.Path(), "/v1/scans/") {
+		if c.Path() == "/v1/scans" || c.Path() == "/v1/targets" || c.Path() == "/v1/scan-plans" || strings.HasSuffix(c.Path(), "/runs") && (strings.HasPrefix(c.Path(), "/v1/scans/") || strings.HasPrefix(c.Path(), "/v1/scan-plans/")) {
 			limit, _ := strconv.Atoi(c.Query("limit", "100"))
 			if len(items) == limit && limit > 0 {
 				q := url.Values{}
@@ -223,6 +234,8 @@ func respondJSONAPI(c fiber.Ctx, status int, v any) error {
 		r.Links = map[string]any{"self": "/v1/targets/" + r.ID}
 	case "scan-plans":
 		r.Links = map[string]any{"self": "/v1/scan-plans/" + r.ID}
+	case "scan-preflights":
+		r.Links = map[string]any{"self": "/v1/scan-plans/" + scanPlanIDFromResource(r) + "/preflight"}
 	case "runs":
 		r.Links = map[string]any{"self": "/v1/runs/" + r.ID}
 	case "inspections":
@@ -239,4 +252,10 @@ func sendJSONAPI(c fiber.Ctx, status int, doc any) error {
 	c.Set("Content-Type", jsonAPIMediaType)
 	c.Status(status)
 	return c.Send(append(b, '\n'))
+}
+
+func scanPlanIDFromResource(r jsonAPIResource) string {
+	var id string
+	_ = json.Unmarshal(r.Attributes["scan_plan_id"], &id)
+	return id
 }

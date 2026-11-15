@@ -68,7 +68,7 @@ func (a *API) Handler() *fiber.App {
 		if c.Path() == "/v1/catalog/regions" || c.Path() == "/v1/catalog/instance-types" {
 			duration = time.Minute
 		}
-		if c.Method() == fiber.MethodPost && strings.HasPrefix(c.Path(), "/v1/scans/") && strings.HasSuffix(c.Path(), "/preflight") {
+		if c.Method() == fiber.MethodPost && (strings.HasPrefix(c.Path(), "/v1/scans/") || strings.HasPrefix(c.Path(), "/v1/scan-plans/")) && strings.HasSuffix(c.Path(), "/preflight") {
 			duration = 2 * time.Minute
 		}
 		if c.Method() == fiber.MethodGet && strings.HasPrefix(c.Path(), "/v1/runs/") && strings.HasSuffix(c.Path(), "/inspection") {
@@ -99,6 +99,7 @@ func (a *API) Handler() *fiber.App {
 	a.register("POST", "/v1/scan-plans", "createScanPlan", "Create a reusable scan plan", ScanPlan{}, a.createScanPlan)
 	a.register("GET", "/v1/scan-plans", "listScanPlans", "List scan plans", ScanPlan{}, a.listScanPlans)
 	a.register("GET", "/v1/scan-plans/:id", "getScanPlan", "Get a scan plan", ScanPlan{}, a.getScanPlan)
+	a.register("POST", "/v1/scan-plans/:id/preflight", "preflightScanPlan", "Resolve and freeze a scan preflight", Plan{}, a.preflightScanPlan)
 	a.register("PATCH", "/v1/scan-plans/:id", "updateScanPlan", "Update a scan plan", ScanPlan{}, a.patchScanPlan)
 	a.register("GET", "/v1/catalog/regions", "listRegions", "List provider regions", regionResponse{}, a.regions)
 	a.register("GET", "/v1/catalog/instance-types", "listInstanceTypes", "List provider instance types", instanceTypeResponse{}, a.instanceTypes)

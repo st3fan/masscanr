@@ -189,6 +189,7 @@ func (m *Manager) finish(ctx context.Context, id string) error {
 func (m *Manager) Routes(a *API, app *fiber.App) {
 	artifacts := artifactAPI{dir: m.Dir, base: a.Base, getRun: m.Store.GetRun}
 	a.register("POST", "/v1/scans/:id/start", "startScan", "Start a confirmed scan", Run{}, m.start)
+	a.register("POST", "/v1/scan-plans/:id/start", "startScanPlan", "Start a confirmed scan plan", Run{}, m.startScanPlan)
 	a.register("POST", "/v1/scans/:id/stop", "stopScan", "Request scan stop", Run{}, m.stop)
 	a.register("POST", "/v1/runs/:id/stop", "stopRun", "Request run stop", Run{}, m.stopRun)
 	a.register("GET", "/v1/runs", "listActiveRuns", "List active runs", Run{}, m.activeRuns)
@@ -202,6 +203,7 @@ func (m *Manager) Routes(a *API, app *fiber.App) {
 	a.register("GET", "/v1/runs/:id/inspection", "inspectRun", "Inspect saved run journal", inspection{}, artifacts.inspect)
 	a.register("GET", "/v1/runs/:id/exports/:format", "exportRun", "Download a complete export", nil, artifacts.export)
 	a.register("GET", "/v1/scans/:id/runs", "listScanRuns", "List runs for a scan", Run{}, func(c fiber.Ctx) error { return a.listTable(c, "runs", c.Params("id")) })
+	a.register("GET", "/v1/scan-plans/:id/runs", "listScanPlanRuns", "List runs for a scan plan", Run{}, func(c fiber.Ctx) error { return a.listTable(c, "runs", c.Params("id")) })
 }
 func (m *Manager) start(c fiber.Ctx) error {
 	m.mu.Lock()
@@ -243,4 +245,38 @@ func (d privateArtifact) Sanitize(s string) string {
 		s = strings.ReplaceAll(s, d.token, "[REDACTED]")
 	}
 	return s
+}
+
+// startScanPlan reserves an immutable preflight before launching its DBOS workflow.
+func (m *Manager) startScanPlan(c fiber.Ctx) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closing {
+		return respond(c, 503, map[string]string{"error": "shutting down"})
+	}
+	var in struct {
+		PreflightID string `json:"preflight_id"`
+		Confirm     bool   `json:"confirm"`
+	}
+	if err := decode(c, &in); err != nil {
+		return bad(c, err)
+	}
+	if in.PreflightID == "" {
+		return bad(c, fmt.Errorf("preflight_id is required"))
+	}
+	key := c.Get("Idempotency-Key")
+	if key == "" || len(key) > 200 {
+		return bad(c, fmt.Errorf("Idempotency-Key of 1..200 bytes required"))
+	}
+	if os.Getenv("VULTR_API_TOKEN") == "" {
+		return respond(c, 503, map[string]string{"error": "VULTR_API_TOKEN is required to start scans"})
+	}
+	run, err := m.Store.ReserveScanPlan(c.Context(), c.Params("id"), in.PreflightID, key, in.Confirm)
+	if err != nil {
+		return problem(c, err)
+	}
+	if err = m.Launch(run.ID); err != nil {
+		return respond(c, 503, map[string]string{"error": "workflow launch pending; retry with the same idempotency key"})
+	}
+	return respond(c, 202, run)
 }
