@@ -8,10 +8,13 @@ export type ListRuns =
   operations['listRuns']['responses'][200]['content']['application/vnd.api+json']
 export type ListResults =
   operations['listScanResults']['responses'][200]['content']['application/vnd.api+json']
+export type ListRunWorkers =
+  operations['listRunWorkers']['responses'][200]['content']['application/vnd.api+json']
 export type Target = ListTargets['data'][number]
 export type ScanPlan = ListScanPlans['data'][number]
 export type ScanRun = ListRuns['data'][number]
 export type ScanResult = ListResults['data'][number]
+export type RunWorker = ListRunWorkers['data'][number]
 export type Collection<T> = {
   data: T[]
   links?: Record<string, unknown>
@@ -162,6 +165,17 @@ export const api = {
     request<ListRuns>(url('/v1/runs', query), 'runs', true, signal),
   run: (id: string, signal?: AbortSignal) =>
     request<{ data: ScanRun }>(`/v1/runs/${encodeURIComponent(id)}`, 'runs', false, signal),
+  runWorkers: (
+    id: string,
+    query?: Record<string, string | number | undefined>,
+    signal?: AbortSignal,
+  ) =>
+    request<ListRunWorkers>(
+      url(`/v1/runs/${encodeURIComponent(id)}/workers`, query),
+      'run-workers',
+      true,
+      signal,
+    ),
   results: (query?: Record<string, string | number | undefined>, signal?: AbortSignal) =>
     request<ListResults>(url('/v1/scan-results', query), 'scan-results', true, signal),
 }
