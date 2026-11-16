@@ -8,7 +8,6 @@ import (
 	"github.com/st3fan/masscanr/internal/controller"
 	"github.com/st3fan/masscanr/internal/runapi"
 	"github.com/st3fan/masscanr/internal/scan"
-	"github.com/st3fan/masscanr/internal/scanfile"
 	"net/netip"
 	"time"
 )
@@ -17,7 +16,7 @@ type Definition struct {
 	Targets        []string `json:"targets"`
 	Backend        string   `json:"backend"`
 	Ports          string   `json:"ports"`
-	Shards         int      `json:"shards"`
+	Workers        int      `json:"workers"`
 	Rate           uint64   `json:"rate"`
 	Region         string   `json:"region"`
 	InstanceType   string   `json:"instance_type"`
@@ -27,10 +26,10 @@ type Definition struct {
 
 func Defaults() Definition {
 	c := scan.Defaults()
-	return Definition{Backend: c.Backend, Ports: c.PortSpec(), Shards: c.Shards, Rate: c.Rate, Region: c.Region, InstanceType: c.InstanceType, Timeout: "24h", CleanupTimeout: "5m"}
+	return Definition{Backend: c.Backend, Ports: c.PortSpec(), Workers: c.Workers, Rate: c.Rate, Region: c.Region, InstanceType: c.InstanceType, Timeout: "24h", CleanupTimeout: "5m"}
 }
 func (d Definition) Config() (scan.Config, controller.Timeouts, error) {
-	c := scan.Config{Backend: d.Backend, Shards: d.Shards, Rate: d.Rate, Region: d.Region, InstanceType: d.InstanceType}
+	c := scan.Config{Backend: d.Backend, Workers: d.Workers, Rate: d.Rate, Region: d.Region, InstanceType: d.InstanceType}
 	t := controller.DefaultTimeouts()
 	var err error
 	if c.RequestedTargets, err = scan.ParseRequestedTargets(d.Targets); err != nil {
@@ -41,9 +40,6 @@ func (d Definition) Config() (scan.Config, controller.Timeouts, error) {
 	}
 	if err = c.ValidateOptions(); err != nil {
 		return c, t, err
-	}
-	if c.Shards > scanfile.MaxShards {
-		return c, t, fmt.Errorf("too many shards")
 	}
 	if t.Scan, err = time.ParseDuration(d.Timeout); err != nil || t.Scan <= 0 {
 		return c, t, fmt.Errorf("invalid timeout")
@@ -57,7 +53,7 @@ func (d Definition) Config() (scan.Config, controller.Timeouts, error) {
 	}
 	intent := c.Intent()
 	intent.Targets = []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0")}
-	return c, t, b.Validate(intent, c.Shards)
+	return c, t, b.Validate(intent, 1)
 }
 
 type Plan = runapi.Preflight

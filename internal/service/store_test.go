@@ -51,7 +51,7 @@ func TestDefinitionValidation(t *testing.T) {
 	if _, _, e := d.Config(); e != nil {
 		t.Fatal(e)
 	}
-	d.Shards = 0
+	d.Workers = 0
 	if _, _, e := d.Config(); e == nil {
 		t.Fatal("accepted zero shards")
 	}

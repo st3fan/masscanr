@@ -1,9 +1,49 @@
-# Scan documents, schema 2 (with schema-1 reading)
+# Scan documents, schema 3 (with schema-1/2 reading)
 
 A `.scan` file is UTF-8 JSON Lines: one object and newline per record, one
 run per file. New files are private (`0600`) and exclusively created. Schema
 versions are independent of application versions. No credentials belong in
 these documents. Configuration records describe the effective authorized scope.
+
+## Schema 3: logical shards and worker slots
+
+New runs use schema 3. The header freezes the normalized effective scope,
+requested target selectors and AS-resolution provenance, canonical TCP ports,
+backend seed, requested and effective worker counts, logical `shard_count`,
+`partition_version: 1`, and `max_probes_per_shard: 1048576`. The partitioner
+assigns whole IP addresses and all selected ports to each logical shard. A
+shard has at most 1,048,576 address/port probes; it is derived on demand from
+the frozen target union. The header does not enumerate every shard. For
+256,000 IPs and 65,535 ports, the manifest has 16,000 logical shards.
+
+`worker` records identify physical instances by `slot` and `instance_id`.
+The slot owns a stable round-robin shard queue and may have several instances
+over time. Cleanup of the old owned instance must be confirmed before a
+replacement enters its slot. An unattributed instance found during cleanup
+uses slot zero and cannot execute a shard.
+
+`attempt` records identify a shard, slot, attempt number (1–3), instance ID,
+and `started`, `failed`, or `completed` phase. Retries scan the whole shard.
+Replay requires contiguous attempts and a completed queue prefix for each
+slot; it rejects skipped shards and attempts on another worker. `progress`
+and `finding` records name both shard and attempt. Findings are checked
+against that shard's exact frozen address scope, selected ports, and target
+attribution. The journal retains every accepted duplicate, including findings
+from failed attempts. PostgreSQL remains the deduplicated result query store.
+
+The `finished` record stores `shard_count` and `completed_shards` rather than
+an array of every shard outcome. `complete` requires every logical shard to
+have a completed attempt. Failed, cancelled, and interrupted runs preserve
+validated partial findings without implying that absent ports are closed.
+
+After a service restart, recovery validates the journal, reconciles run-owned
+instances, closes active attempts as failed, and rebuilds the database slot
+projection before continuation. An unterminated final line is saved in a
+private `.recovery-tail-*` sidecar before its unvalidated bytes are removed;
+complete records retain their original sequence numbers. A malformed complete
+record or unresolved cloud ownership prevents continuation.
+
+## Legacy schemas 1 and 2
 
 Every record has `type`, contiguous unsigned integer `seq` starting at 1,
 UTC RFC3339 `at`, and exactly one matching payload object:
@@ -55,7 +95,7 @@ Findings do not create extra records because several targets match; actual scann
 duplicates are preserved. The attribution index has at most one entry per prefix;
 each lookup checks only the 33 possible IPv4 prefix lengths.
 
-V8 reads both schemas 1 and 2; unknown schema numbers fail. Schema 1 did not define
+Readers accept schemas 1, 2, and 3; unknown schema numbers fail. Schema 1 did not define
 provenance: readers ignore such extension fields and do not invent historical
 identities or make network requests. Inspection identifies attribution as
 unavailable. CSV appends `target,prefix` with empty cells for schema 1; findings-only
@@ -64,10 +104,11 @@ JSONL omits unavailable fields. New direct results have `target` with no JSON
 carry these fields. Existing lifecycle, sequence and completion validation applies
 to both schemas.
 
-Each complete record, including its newline, is limited to 4 MiB. Shards are
-limited to 65,535, with at most that many additional reconciliation-only worker
-identities. Readers retain worker state and counts, not findings. These bounds
-also apply before provisioning. Unknown fields on recognized records may be
+Each complete record, including its newline, is limited to 4 MiB. Legacy
+native shards are limited to 65,535, with at most that many additional
+reconciliation-only worker identities. Schema 3 has no corresponding logical
+shard ceiling; its retryable units are bounded by probe count. Readers retain
+worker state and counts, not findings. Unknown fields on recognized records may be
 ignored; unknown types and unsupported schema versions fail. Duplicate JSON keys
 (including case variants), missing required values, excessive nesting, invalid
 UTF-8, sequence gaps and invalid state transitions are errors. Maximum JSON
@@ -111,6 +152,7 @@ corruption errors, never silently skipped. A live consumer must retain its
 unfinished line while awaiting more data; the offline replay API consumes a
 stable file/snapshot. Callbacks see provisional findings until replay succeeds.
 
-The document aids manual reconciliation but cannot guarantee cloud cleanup
-after controller loss. It is not a resume protocol. Manual edits, silent storage
-corruption and external activity cannot be authenticated from its contents.
+Schema 3 supports guarded continuation after controller loss but cannot
+guarantee cloud cleanup when ownership reconciliation fails. Manual edits,
+silent storage corruption and external activity cannot be authenticated from
+the journal alone.

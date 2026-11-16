@@ -15,7 +15,7 @@ import (
 
 // Overlay database columns in the same SELECT: persisted JSON is not authoritative
 // for admission, stop intent, or settlement (including V9 historical rows).
-const runSnapshotSQL = `data || jsonb_build_object('snapshot_version',2,'active',active,'settled',NOT active,'stop_requested',stop)`
+const runSnapshotSQL = `data || jsonb_build_object('snapshot_version',3,'active',active,'settled',NOT active,'stop_requested',stop,'summary',COALESCE(data->'summary','{}'::jsonb) || jsonb_build_object('ShardCount',shard_count,'CompletedShards',completed_shards))`
 
 func (s *Store) ActiveRuns(ctx context.Context) ([]Run, error) {
 	rows, err := s.Pool.Query(ctx, `SELECT `+runSnapshotSQL+` FROM masscanr.runs WHERE active ORDER BY id`)
@@ -100,6 +100,16 @@ func (m *Manager) stopRun(c fiber.Ctx) error {
 }
 
 func applyEvent(r *Run, e controller.Event, now time.Time) {
+	if e.ShardCount > 0 {
+		r.Summary.ShardCount = e.ShardCount
+	}
+	if e.CompletedShards > r.Summary.CompletedShards {
+		r.Summary.CompletedShards = e.CompletedShards
+	}
+	if e.Slot > 0 {
+		applyShardedEvent(r, e, now)
+		return
+	}
 	// Keep the original V9 field for existing clients.
 	if r.Events == nil {
 		r.Events = map[int]controller.Event{}
@@ -201,6 +211,79 @@ func applyEvent(r *Run, e controller.Event, now time.Time) {
 			}
 			if rank > priority {
 				phase, priority = candidate, rank
+			}
+		}
+		r.Phase = phase
+	}
+}
+
+func applyShardedEvent(r *Run, e controller.Event, now time.Time) {
+	if r.WorkerSnapshots == nil {
+		r.WorkerSnapshots = map[string]runapi.Worker{}
+	}
+	key := strconv.Itoa(e.Slot)
+	w := r.WorkerSnapshots[key]
+	w.Slot = e.Slot
+	w.Shard = 0
+	if e.AssignedShards > 0 {
+		w.AssignedShards = e.AssignedShards
+	}
+	if e.CompletedForSlot > w.CompletedShards {
+		w.CompletedShards = e.CompletedForSlot
+	}
+	if e.ID != "" && e.ID != w.ID {
+		w.ID = e.ID
+		w.InstanceCount++
+		w.Progress, w.ProgressAt, w.Found = nil, nil, nil
+	}
+	if e.IP != "" {
+		w.IP = e.IP
+	}
+	if e.Shard > 0 && e.State != "completed" {
+		if w.CurrentShard != e.Shard || w.Attempt != e.Attempt {
+			w.Progress, w.ProgressAt = nil, nil
+		}
+		w.CurrentShard, w.Attempt = e.Shard, e.Attempt
+	}
+	switch e.State {
+	case "deleting", "shutdown", "cleanup failed":
+		w.Cleanup, w.CleanupDetail = e.State, e.Detail
+	case "finding":
+	case "completed":
+		w.CurrentShard = 0
+		w.Progress, w.ProgressAt = nil, nil
+		if w.CompletedShards == w.AssignedShards {
+			w.State = "completed"
+		} else {
+			w.State = "ready"
+		}
+	default:
+		w.State = e.State
+		if e.Detail != "" {
+			w.Detail = e.Detail
+		}
+	}
+	if e.Progress != nil {
+		p := *e.Progress
+		w.Progress = &p
+		at := now
+		w.ProgressAt = &at
+	}
+	if e.Found != nil {
+		n := *e.Found
+		w.Found = &n
+	}
+	r.WorkerSnapshots[key] = w
+	if r.Phase != "cleanup" && r.Phase != "exporting" {
+		phase := "provisioning"
+		for _, slot := range r.WorkerSnapshots {
+			switch slot.State {
+			case "scanning", "retrying":
+				phase = "scanning"
+			case "preparing", "ready":
+				if phase == "provisioning" {
+					phase = "preparing"
+				}
 			}
 		}
 		r.Phase = phase

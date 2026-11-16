@@ -36,7 +36,7 @@ func TestResultBatchFollowsJournalSyncAndRetriesFailure(t *testing.T) {
 	}
 	defer journal.Close()
 	notify := journalEvents(journal, redactor, nil)
-	for shard := 1; shard <= cfg.Shards; shard++ {
+	for shard := 1; shard <= cfg.Workers; shard++ {
 		for _, phase := range []string{"provisioning", "booting", "preparing", "ready"} {
 			event := Event{Shard: shard, State: phase}
 			if phase != "provisioning" {

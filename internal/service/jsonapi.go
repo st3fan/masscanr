@@ -84,6 +84,8 @@ func resourceType(c fiber.Ctx, v any) string {
 		return "scan-plans"
 	case ScanResult:
 		return "scan-results"
+	case RunWorker:
+		return "run-workers"
 	case Plan:
 		return "scan-preflights"
 	case Run:
@@ -204,7 +206,7 @@ func respondJSONAPI(c fiber.Ctx, status int, v any) error {
 			items = append(items, r)
 		}
 		doc := map[string]any{"data": items, "links": map[string]any{"self": string(c.Request().URI().RequestURI())}}
-		if c.Path() == "/v1/targets" || c.Path() == "/v1/scan-plans" || strings.HasSuffix(c.Path(), "/runs") && strings.HasPrefix(c.Path(), "/v1/scan-plans/") {
+		if c.Path() == "/v1/targets" || c.Path() == "/v1/scan-plans" || strings.HasSuffix(c.Path(), "/runs") && strings.HasPrefix(c.Path(), "/v1/scan-plans/") || strings.HasSuffix(c.Path(), "/workers") && strings.HasPrefix(c.Path(), "/v1/runs/") {
 			limit, _ := strconv.Atoi(c.Query("limit", "100"))
 			if len(items) == limit && limit > 0 {
 				q := url.Values{}

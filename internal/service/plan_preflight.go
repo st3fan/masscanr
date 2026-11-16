@@ -8,6 +8,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/jackc/pgx/v5"
 	"github.com/st3fan/masscanr/internal/backend/registry"
+	"github.com/st3fan/masscanr/internal/controller"
 	"github.com/st3fan/masscanr/internal/ripe"
 	"github.com/st3fan/masscanr/internal/scan"
 )
@@ -42,8 +43,12 @@ func (a *API) preflightScanPlan(c fiber.Ctx) error {
 	}
 	backend, err := registry.Resolve(cfg.Backend)
 	if err == nil {
-		err = backend.Validate(cfg.Intent(), cfg.Shards)
+		err = backend.Validate(cfg.Intent(), 1)
 	}
+	if err != nil {
+		return bad(c, err)
+	}
+	manifest, err := scan.Partition(cfg.Targets, len(cfg.Ports))
 	if err != nil {
 		return bad(c, err)
 	}
@@ -57,6 +62,7 @@ func (a *API) preflightScanPlan(c fiber.Ctx) error {
 		ScanPlanID: plan.ID, ScanPlanRevision: plan.Revision,
 		ExpiresAt: time.Now().UTC().Add(10 * time.Minute),
 		Config:    cfg, Timeouts: timeouts, Workload: workload,
+		ShardCount: manifest.Count, EffectiveWorkers: min(cfg.Workers, int(manifest.Count)), MaxProbesPerShard: scan.MaxProbesPerShard,
 		RequiresConfirmation: workload.RequiresConfirmation(),
 	}
 	err = a.Store.tx(c.Context(), func(tx pgx.Tx) error {
@@ -120,12 +126,12 @@ func (s *Store) ReserveScanPlan(ctx context.Context, scanPlanID, preflightID, ke
 		if active {
 			return ErrConflict
 		}
-		run = Run{SnapshotVersion: 2, Active: true, ID: newID(), TargetID: target.ID, ScanPlanID: plan.ID, Plan: preflight, Phase: "accepted", CreatedAt: time.Now().UTC()}
+		run = Run{SnapshotVersion: 3, Active: true, ID: newID(), TargetID: target.ID, ScanPlanID: plan.ID, Plan: preflight, Phase: "accepted", CreatedAt: time.Now().UTC(), Summary: controller.Summary{ShardCount: preflight.ShardCount}}
 		data, e := json.Marshal(run)
 		if e != nil {
 			return e
 		}
-		_, e = tx.Exec(ctx, `INSERT INTO masscanr.runs(id,target_id,scan_plan_id,request_key,data) VALUES($1,$2,$3,$4,$5)`, run.ID, target.ID, plan.ID, key, data)
+		_, e = tx.Exec(ctx, `INSERT INTO masscanr.runs(id,target_id,scan_plan_id,request_key,workflow_id,shard_count,requested_workers,effective_workers,data) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, run.ID, target.ID, plan.ID, key, run.ID, int64(preflight.ShardCount), preflight.Config.Workers, preflight.EffectiveWorkers, data)
 		return e
 	})
 	return run, err

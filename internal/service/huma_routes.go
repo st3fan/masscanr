@@ -90,7 +90,7 @@ func (a *API) register(method, path, operationID, summary string, model any, han
 			op.Parameters = append(op.Parameters, p)
 		}
 	}
-	if operationID == "listScanPlanRuns" || operationID == "listTargets" || operationID == "listScanPlans" {
+	if operationID == "listScanPlanRuns" || operationID == "listTargets" || operationID == "listScanPlans" || operationID == "listRunWorkers" {
 		op.Parameters = append(op.Parameters, &huma.Param{Name: "limit", In: "query", Schema: &huma.Schema{Type: "integer", Minimum: floatPtr(1), Maximum: floatPtr(1000)}}, &huma.Param{Name: "after", In: "query", Schema: &huma.Schema{Type: "string"}})
 	}
 	if operationID == "listScanResults" {
@@ -169,7 +169,7 @@ func (a *API) register(method, path, operationID, summary string, model any, han
 				example["data"] = []any{exampleResource(typ, model)}
 			}
 			if operationID == "listRuns" {
-				example["meta"] = map[string]int{"snapshot_version": 2}
+				example["meta"] = map[string]int{"snapshot_version": 3}
 			}
 			op.Responses[strconv.Itoa(status)] = &huma.Response{Description: "JSON:API resource document", Content: map[string]*huma.MediaType{jsonAPIMediaType: {Schema: schema, Example: example}}}
 		}
@@ -223,6 +223,8 @@ func resourceTypeForPath(path, operationID string) string {
 		return "instance-types"
 	case "inspectRun":
 		return "inspections"
+	case "listRunWorkers":
+		return "run-workers"
 	}
 	if strings.Contains(path, "/runs") || strings.HasSuffix(path, "/start") || strings.HasSuffix(path, "/stop") {
 		return "runs"

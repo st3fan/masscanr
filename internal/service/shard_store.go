@@ -6,17 +6,13 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/st3fan/masscanr/internal/controller"
 	"github.com/st3fan/masscanr/internal/scan"
 	"github.com/st3fan/masscanr/internal/scanfile"
 )
 
 // ShardLease is the durable identity of one whole-shard attempt.
-type ShardLease struct {
-	Index      uint64
-	Slot       int
-	Attempt    int
-	InstanceID string
-}
+type ShardLease = controller.ShardLease
 
 type WorkerSlotState struct {
 	Slot            int
@@ -25,6 +21,39 @@ type WorkerSlotState struct {
 	NextShard       uint64
 	InstanceID      string
 	State           string
+}
+
+// RunWorker is one physical instance in a stable worker slot.
+type RunWorker struct {
+	ID        string    `json:"id"`
+	RunID     string    `json:"run_id"`
+	Slot      int       `json:"slot"`
+	IP        string    `json:"ip"`
+	State     string    `json:"state"`
+	Cleanup   string    `json:"cleanup"`
+	Detail    string    `json:"detail,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (s *Store) ListShardWorkers(ctx context.Context, runID, after string, limit int) ([]RunWorker, error) {
+	if limit < 1 || limit > 1000 {
+		return nil, fmt.Errorf("limit must be 1..1000")
+	}
+	rows, err := s.Pool.Query(ctx, `SELECT instance_id,run_id,slot,ip,state,cleanup,detail,created_at,updated_at FROM masscanr.run_workers WHERE run_id=$1 AND instance_id>$2 ORDER BY instance_id LIMIT $3`, runID, after, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []RunWorker{}
+	for rows.Next() {
+		var w RunWorker
+		if err = rows.Scan(&w.ID, &w.RunID, &w.Slot, &w.IP, &w.State, &w.Cleanup, &w.Detail, &w.CreatedAt, &w.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, w)
+	}
+	return out, rows.Err()
 }
 
 // InitShardRun persists only slot cursors. Unstarted shard scopes remain
@@ -36,11 +65,11 @@ func (s *Store) InitShardRun(ctx context.Context, runID string, manifest scan.Ma
 	effective := min(requested, int(manifest.Count))
 	var epoch int64
 	err := s.tx(ctx, func(tx pgx.Tx) error {
-		var oldCount int64
-		if e := tx.QueryRow(ctx, `SELECT shard_count FROM masscanr.runs WHERE id=$1 AND active AND NOT stop FOR UPDATE`, runID).Scan(&oldCount); e != nil {
+		var oldCount, oldEpoch int64
+		if e := tx.QueryRow(ctx, `SELECT shard_count,execution_epoch FROM masscanr.runs WHERE id=$1 AND active AND NOT stop FOR UPDATE`, runID).Scan(&oldCount, &oldEpoch); e != nil {
 			return e
 		}
-		if oldCount != 0 {
+		if oldEpoch != 0 || oldCount != 0 && oldCount != int64(manifest.Count) {
 			return ErrConflict
 		}
 		if e := tx.QueryRow(ctx, `UPDATE masscanr.runs SET shard_count=$2,requested_workers=$3,effective_workers=$4,execution_epoch=1 WHERE id=$1 RETURNING execution_epoch`, runID, int64(manifest.Count), requested, effective).Scan(&epoch); e != nil {
@@ -103,6 +132,9 @@ func (s *Store) RestoreShardRun(ctx context.Context, runID string, state scanfil
 			}
 		}
 		for _, worker := range state.Workers {
+			if worker.Slot == 0 && worker.Cleanup == "complete" {
+				continue // An ambiguously created worker has no assigned slot.
+			}
 			if worker.Slot < 1 || worker.Slot > workers {
 				return fmt.Errorf("journal worker slot is invalid")
 			}
@@ -217,8 +249,12 @@ func (s *Store) BeginShardAttempt(ctx context.Context, runID string, epoch int64
 		}
 		var count int64
 		var workers int
-		if e := tx.QueryRow(ctx, `SELECT shard_count,effective_workers FROM masscanr.runs WHERE id=$1`, runID).Scan(&count, &workers); e != nil {
+		var stopped bool
+		if e := tx.QueryRow(ctx, `SELECT shard_count,effective_workers,stop FROM masscanr.runs WHERE id=$1`, runID).Scan(&count, &workers, &stopped); e != nil {
 			return e
+		}
+		if stopped {
+			return ErrConflict
 		}
 		var next int64
 		var current string
@@ -285,7 +321,7 @@ func (s *Store) FinishShardAttempt(ctx context.Context, runID string, epoch int6
 			status = "completed"
 		}
 		now := time.Now().UTC()
-		result, e := tx.Exec(ctx, `UPDATE masscanr.run_shard_attempts SET state=$4,detail=$5,finished_at=$6 WHERE run_id=$1 AND shard_index=$2 AND attempt=$3 AND state='running'`, runID, int64(lease.Index), lease.Attempt, status, detail, now)
+		result, e := tx.Exec(ctx, `UPDATE masscanr.run_shard_attempts SET state=$4,detail=$5,finished_at=$6,journal_seq=$7 WHERE run_id=$1 AND shard_index=$2 AND attempt=$3 AND state='running'`, runID, int64(lease.Index), lease.Attempt, status, detail, now, int64(journalSeq))
 		if e != nil {
 			return e
 		}
@@ -311,8 +347,7 @@ func (s *Store) FinishShardAttempt(ctx context.Context, runID string, epoch int6
 				return e
 			}
 		}
-		_, e = tx.Exec(ctx, `UPDATE masscanr.runs SET result_checkpoint=GREATEST(result_checkpoint,$2) WHERE id=$1`, runID, int64(journalSeq))
-		return e
+		return nil
 	})
 }
 
@@ -356,11 +391,11 @@ func (s *Store) WorkerSlots(ctx context.Context, runID string) ([]WorkerSlotStat
 
 func checkShardEpoch(ctx context.Context, tx pgx.Tx, runID string, epoch int64) error {
 	var current int64
-	var active, stopped bool
-	if err := tx.QueryRow(ctx, `SELECT execution_epoch,active,stop FROM masscanr.runs WHERE id=$1`, runID).Scan(&current, &active, &stopped); err != nil {
+	var active bool
+	if err := tx.QueryRow(ctx, `SELECT execution_epoch,active FROM masscanr.runs WHERE id=$1`, runID).Scan(&current, &active); err != nil {
 		return err
 	}
-	if !active || stopped || current != epoch || epoch < 1 {
+	if !active || current != epoch || epoch < 1 {
 		return ErrConflict
 	}
 	return nil

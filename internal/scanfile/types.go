@@ -46,7 +46,7 @@ func (c Config) Validate() error {
 	if err != nil {
 		return err
 	}
-	cfg := scan.Config{Backend: c.Backend, Targets: c.Targets, Ports: ports, Shards: c.Shards, Rate: c.Rate, Region: c.Region, InstanceType: c.InstanceType}
+	cfg := scan.Config{Backend: c.Backend, Targets: c.Targets, Ports: ports, Workers: c.Shards, Rate: c.Rate, Region: c.Region, InstanceType: c.InstanceType}
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
@@ -136,8 +136,8 @@ type Final struct {
 	CleanupOutcome           string    `json:"cleanup_outcome"`
 	Found                    uint64    `json:"found"`
 	Shards                   []Outcome `json:"shards"`
-	CompletedShards          uint64    `json:"completed_shards,omitempty"`
-	ShardCount               uint64    `json:"shard_count,omitempty"`
+	CompletedShards          uint64    `json:"completed_shards"`
+	ShardCount               uint64    `json:"shard_count"`
 	Undeleted                []string  `json:"undeleted"`
 	ReconciliationUnresolved bool      `json:"reconciliation_unresolved"`
 	Error                    string    `json:"error,omitempty"`

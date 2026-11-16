@@ -18,13 +18,16 @@ checked for a native rejection rather than silently dropping work.
 
 ## Command policy
 
-- Exactly one sender thread and one probe per IP/port pair. Common shard i/N
-  becomes `--shards N --shard i-1` with the same seed on every worker.
+- Exactly one sender thread and one probe per IP/port pair. The current
+  controller derives probe-bounded logical shard scopes and executes each
+  scope with native `--shards 1 --shard 0`. The same run seed is retained
+  across workers and retries. Native multi-shard dry-run tests remain useful
+  compatibility evidence for the backend itself.
 - Seeds use 0..9223372036854775807, the native signed long-long parser's range.
   Generate within that range for ZMap, retain the effective seed unchanged.
 - Rate is explicit, 1..2147483647 packets/second per worker (native signed int).
   Ports are normalized unique TCP ports 0..65535; up to all 65536 are supported.
-- Native shard range is 1..65535. Require shards <= eligible IP/port pairs;
+- Native shard range is 1..65535. Require native shards <= eligible IP/port pairs;
   for small permutation groups (p=257), additionally require shards < 256
   to avoid the upstream iterator assertion. Never manufacture empty workers.
 - `--config /dev/null` excludes ambient config. A private run-owned allowlist

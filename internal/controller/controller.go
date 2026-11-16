@@ -20,6 +20,11 @@ import (
 
 type Event struct {
 	Shard                 int
+	Slot, Attempt         int
+	ShardCount            uint64
+	CompletedShards       uint64
+	AssignedShards        uint64
+	CompletedForSlot      uint64
 	ID, IP, State, Detail string
 	Progress              *scan.Progress
 	RunID                 string
@@ -34,6 +39,8 @@ type Summary struct {
 	RunID                       string
 	Seed                        uint64
 	Found                       uint64
+	ShardCount                  uint64
+	CompletedShards             uint64
 	Undeleted                   []string
 	ScanOutcome, CleanupOutcome string
 	ReconciliationUnresolved    bool
@@ -48,12 +55,15 @@ func DefaultTimeouts() Timeouts {
 }
 
 type Controller struct {
-	RunID      string // Optional service-assigned durable identity.
-	Backend    backend.Backend
-	Provider   cloud.Provider
-	Runner     remote.Runner
-	Timeouts   Timeouts
-	ResultSink ResultSink
+	RunID            string // Optional service-assigned durable identity.
+	Backend          backend.Backend
+	Provider         cloud.Provider
+	Runner           remote.Runner
+	Timeouts         Timeouts
+	ResultSink       ResultSink
+	ShardStore       ShardStore
+	Epoch            int64 // Nonzero when a validated journal was restored after restart.
+	ExpectedIdentity scan.Identity
 }
 
 type tracked struct {
@@ -77,7 +87,7 @@ func (c *Controller) Run(ctx context.Context, cfg scan.Config, out io.Writer, em
 		return summary, fmt.Errorf("configured backend differs from selected backend")
 	}
 	summary.Identity.Name = c.Backend.Name()
-	if err = c.Backend.Validate(cfg.Intent(), cfg.Shards); err != nil {
+	if err = c.Backend.Validate(cfg.Intent(), cfg.Workers); err != nil {
 		return summary, err
 	}
 	for _, d := range []time.Duration{c.Timeouts.Create, c.Timeouts.Ready, c.Timeouts.Prepare, c.Timeouts.Scan, c.Timeouts.Cleanup, c.Timeouts.Delete, c.Timeouts.Poll} {
@@ -118,9 +128,9 @@ func (c *Controller) Run(ctx context.Context, cfg scan.Config, out io.Writer, em
 		}
 	}()
 	notify := journalEvents(journal, redact, emit)
-	plans := make([]backend.Plan, cfg.Shards)
+	plans := make([]backend.Plan, cfg.Workers)
 	for i := range plans {
-		plans[i], err = c.Backend.Build(cfg.Intent(), scan.Shard{Index: i + 1, Total: cfg.Shards}, summary.Seed)
+		plans[i], err = c.Backend.Build(cfg.Intent(), scan.Shard{Index: i + 1, Total: cfg.Workers}, summary.Seed)
 		if err != nil {
 			return summary, err
 		}
@@ -168,7 +178,7 @@ func (c *Controller) Run(ctx context.Context, cfg scan.Config, out io.Writer, em
 	if err != nil {
 		return summary, fmt.Errorf("provider validation: %w", err)
 	}
-	for shard := 1; shard <= cfg.Shards; shard++ {
+	for shard := 1; shard <= cfg.Workers; shard++ {
 		if ctx.Err() != nil {
 			return summary, ctx.Err()
 		}

@@ -17,7 +17,7 @@ func (c Config) ValidateSharded() (scan.Manifest, error) {
 	if err != nil {
 		return scan.Manifest{}, err
 	}
-	cfg := scan.Config{Backend: c.Backend, Targets: c.Targets, Ports: ports, Shards: 1, Rate: c.Rate, Region: c.Region, InstanceType: c.InstanceType}
+	cfg := scan.Config{Backend: c.Backend, Targets: c.Targets, Ports: ports, Workers: 1, Rate: c.Rate, Region: c.Region, InstanceType: c.InstanceType}
 	if err = cfg.Validate(); err != nil {
 		return scan.Manifest{}, err
 	}
@@ -155,8 +155,11 @@ func (s *State) applySharded(r Record) error {
 	switch r.Type {
 	case "worker":
 		w := r.Worker
-		if w == nil || w.InstanceID == "" || w.Slot < 1 || w.Slot > s.Header.Config.Workers || w.Phase == "" || !slices.Contains([]string{"pending", "deleting", "incomplete", "complete"}, w.Cleanup) || w.Shard != 0 {
+		if w == nil || w.InstanceID == "" || w.Slot < 0 || w.Slot > s.Header.Config.Workers || w.Phase == "" || !slices.Contains([]string{"pending", "deleting", "incomplete", "complete"}, w.Cleanup) || w.Shard != 0 {
 			return fmt.Errorf("invalid physical worker")
+		}
+		if w.Slot == 0 && w.Cleanup == "pending" {
+			return fmt.Errorf("unattributed worker must be under reconciliation")
 		}
 		if w.Cleanup == "complete" && s.v3.activeSlot[w.Slot] != 0 {
 			return fmt.Errorf("worker cleanup during active attempt")

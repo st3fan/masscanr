@@ -134,7 +134,8 @@ def arguments(argv=None):
     p.add_argument("--server", default="http://127.0.0.1:18080")
     p.add_argument("--ports", help="TCP ports/ranges; omitted uses service defaults")
     p.add_argument("--backend", choices=("masscan", "zmap"))
-    p.add_argument("--shards", type=int)
+    p.add_argument("--workers", "--shards", dest="workers", type=int,
+                   help="requested worker instances; reduced when fewer logical shards exist")
     p.add_argument("--rate", type=int, help="packets/sec per worker")
     p.add_argument("--region")
     p.add_argument("--instance-type")
@@ -156,8 +157,8 @@ def arguments(argv=None):
         valid = False
     if not valid:
         p.error("--server must be an HTTP(S) URL without credentials, query, or fragment")
-    if any(v is not None and v <= 0 for v in (a.shards, a.rate)):
-        p.error("--shards and --rate must be positive")
+    if any(v is not None and v <= 0 for v in (a.workers, a.rate)):
+        p.error("--workers and --rate must be positive")
     return a
 
 
@@ -176,7 +177,7 @@ def run(a):
     if not isinstance(settings, dict):
         raise Failure("create scan plan: missing settings")
     changed = False
-    for field in ("ports", "backend", "shards", "rate", "region", "instance_type", "cleanup_timeout"):
+    for field in ("ports", "backend", "workers", "rate", "region", "instance_type", "cleanup_timeout"):
         if getattr(a, field) is not None:
             settings[field] = getattr(a, field)
             changed = True

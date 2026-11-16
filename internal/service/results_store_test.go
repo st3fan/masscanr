@@ -138,7 +138,7 @@ func journalForRun(t *testing.T, run Run) []byte {
 	cfg := run.Plan.Config
 	var out bytes.Buffer
 	timeouts := map[string]string{"create": "1s", "ready": "1s", "prepare": "1s", "scan": "1s", "cleanup": "1s", "delete": "1s", "poll": "1s"}
-	header := scanfile.Header{Format: scanfile.Format, Schema: scanfile.Schema, RunID: run.ID, CreatedAt: time.Now().UTC(), ControllerVersion: "fixture", Label: "masscanr", OwnershipTag: "masscanr-run-" + run.ID, Config: scanfile.Config{RequestedTargets: cfg.RequestedTargets, Targets: cfg.Targets, Ports: cfg.PortSpec(), Backend: cfg.Backend, Seed: "7", Shards: cfg.Shards, Rate: cfg.Rate, Provider: "vultr", Region: cfg.Region, InstanceType: cfg.InstanceType, Timeouts: timeouts, Output: run.ID + ".scan"}}
+	header := scanfile.Header{Format: scanfile.Format, Schema: scanfile.Schema, RunID: run.ID, CreatedAt: time.Now().UTC(), ControllerVersion: "fixture", Label: "masscanr", OwnershipTag: "masscanr-run-" + run.ID, Config: scanfile.Config{RequestedTargets: cfg.RequestedTargets, Targets: cfg.Targets, Ports: cfg.PortSpec(), Backend: cfg.Backend, Seed: "7", Shards: cfg.Workers, Rate: cfg.Rate, Provider: "vultr", Region: cfg.Region, InstanceType: cfg.InstanceType, Timeouts: timeouts, Output: run.ID + ".scan"}}
 	writer, err := scanfile.NewWriter(&out, header, nil)
 	if err != nil {
 		t.Fatal(err)

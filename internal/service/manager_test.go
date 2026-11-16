@@ -100,7 +100,7 @@ func reserveFixture(t *testing.T, s *Store, name string) Run {
 		t.Fatal(err)
 	}
 	settings := DefaultScanPlanSettings()
-	settings.Backend, settings.Shards, settings.Ports = name, 1, "80"
+	settings.Backend, settings.Workers, settings.Ports = name, 1, "80"
 	scanPlan, err := s.CreateScanPlan(ctx, "Fixture plan", target.ID, settings)
 	if err != nil {
 		t.Fatal(err)

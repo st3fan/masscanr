@@ -45,10 +45,10 @@ func TestTargets(t *testing.T) {
 func TestDefaults(t *testing.T) {
 	c := Defaults()
 	c.Targets, _ = ParseTargets([]string{"192.0.2.0/24"})
-	if len(c.Ports) != 100 || c.Shards != 2 || c.Rate != 500000 || c.Region != "atl" || c.InstanceType != "vc2-1c-1gb" {
+	if len(c.Ports) != 100 || c.Workers != 2 || c.Rate != 500000 || c.Region != "atl" || c.InstanceType != "vc2-1c-1gb" {
 		t.Fatal(c)
 	}
-	c.Shards = 0
+	c.Workers = 0
 	if err := c.Validate(); err == nil {
 		t.Fatal("accepted zero workers")
 	}

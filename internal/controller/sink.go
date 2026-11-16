@@ -12,7 +12,7 @@ import (
 // accept is the sole authoritative finding path for every backend. Preserve
 // accepted order and duplicates, and attribute each normalized record to a shard.
 func (r *results) accept(shard int, f scan.Finding) error {
-	if shard < 1 || shard > r.cfg.Shards {
+	if shard < 1 || shard > r.cfg.Workers {
 		return fmt.Errorf("invalid finding shard %d", shard)
 	}
 	if f.Protocol != "tcp" || f.State != "open" {

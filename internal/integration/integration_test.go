@@ -327,11 +327,11 @@ func TestMasscanConfiguration(t *testing.T) {
 		t.Skip("set MASSCAN_TEST_BINARY to validate against native masscan --echo")
 	}
 	cfg := scan.Defaults()
-	cfg.Shards = 3
+	cfg.Workers = 3
 	cfg.Ports, _ = scan.ParsePorts("22,80,443,8000-8100")
 	cfg.Targets, _ = scan.ParseTargets([]string{"192.0.2.0/24"})
-	for shard := 1; shard <= cfg.Shards; shard++ {
-		args, _ := masscan.Arguments(cfg.Intent(), scan.Shard{Index: shard, Total: cfg.Shards}, 42)
+	for shard := 1; shard <= cfg.Workers; shard++ {
+		args, _ := masscan.Arguments(cfg.Intent(), scan.Shard{Index: shard, Total: cfg.Workers}, 42)
 		args = append(args, "--echo")
 		data, err := exec.CommandContext(t.Context(), binary, args...).CombinedOutput()
 		if err != nil {
@@ -372,7 +372,7 @@ func TestMasscanListOutput(t *testing.T) {
 	}
 	cfg := scan.Defaults()
 	cfg.Targets, _ = scan.ParseTargets([]string{"192.0.2.0/24"})
-	args, _ := masscan.Arguments(cfg.Intent(), scan.Shard{Index: 1, Total: cfg.Shards}, 42)
+	args, _ := masscan.Arguments(cfg.Intent(), scan.Shard{Index: 1, Total: cfg.Workers}, 42)
 	args = append(args, "--readscan", path)
 	var output, diagnostics bytes.Buffer
 	command := exec.CommandContext(t.Context(), program, args...)

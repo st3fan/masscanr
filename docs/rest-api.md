@@ -26,8 +26,11 @@ journal still records every accepted observation, including duplicates, and is
 the evidence source for rebuilding results after an interrupted database write.
 Completed scans also produce saved CSV and JSONL exports. Preserve both the
 database and artifact directory if you need historical runs. DBOS Go remains
-pinned to v1.8.0 and the workflow version is `masscanr-v9-1`; recovery never
-repeats an attempted cloud scan.
+pinned to v1.8.0 and the workflow version is `masscanr-v10-1`. On restart,
+the service validates the journal, reconciles only run-owned workers, and
+retries unfinished whole shards within their two-retry budget. An invalid
+journal or unresolved worker ownership leaves the run incomplete and triggers
+cleanup instead of continuation.
 
 ## JSON:API and docs
 
@@ -64,7 +67,7 @@ Create a Target and ScanPlan:
 
 The example addresses are documentation-only. Omitted ScanPlan `settings` use
 server defaults. A supplied settings object must contain valid values for all
-settings (`backend`, `ports`, `provider`, `shards`, `rate`, `region`,
+settings (`backend`, `ports`, `provider`, `workers`, `rate`, `region`,
 `instance_type`, `timeout`, `cleanup_timeout`). Only `vultr` is supported as a
 provider today. `PATCH` accepts a partial settings object and a matching
 `revision`; it retains omitted fields and increments the revision:
@@ -93,6 +96,7 @@ preflight. An active run keeps its frozen scope and configuration.
 | `GET /v1/runs?active=true` | 200 current active run list and snapshot version |
 | `GET /v1/runs` | 200 recent run history across all plans, newest first |
 | `GET /v1/runs/{id}` | 200 run snapshot |
+| `GET /v1/runs/{id}/workers` | 200 paginated physical worker instance history |
 | `POST /v1/runs/{id}/stop` | 202 stop request for the exact run |
 | `GET /v1/scan-results` | 200 positive open-port results with coverage metadata |
 | `GET /v1/runs/{id}/inspection` | 200 validated journal inspection |
@@ -100,7 +104,7 @@ preflight. An active run keeps its frozen scope and configuration.
 | `GET /v1/catalog/regions` | 200 region catalog |
 | `GET /v1/catalog/instance-types?region=atl` | 200 instance catalog |
 
-Target, ScanPlan, run-history, per-plan run, and result lists accept `limit` (1–1000,
+Target, ScanPlan, run-history, per-plan run, physical worker, and result lists accept `limit` (1–1000,
 default 100) and an opaque `after` cursor from `links.next`. Run history accepts
 `filter[target_id]`, `filter[scan_plan_id]`, and `filter[phase]`. Results also accept
 `filter[run_id]`, `filter[target_id]`, `filter[ip]` (IPv4), and `filter[port]`
@@ -116,7 +120,8 @@ credentials or shutdown returns 503.
 
 `POST /v1/scan-plans/{id}/preflight` resolves AS selectors, computes the effective
 scope and workload, and saves a ten-minute preflight. Check `config.Targets`,
-`config.RequestedTargets`, `workload`, and `requires_confirmation` in its
+`config.RequestedTargets`, `workload`, `shard_count`, `effective_workers`,
+`max_probes_per_shard`, and `requires_confirmation` in its
 attributes before starting. Resolution provenance and all effective settings are
 frozen in the preflight and copied into the run. Starting does not do another
 RIPE lookup. More than 1,000,000 planned probes require explicit `confirm:true`.
@@ -132,11 +137,20 @@ server returns the same run for an accepted retry, including after completion.
 Only one run can be active globally, including cleanup. A 202 means accepted,
 not that cloud provisioning or scanning succeeded.
 
-Every run includes `snapshot_version:2`, `active`, `settled`, `stop_requested`,
+Every run includes `snapshot_version:3`, `active`, `settled`, `stop_requested`,
 `worker_snapshots`, `target_id`, `scan_plan_id`, and immutable `preflight` in its
 attributes. `summary.ScanOutcome` and `summary.CleanupOutcome` are separate.
-Progress and finding counts are cumulative; missing telemetry is unknown.
-`GET /v1/runs?active=true` includes `meta.snapshot_version:2` and an empty
+Logical shards contain at most 1,048,576 address/port probes and are assigned
+round-robin to stable worker slots. Requested workers are reduced to the shard
+count when there is less work than workers. `summary.CompletedShards` and
+`summary.ShardCount` report total completed shard progress. Each
+`worker_snapshots` entry reports its slot, current shard and attempt, and
+completed/assigned shard counts. Current-shard percent is unknown until a
+scanner reports it. Physical replacements retain the slot's queue; the
+`/workers` endpoint records each instance separately. Finding counts include
+duplicate journal observations, while results remain deduplicated. Missing
+telemetry is unknown.
+`GET /v1/runs?active=true` includes `meta.snapshot_version:3` and an empty
 `data` array while idle. Stop targets one run ID; a settled run is a no-op.
 
 ## Results, evidence, and coverage
@@ -154,8 +168,8 @@ A non-complete run has unconfirmed coverage, including when it has findings.
 On finalization or recovery, the server validates and can rebuild PostgreSQL
 results from the journal. Rebuilds are atomic: a corrupt later record does not
 publish partially replayed rows. Missing or invalid evidence marks result state
-`error`; the run and its cleanup remain inspectable. Recovery does not restart
-scanning. The journal remains the raw evidence for duplicate and partial
+`error`; the run and its cleanup remain inspectable. Validated unfinished
+shards can resume after owned-worker reconciliation. The journal remains the raw evidence for duplicate and partial
 observations; normalized PostgreSQL rows are the query representation.
 
 Inspection at `/v1/runs/{id}/inspection` replays the saved journal for that run,

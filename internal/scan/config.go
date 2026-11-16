@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	DefaultShards              = 2
+	DefaultWorkers             = 2
 	DefaultRate         uint64 = 500000
 	DefaultRegion              = "atl"
 	DefaultInstanceType        = "vc2-1c-1gb"
@@ -30,7 +30,7 @@ type Config struct {
 	Targets          []netip.Prefix
 	RequestedTargets []Target
 	Ports            []uint16
-	Shards           int
+	Workers          int
 	Rate             uint64
 	Region           string
 	InstanceType     string
@@ -38,7 +38,7 @@ type Config struct {
 
 func Defaults() Config {
 	ports, _ := ParsePorts(TopPorts)
-	return Config{Backend: "masscan", Ports: ports, Shards: DefaultShards, Rate: DefaultRate, Region: DefaultRegion, InstanceType: DefaultInstanceType}
+	return Config{Backend: "masscan", Ports: ports, Workers: DefaultWorkers, Rate: DefaultRate, Region: DefaultRegion, InstanceType: DefaultInstanceType}
 }
 
 // ParseTargets masks host bits and removes duplicate/contained prefixes.
@@ -112,8 +112,8 @@ func (c Config) ValidateOptions() error {
 	if len(c.Ports) == 0 {
 		return fmt.Errorf("provide at least one TCP port")
 	}
-	if c.Shards < 1 {
-		return fmt.Errorf("shards must be positive")
+	if c.Workers < 1 {
+		return fmt.Errorf("workers must be positive")
 	}
 	if c.Rate == 0 {
 		return fmt.Errorf("rate must be positive (packets/second per worker)")

@@ -19,6 +19,7 @@ var applicationRoutes = []string{
 	"GET /v1/runs/:id",
 	"GET /v1/runs/:id/exports/:format",
 	"GET /v1/runs/:id/inspection",
+	"GET /v1/runs/:id/workers",
 	"GET /v1/scan-plans",
 	"GET /v1/scan-plans/:id",
 	"GET /v1/scan-plans/:id/runs",

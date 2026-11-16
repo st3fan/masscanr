@@ -23,7 +23,7 @@ func TestFindingSink(t *testing.T) {
 	}
 	defer journal.Close()
 	notify := journalEvents(journal, &redactor{}, nil)
-	for i := 1; i <= cfg.Shards; i++ {
+	for i := 1; i <= cfg.Workers; i++ {
 		for _, phase := range []string{"provisioning", "booting", "preparing", "ready"} {
 			e := Event{Shard: i, State: phase}
 			if phase != "provisioning" {

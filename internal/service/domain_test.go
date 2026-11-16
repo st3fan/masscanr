@@ -43,7 +43,7 @@ func TestScanPlanSettingsRequireSupportedProviderAndValidOptions(t *testing.T) {
 		t.Fatal("accepted unsupported provider")
 	}
 	settings.Provider = "vultr"
-	settings.Shards = 0
+	settings.Workers = 0
 	if _, _, err := settings.Config([]string{"192.0.2.0/24"}); err == nil {
 		t.Fatal("accepted zero workers")
 	}

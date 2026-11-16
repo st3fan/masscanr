@@ -210,7 +210,7 @@ func (w *Writer) FinishSharded(scanOutcome string, reconciliation bool, detail s
 	if w.state.v3 == nil {
 		return fmt.Errorf("not a sharded journal")
 	}
-	final := Final{ScanOutcome: scanOutcome, CleanupOutcome: "complete", Found: w.state.Found, CompletedShards: w.state.v3.completed, ShardCount: w.state.v3.manifest.Count, Undeleted: w.state.Undeleted(), ReconciliationUnresolved: reconciliation, Error: detail}
+	final := Final{ScanOutcome: scanOutcome, CleanupOutcome: "complete", Found: w.state.Found, CompletedShards: w.state.v3.completed, ShardCount: w.state.v3.manifest.Count, Undeleted: append([]string{}, w.state.Undeleted()...), ReconciliationUnresolved: reconciliation, Error: detail}
 	if len(final.Undeleted) > 0 || reconciliation {
 		final.CleanupOutcome = "incomplete"
 	}
@@ -228,6 +228,16 @@ func (w *Writer) Flush() (uint64, error) {
 }
 
 func (w *Writer) Err() error { w.mu.Lock(); defer w.mu.Unlock(); return w.err }
+
+func (w *Writer) Stats() (found, completed, sequence uint64) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	found, sequence = w.state.Found, w.state.Seq
+	if w.state.v3 != nil {
+		completed = w.state.v3.completed
+	}
+	return
+}
 
 func (w *Writer) Close() error {
 	w.closeOnce.Do(func() {
