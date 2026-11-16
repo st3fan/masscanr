@@ -33,7 +33,7 @@ func TestPlannedWork(t *testing.T) {
 			}
 			for _, shards := range []int{1, 2, 8} {
 				cfg := Defaults()
-				cfg.Targets, cfg.Ports, cfg.Shards = targets, ports, shards
+				cfg.Targets, cfg.Ports, cfg.Workers = targets, ports, shards
 				got, err := cfg.Intent().Workload()
 				if err != nil || got != tc.want || got.RequiresConfirmation() != tc.prompt {
 					t.Fatalf("shards=%d: got %+v, %v; want %+v, prompt=%v", shards, got, err, tc.want, tc.prompt)

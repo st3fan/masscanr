@@ -18,7 +18,7 @@ func configLines(r runSnapshot, width int) []string {
 			addresses += uint64(1) << (32 - p.Bits())
 		}
 	}
-	requestedRate := new(big.Int).Mul(new(big.Int).SetUint64(c.Rate), big.NewInt(int64(c.Shards)))
+	requestedRate := new(big.Int).Mul(new(big.Int).SetUint64(c.Rate), big.NewInt(int64(r.Plan.EffectiveWorkers)))
 	version, build := known(r.Summary.Identity.Version), known(r.Summary.Identity.Build)
 	seed := "pending"
 	if r.Summary.RunID != "" {
@@ -51,9 +51,11 @@ func configLines(r runSnapshot, width int) []string {
 		"Protocol              TCP SYN",
 		fmt.Sprintf("Port count            %d", len(c.Ports)),
 		"Effective ports       "+c.PortSpec(),
-		fmt.Sprintf("Shards                %d", c.Shards),
-		fmt.Sprintf("Rate / shard          %d pps", c.Rate),
-		"Requested total rate  "+requestedRate.String()+" pps",
+		fmt.Sprintf("Logical shards        %d", r.Plan.ShardCount),
+		fmt.Sprintf("Workers requested     %d", c.Workers),
+		fmt.Sprintf("Workers effective     %d", r.Plan.EffectiveWorkers),
+		fmt.Sprintf("Rate / worker         %d pps", c.Rate),
+		"Effective total rate  "+requestedRate.String()+" pps",
 		"Shared seed           "+seed,
 		"Scan timeout          "+r.Plan.Timeouts.Scan.String(),
 		"Cleanup timeout       "+r.Plan.Timeouts.Cleanup.String(),
@@ -105,7 +107,11 @@ func runLines(r runSnapshot, tab, width int) []string {
 		return append(lines, configLines(r, max(1, width))...)
 	}
 	cfg := r.Plan.Config
-	lines = append(lines, fmt.Sprintf("Backend %s | shards %d | requested %d pps/worker", cfg.Backend, cfg.Shards, cfg.Rate), "Ports: "+cfg.PortSpec())
+	lines = append(lines, fmt.Sprintf("Backend %s | workers %d/%d | requested %d pps/worker", cfg.Backend, r.Plan.EffectiveWorkers, cfg.Workers, cfg.Rate), "Ports: "+cfg.PortSpec())
+	if r.Summary.ShardCount > 0 {
+		pct := 100 * float64(r.Summary.CompletedShards) / float64(r.Summary.ShardCount)
+		lines = append(lines, fmt.Sprintf("Shards %.1f%% | %d/%d completed", pct, r.Summary.CompletedShards, r.Summary.ShardCount))
+	}
 	if r.Summary.ScanOutcome != "" {
 		lines = append(lines, fmt.Sprintf("Found: %d", r.Summary.Found))
 	}
@@ -115,8 +121,8 @@ func runLines(r runSnapshot, tab, width int) []string {
 	}
 	sort.Slice(keys, func(i, j int) bool {
 		a, b := r.WorkerSnapshots[keys[i]], r.WorkerSnapshots[keys[j]]
-		if a.Shard != b.Shard {
-			return a.Shard < b.Shard
+		if a.Slot != b.Slot {
+			return a.Slot < b.Slot
 		}
 		return keys[i] < keys[j]
 	})
@@ -140,7 +146,7 @@ func runLines(r runSnapshot, tab, width int) []string {
 				eta = p.ETA.Round(time.Second).String()
 			}
 		}
-		lines = append(lines, fmt.Sprintf("Shard %d | %s | %s | %s | cleanup: %s", w.Shard, known(w.ID), known(w.IP), known(w.State), known(w.Cleanup)), fmt.Sprintf("  Progress %s | rate %s pps | ETA %s | found %s", pct, rate, eta, found))
+		lines = append(lines, fmt.Sprintf("Worker %d | %s | %s | %s | cleanup: %s", w.Slot, known(w.ID), known(w.IP), known(w.State), known(w.Cleanup)), fmt.Sprintf("  Shards %d/%d | current %d (attempt %d) | Progress %s | rate %s pps | ETA %s | found %s", w.CompletedShards, w.AssignedShards, w.CurrentShard, w.Attempt, pct, rate, eta, found))
 		if w.ProgressAt != nil {
 			lines = append(lines, "  Last telemetry: "+w.ProgressAt.Format(time.RFC3339))
 		}

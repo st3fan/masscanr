@@ -36,6 +36,24 @@ func TestCumulativeWorkerSnapshot(t *testing.T) {
 	}
 }
 
+func TestShardedWorkerSnapshotKeepsQueueAcrossReplacement(t *testing.T) {
+	r := Run{}
+	now := time.Now().UTC()
+	progress := scan.Progress{Percent: 45, Rate: 1000}
+	applyEvent(&r, controller.Event{Slot: 1, Shard: 24, Attempt: 1, ID: "vm-1", State: "scanning", AssignedShards: 50, CompletedForSlot: 23, Progress: &progress, ShardCount: 100, CompletedShards: 45}, now)
+	w := r.WorkerSnapshots["1"]
+	if w.CurrentShard != 24 || w.CompletedShards != 23 || w.AssignedShards != 50 || w.Progress == nil || w.Progress.Percent != 45 || r.Summary.CompletedShards != 45 {
+		t.Fatalf("active worker=%+v summary=%+v", w, r.Summary)
+	}
+	applyEvent(&r, controller.Event{Slot: 1, ID: "vm-1", State: "shutdown"}, now)
+	applyEvent(&r, controller.Event{Slot: 1, ID: "vm-2", State: "booting"}, now.Add(time.Second))
+	applyEvent(&r, controller.Event{Slot: 1, Shard: 24, Attempt: 2, ID: "vm-2", State: "scanning", AssignedShards: 50, CompletedForSlot: 23}, now.Add(time.Second))
+	w = r.WorkerSnapshots["1"]
+	if len(r.WorkerSnapshots) != 1 || w.ID != "vm-2" || w.InstanceCount != 2 || w.CurrentShard != 24 || w.Attempt != 2 || w.CompletedShards != 23 || w.Progress != nil {
+		t.Fatalf("replacement worker=%+v", w)
+	}
+}
+
 func TestActiveDiscoveryAndHistoricalRunStop(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()
@@ -53,7 +71,7 @@ func TestActiveDiscoveryAndHistoricalRunStop(t *testing.T) {
 			} `json:"meta"`
 		}
 		var runs []Run
-		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &out) != nil || out.Meta.SnapshotVersion != 2 || decodeTestList(w.Body.Bytes(), &runs) != nil {
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &out) != nil || out.Meta.SnapshotVersion != 3 || decodeTestList(w.Body.Bytes(), &runs) != nil {
 			t.Fatal(w.Code, w.Body)
 		}
 		return runs
@@ -130,7 +148,7 @@ func TestActiveDiscoveryAndHistoricalRunStop(t *testing.T) {
 		t.Fatal(history.Body)
 	}
 	for _, r := range runs {
-		if r.SnapshotVersion != 2 || r.Active == r.Settled {
+		if r.SnapshotVersion != 3 || r.Active == r.Settled {
 			t.Fatal(r)
 		}
 	}

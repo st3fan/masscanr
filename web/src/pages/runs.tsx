@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import type { ColumnDef } from '@tanstack/react-table'
 import { Link, useParams } from 'react-router-dom'
-import { api, nextCursor, type ScanRun } from '@/api/client'
+import { api, nextCursor, type RunWorker, type ScanRun } from '@/api/client'
 import { queries } from '@/api/queries'
 import { DataTable } from '@/components/data-table'
 import { MetricCard, StatusBadge, formatTime } from '@/components/domain'
@@ -46,6 +46,14 @@ const columns: ColumnDef<ScanRun>[] = [
   { header: 'Findings', cell: ({ row }) => row.original.attributes.summary.Found },
   { header: 'Created', cell: ({ row }) => formatTime(row.original.attributes.created_at) },
 ]
+
+const workerColumns: ColumnDef<RunWorker>[] = [
+  { header: 'Instance', cell: ({ row }) => <code className="text-xs">{row.original.id}</code> },
+  { header: 'Worker slot', cell: ({ row }) => row.original.attributes.slot },
+  { header: 'State', cell: ({ row }) => <StatusBadge phase={row.original.attributes.state} /> },
+  { header: 'Cleanup', cell: ({ row }) => row.original.attributes.cleanup },
+  { header: 'Created', cell: ({ row }) => formatTime(row.original.attributes.created_at) },
+]
 export function RunsPage() {
   const page = useCursorPagination()
   const query = useQuery(queries.runs(50, page.cursor))
@@ -80,16 +88,26 @@ export function RunsPage() {
 }
 export function RunDetailPage() {
   const { id = '' } = useParams()
+  const historyPage = useCursorPagination()
   const query = useQuery({
     queryKey: ['run', id],
     queryFn: ({ signal }) => api.run(id, signal),
     refetchInterval: (data) => (data.state.data?.data.attributes.active ? 5000 : false),
   })
+  const history = useQuery({
+    ...queries.runWorkers(id, 100, historyPage.cursor),
+    refetchInterval: query.data?.data.attributes.active ? 5000 : false,
+  })
   if (query.isPending) return <LoadingState />
   if (query.error) return <ErrorState error={query.error} retry={() => query.refetch()} />
   const run = query.data.data
   const a = run.attributes
-  const workers = Object.entries(a.worker_snapshots ?? {})
+  const workers = Object.entries(a.worker_snapshots ?? {}).sort(
+    ([, left], [, right]) => (left.slot ?? 0) - (right.slot ?? 0),
+  )
+  const totalShards = a.summary.ShardCount || a.preflight.shard_count
+  const completedShards = a.summary.CompletedShards
+  const shardPercent = totalShards > 0 ? (100 * completedShards) / totalShards : 0
   return (
     <>
       <PageHeader
@@ -98,18 +116,36 @@ export function RunDetailPage() {
         description={`Created ${formatTime(a.created_at)} · ${a.active ? 'Active' : 'Settled'}`}
         action={<StatusBadge phase={a.phase} active={a.active} />}
       />
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-4">
         <MetricCard
           label="Open observations"
           value={a.summary.Found}
           detail="Positive findings only"
         />
-        <MetricCard label="Workers" value={workers.length} detail="Reported worker snapshots" />
+        <MetricCard
+          label="Shards completed"
+          value={`${completedShards}/${totalShards}`}
+          detail={`${shardPercent.toFixed(1)}% of logical shards`}
+        />
+        <MetricCard
+          label="Workers"
+          value={a.preflight.effective_workers}
+          detail={`${a.preflight.config.Workers} requested`}
+        />
         <MetricCard
           label="Cleanup"
           value={a.summary.CleanupOutcome || 'Pending'}
           detail={a.summary.ReconciliationUnresolved ? 'Reconciliation unresolved' : undefined}
         />
+      </div>
+      <div className="mt-5 space-y-2">
+        <div className="flex justify-between text-sm">
+          <span className="font-medium">Total shard progress</span>
+          <span className="text-muted-foreground">
+            {completedShards}/{totalShards} completed
+          </span>
+        </div>
+        <Progress value={shardPercent} aria-label="Total shard progress" />
       </div>
       {a.error && (
         <div
@@ -130,19 +166,40 @@ export function RunDetailPage() {
                 {workers.map(([key, worker]) => (
                   <div key={key} className="space-y-2 py-3">
                     <div className="flex justify-between gap-3 text-sm">
-                      <span className="font-medium">Shard {worker.shard || key}</span>
+                      <span className="font-medium">Worker {worker.slot || key}</span>
                       <span className="capitalize text-muted-foreground">
                         {worker.state || 'Unknown'}
                       </span>
                     </div>
-                    {worker.progress && !worker.progress.RateUnknown ? (
-                      <Progress
-                        value={Math.min(100, Math.max(0, worker.progress.Percent))}
-                        aria-label={`Shard ${key} progress`}
-                      />
-                    ) : (
-                      <p className="text-xs text-muted-foreground">Progress unknown</p>
-                    )}
+                    <div className="flex flex-wrap justify-between gap-2 text-xs text-muted-foreground">
+                      <span>
+                        {worker.completed_shards ?? 0}/{worker.assigned_shards ?? 0} assigned shards
+                        completed
+                      </span>
+                      <span>
+                        {worker.current_shard
+                          ? `Shard ${worker.current_shard} · attempt ${worker.attempt ?? 1}`
+                          : 'No shard in progress'}
+                      </span>
+                    </div>
+                    <Progress
+                      value={
+                        worker.assigned_shards
+                          ? (100 * (worker.completed_shards ?? 0)) / worker.assigned_shards
+                          : 0
+                      }
+                      aria-label={`Worker ${key} completed shards`}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      {worker.current_shard && worker.progress && !worker.progress.PercentUnknown
+                        ? `Current shard ${worker.progress.Percent.toFixed(1)}% complete`
+                        : worker.current_shard
+                          ? 'Current shard progress unknown'
+                          : 'Waiting for next shard or finished'}
+                      {worker.instance_count && worker.instance_count > 1
+                        ? ` · ${worker.instance_count} physical instances`
+                        : ''}
+                    </p>
                   </div>
                 ))}
               </div>
@@ -189,6 +246,32 @@ export function RunDetailPage() {
           </CardContent>
         </Card>
       </div>
+      <Card className="mt-6">
+        <CardHeader>
+          <CardTitle>Physical worker history</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {history.isPending ? (
+            <LoadingState />
+          ) : history.error ? (
+            <ErrorState error={history.error} retry={() => history.refetch()} />
+          ) : (
+            <DataTable
+              data={history.data.data}
+              columns={workerColumns}
+              emptyTitle="No instances recorded"
+              emptyDescription="Worker instances appear after provisioning begins."
+              previous={historyPage.hasPrevious}
+              next={!!nextCursor(history.data.links?.next)}
+              onPrevious={historyPage.previous}
+              onNext={() => {
+                const cursor = nextCursor(history.data.links?.next)
+                if (cursor) historyPage.next(cursor)
+              }}
+            />
+          )}
+        </CardContent>
+      </Card>
     </>
   )
 }

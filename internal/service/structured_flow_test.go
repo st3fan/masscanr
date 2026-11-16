@@ -52,7 +52,7 @@ func TestStructuredHTTPWorkflow(t *testing.T) {
 	if created.Code != 201 || decodeTestResource(created.Body.Bytes(), &plan) != nil {
 		t.Fatalf("create ScanPlan: %d %s", created.Code, created.Body)
 	}
-	updated := request(app, "PATCH", "/v1/scan-plans/"+plan.ID, `{"data":{"type":"scan-plans","id":"`+plan.ID+`","attributes":{"revision":1,"settings":{"ports":"80","shards":1}}}}`)
+	updated := request(app, "PATCH", "/v1/scan-plans/"+plan.ID, `{"data":{"type":"scan-plans","id":"`+plan.ID+`","attributes":{"revision":1,"settings":{"ports":"80","workers":1}}}}`)
 	if updated.Code != 200 || decodeTestResource(updated.Body.Bytes(), &plan) != nil || plan.Revision != 2 {
 		t.Fatalf("update ScanPlan: %d %s", updated.Code, updated.Body)
 	}
@@ -80,7 +80,7 @@ func TestStructuredHTTPWorkflow(t *testing.T) {
 		t.Fatalf("run: %+v", settled)
 	}
 	status := request(app, "GET", "/v1/runs/"+run.ID, "")
-	if status.Code != 200 || !strings.Contains(status.Body.String(), `"snapshot_version":2`) {
+	if status.Code != 200 || !strings.Contains(status.Body.String(), `"snapshot_version":3`) {
 		t.Fatalf("status: %d %s", status.Code, status.Body)
 	}
 	query := request(app, "GET", "/v1/scan-results?filter[run_id]="+run.ID+"&filter[port]=80", "")

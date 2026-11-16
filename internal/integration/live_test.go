@@ -115,7 +115,7 @@ func TestVultrWorkerSmoke(t *testing.T) {
 	t.Log("root/password SSH ready;", prepared.String())
 	cfg := scan.Defaults()
 	cfg.Targets, _ = scan.ParseTargets([]string{"192.0.2.0/30"})
-	args, _ := masscan.Arguments(cfg.Intent(), scan.Shard{Index: 1, Total: cfg.Shards}, 42)
+	args, _ := masscan.Arguments(cfg.Intent(), scan.Shard{Index: 1, Total: cfg.Workers}, 42)
 	args = append(args, "--echo")
 	var output bytes.Buffer
 	plan := backend.Plan{Command: backend.Command{Executable: "masscan", Args: args}, NewDecoder: func() backend.Decoder { return configCapture{out: &output} }}

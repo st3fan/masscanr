@@ -24,7 +24,7 @@ const columns: ColumnDef<ScanPlan>[] = [
   },
   { header: 'Ports', cell: ({ row }) => <code>{row.original.attributes.settings.ports}</code> },
   { header: 'Backend', cell: ({ row }) => row.original.attributes.settings.backend },
-  { header: 'Workers', cell: ({ row }) => row.original.attributes.settings.shards },
+  { header: 'Workers', cell: ({ row }) => row.original.attributes.settings.workers },
   { header: 'Revision', cell: ({ row }) => row.original.attributes.revision },
   { header: 'Updated', cell: ({ row }) => formatTime(row.original.attributes.updated_at) },
 ]
@@ -79,7 +79,7 @@ export function PlanDetailPage() {
     ['Provider', settings.provider],
     ['Region', settings.region],
     ['Instance type', settings.instance_type],
-    ['Workers / shards', settings.shards],
+    ['Requested workers', settings.workers],
     ['Rate', settings.rate],
     ['Scan timeout', settings.timeout],
     ['Cleanup timeout', settings.cleanup_timeout],

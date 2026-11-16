@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-const SnapshotVersion = 2
+const SnapshotVersion = 3
 
 type Preflight struct {
 	ID                   string              `json:"id"`
@@ -19,6 +19,9 @@ type Preflight struct {
 	Config               scan.Config         `json:"config"`
 	Timeouts             controller.Timeouts `json:"timeouts"`
 	Workload             scan.Workload       `json:"workload"`
+	ShardCount           uint64              `json:"shard_count"`
+	EffectiveWorkers     int                 `json:"effective_workers"`
+	MaxProbesPerShard    uint64              `json:"max_probes_per_shard"`
 	RequiresConfirmation bool                `json:"requires_confirmation"`
 }
 type Plan = Preflight
@@ -44,17 +47,23 @@ type Run struct {
 
 // Worker retains independent execution and cleanup state. Nil measurements are unknown.
 type Worker struct {
-	Shard         int            `json:"shard"`
-	ID            string         `json:"id"`
-	IP            string         `json:"ip"`
-	State         string         `json:"state"`
-	Detail        string         `json:"detail,omitempty"`
-	Cleanup       string         `json:"cleanup"`
-	CleanupDetail string         `json:"cleanup_detail,omitempty"`
-	Progress      *scan.Progress `json:"progress"`
-	ProgressAt    *time.Time     `json:"progress_at"`
-	Found         *uint64        `json:"found"`
-	Prepared      *scan.Prepared `json:"prepared,omitempty"`
+	Shard           int            `json:"shard"`
+	Slot            int            `json:"slot,omitempty"`
+	CurrentShard    int            `json:"current_shard,omitempty"`
+	Attempt         int            `json:"attempt,omitempty"`
+	AssignedShards  uint64         `json:"assigned_shards,omitempty"`
+	CompletedShards uint64         `json:"completed_shards,omitempty"`
+	InstanceCount   int            `json:"instance_count,omitempty"`
+	ID              string         `json:"id"`
+	IP              string         `json:"ip"`
+	State           string         `json:"state"`
+	Detail          string         `json:"detail,omitempty"`
+	Cleanup         string         `json:"cleanup"`
+	CleanupDetail   string         `json:"cleanup_detail,omitempty"`
+	Progress        *scan.Progress `json:"progress"`
+	ProgressAt      *time.Time     `json:"progress_at"`
+	Found           *uint64        `json:"found"`
+	Prepared        *scan.Prepared `json:"prepared,omitempty"`
 }
 
 type ActiveRuns struct {

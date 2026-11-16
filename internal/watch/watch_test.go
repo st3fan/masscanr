@@ -43,7 +43,7 @@ func (f activeRunsFixture) MarshalJSON() ([]byte, error) {
 }
 
 func fixtureRun(id string, active bool) runSnapshot {
-	return runSnapshot{SnapshotVersion: 2, ID: id, ScanPlanID: "plan", Active: active, Settled: !active, Phase: "scanning", CreatedAt: time.Now(), Plan: planSnapshot{ScanPlanRevision: 1, Config: configSnapshot{Backend: "masscan", Shards: 2, Ports: []uint16{80, 443}}}}
+	return runSnapshot{SnapshotVersion: 3, ID: id, ScanPlanID: "plan", Active: active, Settled: !active, Phase: "scanning", CreatedAt: time.Now(), Plan: planSnapshot{ScanPlanRevision: 1, ShardCount: 2, EffectiveWorkers: 2, Config: configSnapshot{Backend: "masscan", Workers: 2, Ports: []uint16{80, 443}}}, Summary: summarySnapshot{ShardCount: 2}}
 }
 
 func TestServerSnapshotWireCompatibility(t *testing.T) {
@@ -145,7 +145,7 @@ func TestDiscoveryTransitionsAndStopRequest(t *testing.T) {
 				w.WriteHeader(503)
 				return
 			}
-			json.NewEncoder(w).Encode(activeRunsFixture{SnapshotVersion: 2, Runs: runs})
+			json.NewEncoder(w).Encode(activeRunsFixture{SnapshotVersion: 3, Runs: runs})
 		case "/v1/runs/a":
 			v := a
 			v.Active = false
@@ -271,7 +271,7 @@ func TestRenderUnknownNarrowAndPlain(t *testing.T) {
 		r := fixtureRun("a", true)
 		r.Plan.Config.Backend = backend
 		r.Error = "bad\x1b[31m\nrow"
-		r.WorkerSnapshots = map[string]workerSnapshot{"1": {Shard: 1, ID: "w", State: "booting"}}
+		r.WorkerSnapshots = map[string]workerSnapshot{"1": {Slot: 1, ID: "w", State: "booting", AssignedShards: 2}}
 		s := snapshot{Runs: []runSnapshot{r}}
 		text := renderPlain("http://server", s, "")
 		if strings.Contains(text, "\x1b") || !strings.Contains(text, "Progress unknown") || !strings.Contains(text, backend) {
@@ -304,7 +304,7 @@ func TestPlainAllIdleAndDedup(t *testing.T) {
 			mutations.Add(1)
 		}
 		gets.Add(1)
-		json.NewEncoder(w).Encode(activeRunsFixture{SnapshotVersion: 2, Runs: []runSnapshot{}})
+		json.NewEncoder(w).Encode(activeRunsFixture{SnapshotVersion: 3, Runs: []runSnapshot{}})
 	})
 	s, err := poll(ctx, c, "", snapshot{})
 	if err != nil {

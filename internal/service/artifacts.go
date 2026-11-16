@@ -41,19 +41,22 @@ func (s artifactStream) Close() error {
 }
 
 type inspection struct {
-	RunID            string            `json:"run_id"`
-	Format           string            `json:"format"`
-	Schema           int               `json:"schema"`
-	CreatedAt        time.Time         `json:"created_at"`
-	Config           scanfile.Config   `json:"config"`
-	AcceptedFindings uint64            `json:"accepted_findings"`
-	Records          uint64            `json:"records"`
-	Workers          []scanfile.Worker `json:"workers"`
-	ScanOutcome      string            `json:"scan_outcome"`
-	CleanupOutcome   string            `json:"cleanup_outcome"`
-	Complete         bool              `json:"complete"`
-	Truncated        bool              `json:"truncated"`
-	Undeleted        []string          `json:"undeleted"`
+	RunID            string             `json:"run_id"`
+	Format           string             `json:"format"`
+	Schema           int                `json:"schema"`
+	CreatedAt        time.Time          `json:"created_at"`
+	Config           scanfile.Config    `json:"config"`
+	AcceptedFindings uint64             `json:"accepted_findings"`
+	ShardCount       uint64             `json:"shard_count"`
+	CompletedShards  uint64             `json:"completed_shards"`
+	ActiveAttempts   []scanfile.Attempt `json:"active_attempts"`
+	Records          uint64             `json:"records"`
+	Workers          []scanfile.Worker  `json:"workers"`
+	ScanOutcome      string             `json:"scan_outcome"`
+	CleanupOutcome   string             `json:"cleanup_outcome"`
+	Complete         bool               `json:"complete"`
+	Truncated        bool               `json:"truncated"`
+	Undeleted        []string           `json:"undeleted"`
 }
 
 type contextReader struct {
@@ -120,12 +123,12 @@ func (a artifactAPI) inspect(c fiber.Ctx) error {
 		workers = append(workers, worker)
 	}
 	slices.SortFunc(workers, func(a, b scanfile.Worker) int {
-		if a.Shard != b.Shard {
-			return a.Shard - b.Shard
+		if a.Slot != b.Slot {
+			return a.Slot - b.Slot
 		}
 		return strings.Compare(a.InstanceID, b.InstanceID)
 	})
-	result := inspection{RunID: state.Header.RunID, Format: state.Header.Format, Schema: state.Header.Schema, CreatedAt: state.Header.CreatedAt, Config: state.Header.Config, AcceptedFindings: state.Found, Records: state.Seq, Workers: workers, ScanOutcome: "unconfirmed", CleanupOutcome: "unconfirmed", Complete: state.Complete(), Truncated: state.Truncated, Undeleted: state.Undeleted()}
+	result := inspection{RunID: state.Header.RunID, Format: state.Header.Format, Schema: state.Header.Schema, CreatedAt: state.Header.CreatedAt, Config: state.Header.Config, AcceptedFindings: state.Found, ShardCount: state.Header.Config.ShardCount, CompletedShards: state.CompletedShards(), ActiveAttempts: state.ActiveShardAttempts(), Records: state.Seq, Workers: workers, ScanOutcome: "unconfirmed", CleanupOutcome: "unconfirmed", Complete: state.Complete(), Truncated: state.Truncated, Undeleted: state.Undeleted()}
 	if state.Finished != nil {
 		result.ScanOutcome = state.Finished.ScanOutcome
 		result.CleanupOutcome = state.Finished.CleanupOutcome

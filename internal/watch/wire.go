@@ -8,8 +8,7 @@ import (
 
 // These types describe only the fields watch reads from the server's JSON API.
 // Keeping them here prevents the client binary from importing scan execution code.
-const snapshotVersion = 2
-const maxShards = 65535
+const snapshotVersion = 3
 
 type runSnapshot struct {
 	SnapshotVersion int                       `json:"snapshot_version"`
@@ -30,6 +29,8 @@ type runSnapshot struct {
 
 type planSnapshot struct {
 	ScanPlanRevision int64           `json:"scan_plan_revision"`
+	ShardCount       uint64          `json:"shard_count"`
+	EffectiveWorkers int             `json:"effective_workers"`
 	Config           configSnapshot  `json:"config"`
 	Timeouts         timeoutSnapshot `json:"timeouts"`
 }
@@ -44,7 +45,7 @@ type configSnapshot struct {
 	Targets          []string          `json:"Targets"`
 	RequestedTargets []requestedTarget `json:"RequestedTargets"`
 	Ports            []uint16          `json:"Ports"`
-	Shards           int               `json:"Shards"`
+	Workers          int               `json:"Workers"`
 	Rate             uint64            `json:"Rate"`
 	Region           string            `json:"Region"`
 	InstanceType     string            `json:"InstanceType"`
@@ -85,6 +86,8 @@ type summarySnapshot struct {
 	RunID                    string           `json:"RunID"`
 	Seed                     uint64           `json:"Seed"`
 	Found                    uint64           `json:"Found"`
+	ShardCount               uint64           `json:"ShardCount"`
+	CompletedShards          uint64           `json:"CompletedShards"`
 	Undeleted                []string         `json:"Undeleted"`
 	ScanOutcome              string           `json:"ScanOutcome"`
 	CleanupOutcome           string           `json:"CleanupOutcome"`
@@ -98,16 +101,22 @@ type identitySnapshot struct {
 }
 
 type workerSnapshot struct {
-	Shard         int               `json:"shard"`
-	ID            string            `json:"id"`
-	IP            string            `json:"ip"`
-	State         string            `json:"state"`
-	Detail        string            `json:"detail,omitempty"`
-	Cleanup       string            `json:"cleanup"`
-	CleanupDetail string            `json:"cleanup_detail,omitempty"`
-	Progress      *progressSnapshot `json:"progress"`
-	ProgressAt    *time.Time        `json:"progress_at"`
-	Found         *uint64           `json:"found"`
+	Shard           int               `json:"shard"`
+	Slot            int               `json:"slot"`
+	CurrentShard    int               `json:"current_shard"`
+	Attempt         int               `json:"attempt"`
+	AssignedShards  uint64            `json:"assigned_shards"`
+	CompletedShards uint64            `json:"completed_shards"`
+	InstanceCount   int               `json:"instance_count"`
+	ID              string            `json:"id"`
+	IP              string            `json:"ip"`
+	State           string            `json:"state"`
+	Detail          string            `json:"detail,omitempty"`
+	Cleanup         string            `json:"cleanup"`
+	CleanupDetail   string            `json:"cleanup_detail,omitempty"`
+	Progress        *progressSnapshot `json:"progress"`
+	ProgressAt      *time.Time        `json:"progress_at"`
+	Found           *uint64           `json:"found"`
 }
 
 type progressSnapshot struct {

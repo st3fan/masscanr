@@ -140,6 +140,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/runs/{id}/workers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List physical worker instances for a run */
+        get: operations["listRunWorkers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/scan-plans": {
         parameters: {
             query?: never;
@@ -316,6 +333,14 @@ export interface components {
             source: string;
         };
         controllerEvent: {
+            /** Format: int64 */
+            AssignedShards: number;
+            /** Format: int64 */
+            Attempt: number;
+            /** Format: int64 */
+            CompletedForSlot: number;
+            /** Format: int64 */
+            CompletedShards: number;
             Detail: string;
             /** Format: int64 */
             Found: number | null;
@@ -329,10 +354,16 @@ export interface components {
             Seed: number | null;
             /** Format: int64 */
             Shard: number;
+            /** Format: int64 */
+            ShardCount: number;
+            /** Format: int64 */
+            Slot: number;
             State: string;
         };
         controllerSummary: {
             CleanupOutcome: string;
+            /** Format: int64 */
+            CompletedShards: number;
             /** Format: int64 */
             Found: number;
             Identity: components["schemas"]["scanIdentity"];
@@ -341,6 +372,8 @@ export interface components {
             ScanOutcome: string;
             /** Format: int64 */
             Seed: number;
+            /** Format: int64 */
+            ShardCount: number;
             Undeleted: string[] | null;
         };
         controllerTimeouts: {
@@ -361,13 +394,19 @@ export interface components {
         };
         runapiPreflight: {
             config: components["schemas"]["scanConfig"];
+            /** Format: int64 */
+            effective_workers: number;
             /** Format: date-time */
             expires_at: string;
             id: string;
+            /** Format: int64 */
+            max_probes_per_shard: number;
             requires_confirmation: boolean;
             scan_plan_id?: string;
             /** Format: int64 */
             scan_plan_revision?: number;
+            /** Format: int64 */
+            shard_count: number;
             target_id?: string;
             /** Format: int64 */
             target_revision?: number;
@@ -375,12 +414,22 @@ export interface components {
             workload: components["schemas"]["scanWorkload"];
         };
         runapiWorker: {
+            /** Format: int64 */
+            assigned_shards?: number;
+            /** Format: int64 */
+            attempt?: number;
             cleanup: string;
             cleanup_detail?: string;
+            /** Format: int64 */
+            completed_shards?: number;
+            /** Format: int64 */
+            current_shard?: number;
             detail?: string;
             /** Format: int64 */
             found: number | null;
             id: string;
+            /** Format: int64 */
+            instance_count?: number;
             ip: string;
             prepared?: components["schemas"]["Prepared"];
             progress: components["schemas"]["Progress"];
@@ -388,6 +437,8 @@ export interface components {
             progress_at: string | null;
             /** Format: int64 */
             shard: number;
+            /** Format: int64 */
+            slot?: number;
             state: string;
         };
         scanConfig: {
@@ -398,9 +449,9 @@ export interface components {
             Rate: number;
             Region: string;
             RequestedTargets: components["schemas"]["scanTarget"][] | null;
-            /** Format: int64 */
-            Shards: number;
             Targets: string[] | null;
+            /** Format: int64 */
+            Workers: number;
         };
         scanIdentity: {
             Build: string;
@@ -421,24 +472,45 @@ export interface components {
             /** Format: int64 */
             Probes: number;
         };
+        scanfileAttempt: {
+            detail?: string;
+            instance_id: string;
+            /** Format: int64 */
+            number: number;
+            phase: string;
+            /** Format: int64 */
+            shard: number;
+            /** Format: int64 */
+            slot: number;
+        };
         scanfileConfig: {
             backend: string;
             exports: string[] | null;
             instance_type: string;
+            /** Format: int64 */
+            max_probes_per_shard?: number;
             output: string;
+            /** Format: int64 */
+            partition_version?: number;
             ports: string;
             provider: string;
             /** Format: int64 */
             rate_per_worker: number;
             region: string;
             requested_targets?: components["schemas"]["scanTarget"][] | null;
+            /** Format: int64 */
+            requested_workers?: number;
             seed: string;
             /** Format: int64 */
-            shards: number;
+            shard_count?: number;
+            /** Format: int64 */
+            shards?: number;
             targets: string[] | null;
             timeouts: {
                 [key: string]: string;
             };
+            /** Format: int64 */
+            workers?: number;
         };
         scanfileWorker: {
             cleanup: string;
@@ -448,6 +520,8 @@ export interface components {
             phase: string;
             /** Format: int64 */
             shard: number;
+            /** Format: int64 */
+            slot?: number;
         };
         serviceScanPlanSettings: {
             backend: string;
@@ -458,9 +532,9 @@ export interface components {
             /** Format: int64 */
             rate: number;
             region: string;
-            /** Format: int64 */
-            shards: number;
             timeout: string;
+            /** Format: int64 */
+            workers: number;
         };
         serviceTargetEntry: {
             id: string;
@@ -1171,12 +1245,15 @@ export interface operations {
                      *                 "Rate": 0,
                      *                 "Region": "",
                      *                 "RequestedTargets": null,
-                     *                 "Shards": 0,
-                     *                 "Targets": null
+                     *                 "Targets": null,
+                     *                 "Workers": 0
                      *               },
+                     *               "effective_workers": 0,
                      *               "expires_at": "0001-01-01T00:00:00Z",
                      *               "id": "",
+                     *               "max_probes_per_shard": 0,
                      *               "requires_confirmation": false,
+                     *               "shard_count": 0,
                      *               "timeouts": {
                      *                 "Cleanup": 0,
                      *                 "Create": 0,
@@ -1197,6 +1274,7 @@ export interface operations {
                      *             "stop_requested": false,
                      *             "summary": {
                      *               "CleanupOutcome": "",
+                     *               "CompletedShards": 0,
                      *               "Found": 0,
                      *               "Identity": {
                      *                 "Build": "",
@@ -1207,6 +1285,7 @@ export interface operations {
                      *               "RunID": "",
                      *               "ScanOutcome": "",
                      *               "Seed": 0,
+                     *               "ShardCount": 0,
                      *               "Undeleted": null
                      *             },
                      *             "worker_snapshots": null
@@ -1216,7 +1295,7 @@ export interface operations {
                      *         }
                      *       ],
                      *       "meta": {
-                     *         "snapshot_version": 2
+                     *         "snapshot_version": 3
                      *       }
                      *     }
                      */
@@ -1538,12 +1617,15 @@ export interface operations {
                      *               "Rate": 0,
                      *               "Region": "",
                      *               "RequestedTargets": null,
-                     *               "Shards": 0,
-                     *               "Targets": null
+                     *               "Targets": null,
+                     *               "Workers": 0
                      *             },
+                     *             "effective_workers": 0,
                      *             "expires_at": "0001-01-01T00:00:00Z",
                      *             "id": "",
+                     *             "max_probes_per_shard": 0,
                      *             "requires_confirmation": false,
+                     *             "shard_count": 0,
                      *             "timeouts": {
                      *               "Cleanup": 0,
                      *               "Create": 0,
@@ -1564,6 +1646,7 @@ export interface operations {
                      *           "stop_requested": false,
                      *           "summary": {
                      *             "CleanupOutcome": "",
+                     *             "CompletedShards": 0,
                      *             "Found": 0,
                      *             "Identity": {
                      *               "Build": "",
@@ -1574,6 +1657,7 @@ export interface operations {
                      *             "RunID": "",
                      *             "ScanOutcome": "",
                      *             "Seed": 0,
+                     *             "ShardCount": 0,
                      *             "Undeleted": null
                      *           },
                      *           "worker_snapshots": null
@@ -2159,8 +2243,10 @@ export interface operations {
                      *       "data": {
                      *         "attributes": {
                      *           "accepted_findings": 0,
+                     *           "active_attempts": null,
                      *           "cleanup_outcome": "",
                      *           "complete": false,
+                     *           "completed_shards": 0,
                      *           "config": {
                      *             "backend": "",
                      *             "exports": [
@@ -2174,7 +2260,6 @@ export interface operations {
                      *             "rate_per_worker": 0,
                      *             "region": "",
                      *             "seed": "",
-                     *             "shards": 0,
                      *             "targets": null,
                      *             "timeouts": null
                      *           },
@@ -2184,6 +2269,7 @@ export interface operations {
                      *           "run_id": "",
                      *           "scan_outcome": "",
                      *           "schema": 0,
+                     *           "shard_count": 0,
                      *           "truncated": false,
                      *           "undeleted": null,
                      *           "workers": null
@@ -2198,8 +2284,11 @@ export interface operations {
                             attributes: {
                                 /** Format: int64 */
                                 accepted_findings: number;
+                                active_attempts: components["schemas"]["scanfileAttempt"][] | null;
                                 cleanup_outcome: string;
                                 complete: boolean;
+                                /** Format: int64 */
+                                completed_shards: number;
                                 config: components["schemas"]["scanfileConfig"];
                                 /** Format: date-time */
                                 created_at: string;
@@ -2210,6 +2299,8 @@ export interface operations {
                                 scan_outcome: string;
                                 /** Format: int64 */
                                 schema: number;
+                                /** Format: int64 */
+                                shard_count: number;
                                 truncated: boolean;
                                 undeleted: string[] | null;
                                 workers: components["schemas"]["scanfileWorker"][] | null;
@@ -2508,12 +2599,15 @@ export interface operations {
                      *               "Rate": 0,
                      *               "Region": "",
                      *               "RequestedTargets": null,
-                     *               "Shards": 0,
-                     *               "Targets": null
+                     *               "Targets": null,
+                     *               "Workers": 0
                      *             },
+                     *             "effective_workers": 0,
                      *             "expires_at": "0001-01-01T00:00:00Z",
                      *             "id": "",
+                     *             "max_probes_per_shard": 0,
                      *             "requires_confirmation": false,
+                     *             "shard_count": 0,
                      *             "timeouts": {
                      *               "Cleanup": 0,
                      *               "Create": 0,
@@ -2534,6 +2628,7 @@ export interface operations {
                      *           "stop_requested": false,
                      *           "summary": {
                      *             "CleanupOutcome": "",
+                     *             "CompletedShards": 0,
                      *             "Found": 0,
                      *             "Identity": {
                      *               "Build": "",
@@ -2544,6 +2639,7 @@ export interface operations {
                      *             "RunID": "",
                      *             "ScanOutcome": "",
                      *             "Seed": 0,
+                     *             "ShardCount": 0,
                      *             "Undeleted": null
                      *           },
                      *           "worker_snapshots": null
@@ -2838,6 +2934,321 @@ export interface operations {
             };
         };
     };
+    listRunWorkers: {
+        parameters: {
+            query?: {
+                limit?: number;
+                after?: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description JSON:API resource document */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "data": [
+                     *         {
+                     *           "attributes": {
+                     *             "cleanup": "",
+                     *             "created_at": "0001-01-01T00:00:00Z",
+                     *             "ip": "",
+                     *             "run_id": "",
+                     *             "slot": 0,
+                     *             "state": "",
+                     *             "updated_at": "0001-01-01T00:00:00Z"
+                     *           },
+                     *           "id": "example-id",
+                     *           "type": "run-workers"
+                     *         }
+                     *       ]
+                     *     }
+                     */
+                    "application/vnd.api+json": {
+                        data: {
+                            attributes: {
+                                cleanup: string;
+                                /** Format: date-time */
+                                created_at: string;
+                                detail?: string;
+                                ip: string;
+                                run_id: string;
+                                /** Format: int64 */
+                                slot: number;
+                                state: string;
+                                /** Format: date-time */
+                                updated_at: string;
+                            };
+                            id: string;
+                            links?: {
+                                [key: string]: unknown;
+                            };
+                            relationships?: {
+                                [key: string]: unknown;
+                            };
+                            /** @constant */
+                            type: "run-workers";
+                        }[];
+                        links?: {
+                            [key: string]: unknown;
+                        };
+                        meta?: {
+                            [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description JSON:API error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "errors": [
+                     *         {
+                     *           "detail": "request failed",
+                     *           "status": "400"
+                     *         }
+                     *       ]
+                     *     }
+                     */
+                    "application/vnd.api+json": {
+                        errors: {
+                            detail: string;
+                            status: string;
+                        }[];
+                    };
+                };
+            };
+            /** @description JSON:API error */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "errors": [
+                     *         {
+                     *           "detail": "request failed",
+                     *           "status": "404"
+                     *         }
+                     *       ]
+                     *     }
+                     */
+                    "application/vnd.api+json": {
+                        errors: {
+                            detail: string;
+                            status: string;
+                        }[];
+                    };
+                };
+            };
+            /** @description JSON:API error */
+            406: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "errors": [
+                     *         {
+                     *           "detail": "request failed",
+                     *           "status": "406"
+                     *         }
+                     *       ]
+                     *     }
+                     */
+                    "application/vnd.api+json": {
+                        errors: {
+                            detail: string;
+                            status: string;
+                        }[];
+                    };
+                };
+            };
+            /** @description JSON:API error */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "errors": [
+                     *         {
+                     *           "detail": "request failed",
+                     *           "status": "409"
+                     *         }
+                     *       ]
+                     *     }
+                     */
+                    "application/vnd.api+json": {
+                        errors: {
+                            detail: string;
+                            status: string;
+                        }[];
+                    };
+                };
+            };
+            /** @description JSON:API error */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "errors": [
+                     *         {
+                     *           "detail": "request failed",
+                     *           "status": "413"
+                     *         }
+                     *       ]
+                     *     }
+                     */
+                    "application/vnd.api+json": {
+                        errors: {
+                            detail: string;
+                            status: string;
+                        }[];
+                    };
+                };
+            };
+            /** @description JSON:API error */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "errors": [
+                     *         {
+                     *           "detail": "request failed",
+                     *           "status": "415"
+                     *         }
+                     *       ]
+                     *     }
+                     */
+                    "application/vnd.api+json": {
+                        errors: {
+                            detail: string;
+                            status: string;
+                        }[];
+                    };
+                };
+            };
+            /** @description JSON:API error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "errors": [
+                     *         {
+                     *           "detail": "request failed",
+                     *           "status": "422"
+                     *         }
+                     *       ]
+                     *     }
+                     */
+                    "application/vnd.api+json": {
+                        errors: {
+                            detail: string;
+                            status: string;
+                        }[];
+                    };
+                };
+            };
+            /** @description JSON:API error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "errors": [
+                     *         {
+                     *           "detail": "request failed",
+                     *           "status": "500"
+                     *         }
+                     *       ]
+                     *     }
+                     */
+                    "application/vnd.api+json": {
+                        errors: {
+                            detail: string;
+                            status: string;
+                        }[];
+                    };
+                };
+            };
+            /** @description JSON:API error */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "errors": [
+                     *         {
+                     *           "detail": "request failed",
+                     *           "status": "502"
+                     *         }
+                     *       ]
+                     *     }
+                     */
+                    "application/vnd.api+json": {
+                        errors: {
+                            detail: string;
+                            status: string;
+                        }[];
+                    };
+                };
+            };
+            /** @description JSON:API error */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "errors": [
+                     *         {
+                     *           "detail": "request failed",
+                     *           "status": "503"
+                     *         }
+                     *       ]
+                     *     }
+                     */
+                    "application/vnd.api+json": {
+                        errors: {
+                            detail: string;
+                            status: string;
+                        }[];
+                    };
+                };
+            };
+        };
+    };
     listScanPlans: {
         parameters: {
             query?: {
@@ -2872,8 +3283,8 @@ export interface operations {
                      *               "provider": "",
                      *               "rate": 0,
                      *               "region": "",
-                     *               "shards": 0,
-                     *               "timeout": ""
+                     *               "timeout": "",
+                     *               "workers": 0
                      *             },
                      *             "target_id": "",
                      *             "updated_at": "0001-01-01T00:00:00Z"
@@ -3191,9 +3602,9 @@ export interface operations {
                                 /** Format: int64 */
                                 rate: number;
                                 region: string;
-                                /** Format: int64 */
-                                shards: number;
                                 timeout: string;
+                                /** Format: int64 */
+                                workers: number;
                             };
                             target_id: string;
                         };
@@ -3226,8 +3637,8 @@ export interface operations {
                      *             "provider": "",
                      *             "rate": 0,
                      *             "region": "",
-                     *             "shards": 0,
-                     *             "timeout": ""
+                     *             "timeout": "",
+                     *             "workers": 0
                      *           },
                      *           "target_id": "",
                      *           "updated_at": "0001-01-01T00:00:00Z"
@@ -3543,8 +3954,8 @@ export interface operations {
                      *             "provider": "",
                      *             "rate": 0,
                      *             "region": "",
-                     *             "shards": 0,
-                     *             "timeout": ""
+                     *             "timeout": "",
+                     *             "workers": 0
                      *           },
                      *           "target_id": "",
                      *           "updated_at": "0001-01-01T00:00:00Z"
@@ -3867,9 +4278,9 @@ export interface operations {
                                 /** Format: int64 */
                                 rate?: number;
                                 region?: string;
-                                /** Format: int64 */
-                                shards?: number;
                                 timeout?: string;
+                                /** Format: int64 */
+                                workers?: number;
                             };
                             target_id?: string;
                         };
@@ -3902,8 +4313,8 @@ export interface operations {
                      *             "provider": "",
                      *             "rate": 0,
                      *             "region": "",
-                     *             "shards": 0,
-                     *             "timeout": ""
+                     *             "timeout": "",
+                     *             "workers": 0
                      *           },
                      *           "target_id": "",
                      *           "updated_at": "0001-01-01T00:00:00Z"
@@ -4215,11 +4626,14 @@ export interface operations {
                      *             "Rate": 0,
                      *             "Region": "",
                      *             "RequestedTargets": null,
-                     *             "Shards": 0,
-                     *             "Targets": null
+                     *             "Targets": null,
+                     *             "Workers": 0
                      *           },
+                     *           "effective_workers": 0,
                      *           "expires_at": "0001-01-01T00:00:00Z",
+                     *           "max_probes_per_shard": 0,
                      *           "requires_confirmation": false,
+                     *           "shard_count": 0,
                      *           "timeouts": {
                      *             "Cleanup": 0,
                      *             "Create": 0,
@@ -4244,12 +4658,18 @@ export interface operations {
                         data: {
                             attributes: {
                                 config: components["schemas"]["scanConfig"];
+                                /** Format: int64 */
+                                effective_workers: number;
                                 /** Format: date-time */
                                 expires_at: string;
+                                /** Format: int64 */
+                                max_probes_per_shard: number;
                                 requires_confirmation: boolean;
                                 scan_plan_id?: string;
                                 /** Format: int64 */
                                 scan_plan_revision?: number;
+                                /** Format: int64 */
+                                shard_count: number;
                                 target_id?: string;
                                 /** Format: int64 */
                                 target_revision?: number;
@@ -4554,12 +4974,15 @@ export interface operations {
                      *                 "Rate": 0,
                      *                 "Region": "",
                      *                 "RequestedTargets": null,
-                     *                 "Shards": 0,
-                     *                 "Targets": null
+                     *                 "Targets": null,
+                     *                 "Workers": 0
                      *               },
+                     *               "effective_workers": 0,
                      *               "expires_at": "0001-01-01T00:00:00Z",
                      *               "id": "",
+                     *               "max_probes_per_shard": 0,
                      *               "requires_confirmation": false,
+                     *               "shard_count": 0,
                      *               "timeouts": {
                      *                 "Cleanup": 0,
                      *                 "Create": 0,
@@ -4580,6 +5003,7 @@ export interface operations {
                      *             "stop_requested": false,
                      *             "summary": {
                      *               "CleanupOutcome": "",
+                     *               "CompletedShards": 0,
                      *               "Found": 0,
                      *               "Identity": {
                      *                 "Build": "",
@@ -4590,6 +5014,7 @@ export interface operations {
                      *               "RunID": "",
                      *               "ScanOutcome": "",
                      *               "Seed": 0,
+                     *               "ShardCount": 0,
                      *               "Undeleted": null
                      *             },
                      *             "worker_snapshots": null
@@ -4945,12 +5370,15 @@ export interface operations {
                      *               "Rate": 0,
                      *               "Region": "",
                      *               "RequestedTargets": null,
-                     *               "Shards": 0,
-                     *               "Targets": null
+                     *               "Targets": null,
+                     *               "Workers": 0
                      *             },
+                     *             "effective_workers": 0,
                      *             "expires_at": "0001-01-01T00:00:00Z",
                      *             "id": "",
+                     *             "max_probes_per_shard": 0,
                      *             "requires_confirmation": false,
+                     *             "shard_count": 0,
                      *             "timeouts": {
                      *               "Cleanup": 0,
                      *               "Create": 0,
@@ -4971,6 +5399,7 @@ export interface operations {
                      *           "stop_requested": false,
                      *           "summary": {
                      *             "CleanupOutcome": "",
+                     *             "CompletedShards": 0,
                      *             "Found": 0,
                      *             "Identity": {
                      *               "Build": "",
@@ -4981,6 +5410,7 @@ export interface operations {
                      *             "RunID": "",
                      *             "ScanOutcome": "",
                      *             "Seed": 0,
+                     *             "ShardCount": 0,
                      *             "Undeleted": null
                      *           },
                      *           "worker_snapshots": null

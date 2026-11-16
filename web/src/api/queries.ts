@@ -25,6 +25,11 @@ export const queries = {
       queryFn: ({ signal }) => api.runs({ active: 'true' }, signal),
       refetchInterval: 5000,
     }),
+  runWorkers: (id: string, limit = 100, after?: string) =>
+    queryOptions({
+      queryKey: ['run-workers', id, limit, after],
+      queryFn: ({ signal }) => api.runWorkers(id, { limit, after }, signal),
+    }),
   results: (params: Record<string, string | number | undefined>) =>
     queryOptions({
       queryKey: ['results', params],

@@ -111,7 +111,7 @@ func decodeRun(b []byte) (runSnapshot, error) {
 			return r, &clientError{message: "incompatible run snapshot: missing " + key}
 		}
 	}
-	if r.SnapshotVersion != snapshotVersion || r.Active == r.Settled || !validID(r.ID) || !validID(r.ScanPlanID) || r.Plan.Config.Shards < 1 || r.Plan.Config.Shards > maxShards || r.Plan.ScanPlanRevision < 1 || r.Phase == "" {
+	if r.SnapshotVersion != snapshotVersion || r.Active == r.Settled || !validID(r.ID) || !validID(r.ScanPlanID) || r.Plan.Config.Workers < 1 || r.Plan.ScanPlanRevision < 1 || r.Phase == "" {
 		return r, &clientError{message: "incompatible run snapshot; update masscanr-server"}
 	}
 	return r, nil

@@ -43,7 +43,7 @@ func TestScanPlanSettingsRequireSupportedProviderAndValidOptions(t *testing.T) {
 		t.Fatal("accepted unsupported provider")
 	}
 	settings.Provider = "vultr"
-	settings.Shards = 0
+	settings.Workers = 0
 	if _, _, err := settings.Config([]string{"192.0.2.0/24"}); err == nil {
 		t.Fatal("accepted zero workers")
 	}
@@ -53,7 +53,7 @@ func TestFreshDomainSchemaConstraints(t *testing.T) {
 	store := testStore(t)
 	ctx := context.Background()
 	var version int
-	if err := store.Pool.QueryRow(ctx, `SELECT version FROM masscanr.version`).Scan(&version); err != nil || version != 3 {
+	if err := store.Pool.QueryRow(ctx, `SELECT version FROM masscanr.version`).Scan(&version); err != nil || version != 4 {
 		t.Fatalf("schema version %d: %v", version, err)
 	}
 	now := time.Now().UTC()

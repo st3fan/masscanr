@@ -49,7 +49,7 @@ class StartScanTests(unittest.TestCase):
                         response = {"data": {"type": "scan-plans", "id": "plan-1",
                             "attributes": {"target_id": "target-1", "revision": 2 if status == 200 else 1,
                                            "settings": {"backend": "masscan", "ports": "22", "provider": "vultr",
-                                                        "shards": 1, "rate": 1000, "region": "atl",
+                                                        "workers": 1, "rate": 1000, "region": "atl",
                                                         "instance_type": "vc2-1c-1gb", "timeout": "24h",
                                                         "cleanup_timeout": "5m"}}}}
                 elif self.path.endswith("/preflight"):

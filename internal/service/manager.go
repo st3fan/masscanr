@@ -35,10 +35,10 @@ func NewManager(s *Store, dc dbos.Context, dir string) *Manager {
 	m := &Manager{Store: s, DBOS: dc, Dir: dir, cancel: map[string]context.CancelFunc{}}
 	m.Factory = func(r Run) *controller.Controller {
 		b, _ := registry.Resolve(r.Plan.Config.Backend)
-		return &controller.Controller{RunID: r.ID, Backend: b, Provider: vultr.New(os.Getenv("VULTR_API_TOKEN")), Runner: remote.NewSSH(), Timeouts: r.Plan.Timeouts}
+		return &controller.Controller{RunID: r.ID, Backend: b, Provider: vultr.New(os.Getenv("VULTR_API_TOKEN")), Runner: remote.NewSSH(), Timeouts: r.Plan.Timeouts, ShardStore: s, ExpectedIdentity: r.Summary.Identity}
 	}
-	dbos.RegisterWorkflow(dc, m.cleanupWorkflow, dbos.WithWorkflowName("masscanr.cleanup.v9"))
-	dbos.RegisterWorkflow(dc, m.workflow, dbos.WithWorkflowName("masscanr.scan.v9"))
+	dbos.RegisterWorkflow(dc, m.cleanupWorkflow, dbos.WithWorkflowName("masscanr.cleanup.v10"))
+	dbos.RegisterWorkflow(dc, m.workflow, dbos.WithWorkflowName("masscanr.scan.v10"))
 	return m
 }
 func (s *Store) mutateRun(ctx context.Context, id string, f func(*Run)) error {
@@ -80,15 +80,16 @@ func (m *Manager) execute(ctx context.Context, id string) error {
 	if e != nil {
 		return e
 	}
-	if attempted {
-		return m.Store.mutateRun(ctx, id, func(r *Run) { r.Phase = "interrupted"; r.Summary.ScanOutcome = "interrupted" })
-	}
 	if stop {
 		return m.Store.mutateRun(ctx, id, func(r *Run) { r.Phase = "cancelled"; r.Summary.ScanOutcome = "cancelled" })
 	}
 	r, e := m.Store.GetRun(ctx, id)
 	if e != nil {
 		return e
+	}
+	resuming := attempted && r.Phase == "resuming"
+	if attempted && !resuming {
+		return m.Store.mutateRun(ctx, id, func(r *Run) { r.Phase = "interrupted"; r.Summary.ScanOutcome = "interrupted" })
 	}
 	path := filepath.Join(m.Dir, id+".scan")
 	if e = m.Store.mutateRun(ctx, id, func(r *Run) { r.Artifact = path; r.Phase = "provisioning" }); e != nil {
@@ -121,7 +122,11 @@ func (m *Manager) execute(ctx context.Context, id string) error {
 			}
 		}
 	}()
-	file, e := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	flags := os.O_WRONLY | os.O_CREATE | os.O_EXCL
+	if resuming {
+		flags = os.O_RDWR | os.O_APPEND
+	}
+	file, e := os.OpenFile(path, flags, 0600)
 	if e != nil {
 		return m.Store.mutateRun(ctx, id, func(r *Run) {
 			r.Phase = "failed"
@@ -129,12 +134,33 @@ func (m *Manager) execute(ctx context.Context, id string) error {
 			r.Error = "artifact creation failed"
 		})
 	}
+	var resumeState scanfile.State
+	if resuming {
+		resumeState, e = scanfile.Replay(file, nil)
+		if e == nil && (resumeState.Header == nil || resumeState.Header.RunID != id || resumeState.Truncated || resumeState.Finished != nil || len(resumeState.ActiveShardAttempts()) != 0) {
+			e = fmt.Errorf("recovered journal is not resumable")
+		}
+		if e == nil {
+			_, e = file.Seek(0, 2)
+		}
+		if e != nil {
+			file.Close()
+			return e
+		}
+	}
 	dest := privateArtifact{Destination: scanfile.Destination{Writer: file, SyncFunc: file.Sync, Output: path, Exports: [2]string{path[:len(path)-5] + ".csv", path[:len(path)-5] + ".jsonl"}}, token: os.Getenv("VULTR_API_TOKEN")}
 	runner := m.Factory(r)
+	runner.ShardStore = m.Store
+	if resuming {
+		if e = m.Store.Pool.QueryRow(ctx, `SELECT execution_epoch FROM masscanr.runs WHERE id=$1`, id).Scan(&runner.Epoch); e != nil {
+			file.Close()
+			return e
+		}
+	}
 	if runner.ResultSink == nil {
 		runner.ResultSink = m.Store.ResultSink(r.ID, r.TargetID)
 	}
-	summary, runErr := runner.Run(c, r.Plan.Config, dest, func(event controller.Event) {
+	summary, runErr := runner.RunSharded(c, r.Plan.Config, dest, func(event controller.Event) {
 		eventCtx, stopEvent := context.WithTimeout(context.Background(), 5*time.Second)
 		defer stopEvent()
 		err := m.Store.mutateRun(eventCtx, id, func(r *Run) {
@@ -143,7 +169,7 @@ func (m *Manager) execute(ctx context.Context, id string) error {
 		if err != nil {
 			cancel()
 		}
-	})
+	}, resumeState)
 	syncErr := file.Sync()
 	closeErr := file.Close()
 	phase := "completed"
@@ -209,9 +235,26 @@ func (m *Manager) Routes(a *API, app *fiber.App) {
 		}
 		return respond(c, 200, v)
 	})
+	a.register("GET", "/v1/runs/:id/workers", "listRunWorkers", "List physical worker instances for a run", RunWorker{}, m.listRunWorkers)
 	a.register("GET", "/v1/runs/:id/inspection", "inspectRun", "Inspect saved run journal", inspection{}, artifacts.inspect)
 	a.register("GET", "/v1/runs/:id/exports/:format", "exportRun", "Download a complete export", nil, artifacts.export)
 	a.register("GET", "/v1/scan-plans/:id/runs", "listScanPlanRuns", "List runs for a scan plan", Run{}, a.listPlanRuns)
+}
+
+func (m *Manager) listRunWorkers(c fiber.Ctx) error {
+	id := c.Params("id")
+	if _, err := m.Store.GetRun(c.Context(), id); err != nil {
+		return problem(c, err)
+	}
+	limit, err := resourceLimit(c)
+	if err != nil {
+		return bad(c, err)
+	}
+	workers, err := m.Store.ListShardWorkers(c.Context(), id, c.Query("after"), limit)
+	if err != nil {
+		return problem(c, err)
+	}
+	return respond(c, 200, workers)
 }
 
 type privateArtifact struct {

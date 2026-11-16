@@ -71,7 +71,7 @@ type ScanPlanSettings struct {
 	Backend        string `json:"backend"`
 	Ports          string `json:"ports"`
 	Provider       string `json:"provider"`
-	Shards         int    `json:"shards"`
+	Workers        int    `json:"workers"`
 	Rate           uint64 `json:"rate"`
 	Region         string `json:"region"`
 	InstanceType   string `json:"instance_type"`
@@ -81,14 +81,14 @@ type ScanPlanSettings struct {
 
 func DefaultScanPlanSettings() ScanPlanSettings {
 	d := Defaults()
-	return ScanPlanSettings{Backend: d.Backend, Ports: d.Ports, Provider: "vultr", Shards: d.Shards, Rate: d.Rate, Region: d.Region, InstanceType: d.InstanceType, Timeout: d.Timeout, CleanupTimeout: d.CleanupTimeout}
+	return ScanPlanSettings{Backend: d.Backend, Ports: d.Ports, Provider: "vultr", Workers: d.Workers, Rate: d.Rate, Region: d.Region, InstanceType: d.InstanceType, Timeout: d.Timeout, CleanupTimeout: d.CleanupTimeout}
 }
 
 func (s ScanPlanSettings) Config(targetInputs []string) (scan.Config, controller.Timeouts, error) {
 	if s.Provider != "vultr" {
 		return scan.Config{}, controller.Timeouts{}, fmt.Errorf("unsupported provider %q", s.Provider)
 	}
-	d := Definition{Targets: targetInputs, Backend: s.Backend, Ports: s.Ports, Shards: s.Shards, Rate: s.Rate, Region: s.Region, InstanceType: s.InstanceType, Timeout: s.Timeout, CleanupTimeout: s.CleanupTimeout}
+	d := Definition{Targets: targetInputs, Backend: s.Backend, Ports: s.Ports, Workers: s.Workers, Rate: s.Rate, Region: s.Region, InstanceType: s.InstanceType, Timeout: s.Timeout, CleanupTimeout: s.CleanupTimeout}
 	return d.Config()
 }
 
