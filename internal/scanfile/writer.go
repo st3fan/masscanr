@@ -47,13 +47,34 @@ type Writer struct {
 }
 
 func NewWriter(out io.Writer, h Header, onError func(error)) (*Writer, error) {
-	w := &Writer{out: bufio.NewWriterSize(CheckedWriter{out}, 64<<10), onError: onError, stop: make(chan struct{}), done: make(chan struct{})}
-	if s, ok := out.(interface{ Sync() error }); ok {
-		w.syncFile = s.Sync
-	}
+	w := newWriter(out, State{}, onError)
 	if err := w.Append(Record{Type: "scan", Scan: &h}, true); err != nil {
 		return nil, err
 	}
+	w.startFlushLoop()
+	return w, nil
+}
+
+// ResumeWriter appends to a fully validated, unterminated schema-3 journal.
+// The caller must hold exclusive run ownership and position out at EOF.
+func ResumeWriter(out io.Writer, state State, onError func(error)) (*Writer, error) {
+	if state.Header == nil || state.Header.Schema != ShardedSchema || state.v3 == nil || state.Truncated || state.Finished != nil {
+		return nil, fmt.Errorf("journal cannot be resumed")
+	}
+	w := newWriter(out, state, onError)
+	w.startFlushLoop()
+	return w, nil
+}
+
+func newWriter(out io.Writer, state State, onError func(error)) *Writer {
+	w := &Writer{out: bufio.NewWriterSize(CheckedWriter{out}, 64<<10), state: state, onError: onError, stop: make(chan struct{}), done: make(chan struct{})}
+	if s, ok := out.(interface{ Sync() error }); ok {
+		w.syncFile = s.Sync
+	}
+	return w
+}
+
+func (w *Writer) startFlushLoop() {
 	go func() {
 		defer close(w.done)
 		t := time.NewTicker(time.Second)
@@ -69,7 +90,6 @@ func NewWriter(out io.Writer, h Header, onError func(error)) (*Writer, error) {
 			}
 		}
 	}()
-	return w, nil
 }
 
 func (w *Writer) fail(err error) error {
@@ -176,6 +196,21 @@ func (w *Writer) Finish(scanOutcome string, reconciliation bool, detail string) 
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	final := Final{ScanOutcome: scanOutcome, CleanupOutcome: "complete", Found: w.state.Found, Shards: w.state.Outcomes(), Undeleted: w.state.Undeleted(), ReconciliationUnresolved: reconciliation, Error: detail}
+	if len(final.Undeleted) > 0 || reconciliation {
+		final.CleanupOutcome = "incomplete"
+	}
+	return w.append(Record{Type: "finished", Finished: &final}, true)
+}
+
+// FinishSharded writes a compact completion summary without enumerating all
+// logical shards in one record.
+func (w *Writer) FinishSharded(scanOutcome string, reconciliation bool, detail string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.state.v3 == nil {
+		return fmt.Errorf("not a sharded journal")
+	}
+	final := Final{ScanOutcome: scanOutcome, CleanupOutcome: "complete", Found: w.state.Found, CompletedShards: w.state.v3.completed, ShardCount: w.state.v3.manifest.Count, Undeleted: w.state.Undeleted(), ReconciliationUnresolved: reconciliation, Error: detail}
 	if len(final.Undeleted) > 0 || reconciliation {
 		final.CleanupOutcome = "incomplete"
 	}

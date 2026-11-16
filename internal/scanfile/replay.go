@@ -29,6 +29,7 @@ type State struct {
 	Truncated   bool
 	ports       []uint16
 	attribution *scan.AttributionIndex
+	v3          *shardedState
 }
 
 func workerKey(w Worker) string {
@@ -64,6 +65,9 @@ func (s *State) Complete() bool {
 }
 
 func (s *State) Apply(r Record) error {
+	if r.Scan != nil && r.Scan.Schema == ShardedSchema || s.Header != nil && s.Header.Schema == ShardedSchema {
+		return s.applySharded(r)
+	}
 	if s.Finished != nil {
 		return fmt.Errorf("record after finished")
 	}
@@ -308,7 +312,11 @@ func Replay(in io.Reader, finding func(Finding) error) (State, error) {
 		if err := uniqueKeys(line); err != nil {
 			return s, fmt.Errorf("record %d: %w", s.Seq+1, err)
 		}
-		if err := requiredFields(line); err != nil {
+		schema := 0
+		if s.Header != nil {
+			schema = s.Header.Schema
+		}
+		if err := requiredFields(line, schema); err != nil {
 			return s, fmt.Errorf("record %d: %w", s.Seq+1, err)
 		}
 		var r Record
@@ -384,7 +392,7 @@ func uniqueKeys(line []byte) error {
 }
 
 // Missing JSON numbers/bools must not silently become valid measured zeroes.
-func requiredFields(line []byte) error {
+func requiredFields(line []byte, schema int) error {
 	object := func(data []byte, keys ...string) (map[string]json.RawMessage, error) {
 		var m map[string]json.RawMessage
 		if err := json.Unmarshal(data, &m); err != nil {
@@ -405,6 +413,15 @@ func requiredFields(line []byte) error {
 	if err = json.Unmarshal(m["type"], &kind); err != nil {
 		return err
 	}
+	if kind == "scan" {
+		var scanPayload map[string]json.RawMessage
+		if err = json.Unmarshal(m["scan"], &scanPayload); err != nil {
+			return err
+		}
+		if err = json.Unmarshal(scanPayload["schema"], &schema); err != nil {
+			return err
+		}
+	}
 	spec := map[string][]string{
 		"scan":     {"format", "schema", "run_id", "created_at", "controller_version", "label", "ownership_tag", "config"},
 		"backend":  {"shard", "name", "version", "build"},
@@ -412,6 +429,16 @@ func requiredFields(line []byte) error {
 		"progress": {"shard", "waiting"},
 		"finding":  {"shard", "ip", "port", "protocol", "state", "timestamp"},
 		"finished": {"scan_outcome", "cleanup_outcome", "found", "shards", "reconciliation_unresolved"},
+	}
+	if schema == ShardedSchema {
+		spec = map[string][]string{
+			"scan":     {"format", "schema", "run_id", "created_at", "controller_version", "label", "ownership_tag", "config"},
+			"worker":   {"slot", "instance_id", "phase", "cleanup"},
+			"attempt":  {"shard", "slot", "number", "instance_id", "phase"},
+			"progress": {"shard", "attempt", "waiting"},
+			"finding":  {"shard", "attempt", "ip", "port", "protocol", "state", "timestamp"},
+			"finished": {"scan_outcome", "cleanup_outcome", "found", "completed_shards", "shard_count", "reconciliation_unresolved", "undeleted"},
+		}
 	}
 	keys, ok := spec[kind]
 	if !ok {
@@ -422,7 +449,11 @@ func requiredFields(line []byte) error {
 		return err
 	}
 	if kind == "scan" {
-		_, err = object(payload["config"], "targets", "ports", "backend", "seed", "shards", "rate_per_worker", "provider", "region", "instance_type", "timeouts", "output", "exports")
+		configFields := []string{"targets", "ports", "backend", "seed", "shards", "rate_per_worker", "provider", "region", "instance_type", "timeouts", "output", "exports"}
+		if schema == ShardedSchema {
+			configFields = []string{"targets", "requested_targets", "ports", "backend", "seed", "workers", "requested_workers", "shard_count", "partition_version", "max_probes_per_shard", "rate_per_worker", "provider", "region", "instance_type", "timeouts", "output", "exports"}
+		}
+		_, err = object(payload["config"], configFields...)
 	}
 	if kind == "progress" {
 		for _, k := range []string{"percent", "rate", "eta_seconds"} {
@@ -431,7 +462,7 @@ func requiredFields(line []byte) error {
 			}
 		}
 	}
-	if kind == "finished" {
+	if kind == "finished" && schema != ShardedSchema {
 		if _, ok := payload["undeleted"]; !ok {
 			return fmt.Errorf("missing undeleted field")
 		}

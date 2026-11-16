@@ -81,14 +81,14 @@ func Open(ctx context.Context, url string) (*Store, error) {
 	err = store.tx(ctx, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `CREATE SCHEMA IF NOT EXISTS masscanr;
 CREATE TABLE IF NOT EXISTS masscanr.version (version integer PRIMARY KEY);
-INSERT INTO masscanr.version VALUES (3) ON CONFLICT DO NOTHING;`); err != nil {
+INSERT INTO masscanr.version VALUES (4) ON CONFLICT DO NOTHING;`); err != nil {
 			return err
 		}
 		var count, version int
 		if err := tx.QueryRow(ctx, `SELECT count(*), max(version) FROM masscanr.version`).Scan(&count, &version); err != nil {
 			return err
 		}
-		if count != 1 || version != 3 {
+		if count != 1 || version != 4 {
 			return fmt.Errorf("unsupported database schema: use a fresh development database")
 		}
 		return initDomainSchema(ctx, tx)

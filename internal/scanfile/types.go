@@ -15,6 +15,7 @@ const (
 	Format         = "masscanr.scan"
 	Schema         = 2
 	LegacySchema   = 1
+	ShardedSchema  = 3
 	MaxRecordBytes = 4 << 20
 	MaxShards      = 65535
 )
@@ -25,7 +26,12 @@ type Config struct {
 	Ports            string            `json:"ports"`
 	Backend          string            `json:"backend"`
 	Seed             string            `json:"seed"`
-	Shards           int               `json:"shards"`
+	Shards           int               `json:"shards,omitempty"`
+	Workers          int               `json:"workers,omitempty"`
+	RequestedWorkers int               `json:"requested_workers,omitempty"`
+	ShardCount       uint64            `json:"shard_count,omitempty"`
+	PartitionVersion int               `json:"partition_version,omitempty"`
+	MaxProbesPerUnit uint64            `json:"max_probes_per_shard,omitempty"`
 	Rate             uint64            `json:"rate_per_worker"`
 	Provider         string            `json:"provider"`
 	Region           string            `json:"region"`
@@ -81,6 +87,7 @@ type Header struct {
 
 type Worker struct {
 	Shard      int    `json:"shard"`
+	Slot       int    `json:"slot,omitempty"`
 	InstanceID string `json:"instance_id,omitempty"`
 	IP         string `json:"ip,omitempty"`
 	Phase      string `json:"phase"`
@@ -99,6 +106,7 @@ type Backend struct {
 
 type Progress struct {
 	Shard      int      `json:"shard"`
+	Attempt    int      `json:"attempt,omitempty"`
 	Percent    *float64 `json:"percent"`
 	Rate       *float64 `json:"rate"`
 	ETASeconds *float64 `json:"eta_seconds"`
@@ -109,6 +117,7 @@ type Finding struct {
 	Target    string     `json:"target,omitempty"`
 	Prefix    string     `json:"prefix,omitempty"`
 	Shard     int        `json:"shard"`
+	Attempt   int        `json:"attempt,omitempty"`
 	IP        netip.Addr `json:"ip"`
 	Port      uint16     `json:"port"`
 	Protocol  string     `json:"protocol"`
@@ -127,6 +136,8 @@ type Final struct {
 	CleanupOutcome           string    `json:"cleanup_outcome"`
 	Found                    uint64    `json:"found"`
 	Shards                   []Outcome `json:"shards"`
+	CompletedShards          uint64    `json:"completed_shards,omitempty"`
+	ShardCount               uint64    `json:"shard_count,omitempty"`
 	Undeleted                []string  `json:"undeleted"`
 	ReconciliationUnresolved bool      `json:"reconciliation_unresolved"`
 	Error                    string    `json:"error,omitempty"`
@@ -143,5 +154,16 @@ type Record struct {
 	Worker   *Worker   `json:"worker,omitempty"`
 	Progress *Progress `json:"progress,omitempty"`
 	Finding  *Finding  `json:"finding,omitempty"`
+	Attempt  *Attempt  `json:"attempt,omitempty"`
 	Finished *Final    `json:"finished,omitempty"`
+}
+
+// Attempt describes a whole-shard execution on one physical instance.
+type Attempt struct {
+	Shard      int    `json:"shard"`
+	Slot       int    `json:"slot"`
+	Number     int    `json:"number"`
+	InstanceID string `json:"instance_id"`
+	Phase      string `json:"phase"` // started, failed, or completed.
+	Detail     string `json:"detail,omitempty"`
 }

@@ -59,11 +59,67 @@ CREATE TABLE IF NOT EXISTS masscanr.runs (
     stop boolean NOT NULL DEFAULT false,
     result_checkpoint bigint NOT NULL DEFAULT 0 CHECK (result_checkpoint >= 0),
     result_state text NOT NULL DEFAULT 'none' CHECK (result_state IN ('none', 'live', 'partial', 'complete', 'error')),
+    shard_count bigint NOT NULL DEFAULT 0 CHECK (shard_count >= 0),
+    requested_workers integer NOT NULL DEFAULT 0 CHECK (requested_workers >= 0),
+    effective_workers integer NOT NULL DEFAULT 0 CHECK (effective_workers >= 0),
+    completed_shards bigint NOT NULL DEFAULT 0 CHECK (completed_shards >= 0),
+    execution_epoch bigint NOT NULL DEFAULT 0 CHECK (execution_epoch >= 0),
     data jsonb NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS one_active_run ON masscanr.runs(active) WHERE active;
 CREATE INDEX IF NOT EXISTS runs_target ON masscanr.runs(target_id, id);
 CREATE INDEX IF NOT EXISTS runs_scan_plan ON masscanr.runs(scan_plan_id, id);
+CREATE TABLE IF NOT EXISTS masscanr.run_worker_slots (
+    run_id text NOT NULL REFERENCES masscanr.runs(id),
+    slot integer NOT NULL CHECK (slot > 0),
+    assigned_shards bigint NOT NULL CHECK (assigned_shards > 0),
+    completed_shards bigint NOT NULL DEFAULT 0 CHECK (completed_shards >= 0),
+    next_shard bigint NOT NULL CHECK (next_shard > 0),
+    current_instance_id text,
+    state text NOT NULL DEFAULT 'pending',
+    PRIMARY KEY (run_id, slot)
+);
+CREATE TABLE IF NOT EXISTS masscanr.run_workers (
+    run_id text NOT NULL REFERENCES masscanr.runs(id),
+    instance_id text NOT NULL,
+    slot integer NOT NULL,
+    ip text NOT NULL DEFAULT '',
+    state text NOT NULL,
+    cleanup text NOT NULL DEFAULT 'pending',
+    detail text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    PRIMARY KEY (run_id, instance_id),
+    FOREIGN KEY (run_id, slot) REFERENCES masscanr.run_worker_slots(run_id, slot)
+);
+CREATE INDEX IF NOT EXISTS run_workers_slot ON masscanr.run_workers(run_id, slot, created_at);
+CREATE TABLE IF NOT EXISTS masscanr.run_shards (
+    run_id text NOT NULL REFERENCES masscanr.runs(id),
+    shard_index bigint NOT NULL CHECK (shard_index > 0),
+    slot integer NOT NULL,
+    state text NOT NULL CHECK (state IN ('running', 'failed', 'completed')),
+    attempts integer NOT NULL CHECK (attempts BETWEEN 1 AND 3),
+    current_instance_id text NOT NULL,
+    progress_percent double precision,
+    progress_at timestamptz,
+    updated_at timestamptz NOT NULL,
+    PRIMARY KEY (run_id, shard_index),
+    FOREIGN KEY (run_id, slot) REFERENCES masscanr.run_worker_slots(run_id, slot)
+);
+CREATE INDEX IF NOT EXISTS run_shards_slot ON masscanr.run_shards(run_id, slot, shard_index);
+CREATE TABLE IF NOT EXISTS masscanr.run_shard_attempts (
+    run_id text NOT NULL,
+    shard_index bigint NOT NULL,
+    attempt integer NOT NULL CHECK (attempt BETWEEN 1 AND 3),
+    instance_id text NOT NULL,
+    state text NOT NULL CHECK (state IN ('running', 'failed', 'completed')),
+    detail text NOT NULL DEFAULT '',
+    started_at timestamptz NOT NULL,
+    finished_at timestamptz,
+    PRIMARY KEY (run_id, shard_index, attempt),
+    FOREIGN KEY (run_id, shard_index) REFERENCES masscanr.run_shards(run_id, shard_index),
+    FOREIGN KEY (run_id, instance_id) REFERENCES masscanr.run_workers(run_id, instance_id)
+);
 CREATE TABLE IF NOT EXISTS masscanr.scan_results (
     run_id text NOT NULL REFERENCES masscanr.runs(id),
     target_id text NOT NULL REFERENCES masscanr.targets(id),
