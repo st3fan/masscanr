@@ -425,20 +425,30 @@ export interface components {
             backend: string;
             exports: string[] | null;
             instance_type: string;
+            /** Format: int64 */
+            max_probes_per_shard?: number;
             output: string;
+            /** Format: int64 */
+            partition_version?: number;
             ports: string;
             provider: string;
             /** Format: int64 */
             rate_per_worker: number;
             region: string;
             requested_targets?: components["schemas"]["scanTarget"][] | null;
+            /** Format: int64 */
+            requested_workers?: number;
             seed: string;
             /** Format: int64 */
-            shards: number;
+            shard_count?: number;
+            /** Format: int64 */
+            shards?: number;
             targets: string[] | null;
             timeouts: {
                 [key: string]: string;
             };
+            /** Format: int64 */
+            workers?: number;
         };
         scanfileWorker: {
             cleanup: string;
@@ -448,6 +458,8 @@ export interface components {
             phase: string;
             /** Format: int64 */
             shard: number;
+            /** Format: int64 */
+            slot?: number;
         };
         serviceScanPlanSettings: {
             backend: string;
@@ -2174,7 +2186,6 @@ export interface operations {
                      *             "rate_per_worker": 0,
                      *             "region": "",
                      *             "seed": "",
-                     *             "shards": 0,
                      *             "targets": null,
                      *             "timeouts": null
                      *           },
