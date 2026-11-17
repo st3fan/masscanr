@@ -54,6 +54,64 @@ export class ApiError extends Error {
   }
 }
 
+export type ExportFormat = 'csv' | 'jsonl'
+
+function errorDetail(body: unknown, status: number): string {
+  const errors =
+    body && typeof body === 'object' && 'errors' in body ? (body as { errors: unknown }).errors : []
+  const detail = Array.isArray(errors)
+    ? errors
+        .map((error) => (typeof error?.detail === 'string' ? error.detail : ''))
+        .filter(Boolean)
+        .join('; ')
+    : ''
+  return detail || `Request failed (${status})`
+}
+
+async function apiError(response: Response): Promise<ApiError> {
+  if (response.headers.get('content-type')?.split(';')[0] !== 'application/vnd.api+json')
+    return new ApiError(response.status, `Request failed (${response.status})`)
+  try {
+    const body: unknown = await response.json()
+    return new ApiError(response.status, errorDetail(body, response.status))
+  } catch {
+    return new ApiError(response.status, `Request failed (${response.status})`)
+  }
+}
+
+function attachmentFilename(header: string | null): string {
+  const match = header?.match(/(?:^|;)\s*filename="([^"\\/]+)"(?:;|$)/i)
+  const name = match?.[1]
+  if (!name || name === '.' || name === '..') throw new ApiError(502, 'Invalid export filename')
+  return name
+}
+
+export async function downloadRunExport(id: string, format: ExportFormat): Promise<void> {
+  const path = `/v1/runs/${encodeURIComponent(id)}/exports/${format}`
+  const response = await fetch(path, {
+    headers: { Accept: 'text/csv, application/x-ndjson, application/vnd.api+json' },
+    credentials: 'same-origin',
+  })
+  if (!response.ok) throw await apiError(response)
+  const contentType = response.headers.get('content-type')?.split(';')[0]
+  if (contentType !== (format === 'csv' ? 'text/csv' : 'application/x-ndjson'))
+    throw new ApiError(502, 'Unexpected export response type')
+  const filename = attachmentFilename(response.headers.get('content-disposition'))
+  const blob = await response.blob()
+  const objectURL = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = objectURL
+  link.download = filename
+  document.body.append(link)
+  try {
+    link.click()
+  } finally {
+    link.remove()
+    // Browsers may begin reading the object URL after the click handler returns.
+    window.setTimeout(() => URL.revokeObjectURL(objectURL), 60_000)
+  }
+}
+
 function expectDocument<T>(value: unknown, type: string, collection: boolean): T {
   if (!value || typeof value !== 'object' || !('data' in value))
     throw new ApiError(502, 'Invalid API document')
@@ -112,17 +170,7 @@ async function request<T>(
     throw new ApiError(response.status, 'Invalid API JSON')
   }
   if (!response.ok) {
-    const errors =
-      body && typeof body === 'object' && 'errors' in body
-        ? (body as { errors: unknown }).errors
-        : []
-    const detail = Array.isArray(errors)
-      ? errors
-          .map((error) => (typeof error?.detail === 'string' ? error.detail : ''))
-          .filter(Boolean)
-          .join('; ')
-      : ''
-    throw new ApiError(response.status, detail || `Request failed (${response.status})`)
+    throw new ApiError(response.status, errorDetail(body, response.status))
   }
   return expectDocument<T>(body, type, collection)
 }

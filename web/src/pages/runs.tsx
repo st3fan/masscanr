@@ -1,13 +1,23 @@
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { ColumnDef } from '@tanstack/react-table'
 import { Link, useParams } from 'react-router-dom'
-import { api, nextCursor, type RunWorker, type ScanRun } from '@/api/client'
+import { Download } from 'lucide-react'
+import {
+  api,
+  downloadRunExport,
+  nextCursor,
+  type ExportFormat,
+  type RunWorker,
+  type ScanRun,
+} from '@/api/client'
 import { queries } from '@/api/queries'
 import { DataTable } from '@/components/data-table'
 import { MetricCard, StatusBadge, formatTime } from '@/components/domain'
 import { PageHeader } from '@/components/layout'
 import { useCursorPagination } from '@/components/pagination'
 import { ErrorState, LoadingState } from '@/components/states'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 
@@ -88,6 +98,8 @@ export function RunsPage() {
 }
 export function RunDetailPage() {
   const { id = '' } = useParams()
+  const [downloading, setDownloading] = useState<ExportFormat | null>(null)
+  const [downloadError, setDownloadError] = useState<string | null>(null)
   const historyPage = useCursorPagination()
   const query = useQuery({
     queryKey: ['run', id],
@@ -108,6 +120,18 @@ export function RunDetailPage() {
   const totalShards = a.summary.ShardCount || a.preflight.shard_count
   const completedShards = a.summary.CompletedShards
   const shardPercent = totalShards > 0 ? (100 * completedShards) / totalShards : 0
+  const canExport = !a.active && a.settled && a.summary.ScanOutcome === 'complete'
+  async function download(format: ExportFormat) {
+    setDownloading(format)
+    setDownloadError(null)
+    try {
+      await downloadRunExport(run.id, format)
+    } catch (error) {
+      setDownloadError(error instanceof Error ? error.message : 'Export download failed')
+    } finally {
+      setDownloading(null)
+    }
+  }
   return (
     <>
       <PageHeader
@@ -155,6 +179,41 @@ export function RunDetailPage() {
           {a.error}
         </div>
       )}
+      <Card className="mt-6">
+        <CardHeader>
+          <CardTitle>Download results</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            {canExport
+              ? 'Download the saved results for this completed run.'
+              : a.active
+                ? 'Downloads become available after the scan completes.'
+                : 'A complete export is unavailable for this run. Positive findings may exist, but they do not establish complete coverage.'}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {(['csv', 'jsonl'] as const).map((format) => (
+              <Button
+                key={format}
+                type="button"
+                variant="outline"
+                disabled={!canExport || downloading !== null}
+                onClick={() => void download(format)}
+              >
+                <Download aria-hidden="true" />
+                {downloading === format
+                  ? `Downloading ${format.toUpperCase()}…`
+                  : `Download ${format.toUpperCase()}`}
+              </Button>
+            ))}
+          </div>
+          {downloadError && (
+            <p role="alert" className="text-sm text-destructive">
+              {downloadError}
+            </p>
+          )}
+        </CardContent>
+      </Card>
       <div className="mt-6 grid gap-5 xl:grid-cols-[2fr_1fr]">
         <Card>
           <CardHeader>

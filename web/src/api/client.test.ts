@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, api, nextCursor, relatedResources } from './client'
+import { ApiError, api, downloadRunExport, nextCursor, relatedResources } from './client'
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  vi.unstubAllGlobals()
+  vi.restoreAllMocks()
+})
 function reply(body: unknown, status = 200, contentType = 'application/vnd.api+json') {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': contentType } })
 }
@@ -65,5 +68,62 @@ describe('JSON:API client', () => {
     expect(relatedResources(document, document.data[0], 'target')[0].attributes.name).toBe(
       'External',
     )
+  })
+})
+
+describe('run exports', () => {
+  it.each([
+    ['csv', 'text/csv', 'run-1.csv'],
+    ['jsonl', 'application/x-ndjson', 'run-1.jsonl'],
+  ] as const)(
+    'downloads %s using the server attachment name',
+    async (format, mediaType, filename) => {
+      const fetch = vi.fn().mockResolvedValue(
+        new Response('saved results', {
+          headers: {
+            'Content-Type': mediaType,
+            'Content-Disposition': `attachment; filename="${filename}"`,
+          },
+        }),
+      )
+      const createObjectURL = vi.fn().mockReturnValue('blob:export')
+      vi.stubGlobal('fetch', fetch)
+      vi.stubGlobal(
+        'URL',
+        class extends URL {
+          static createObjectURL = createObjectURL
+          static revokeObjectURL = vi.fn()
+        },
+      )
+      let clickedName = ''
+      vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
+        this: HTMLAnchorElement,
+      ) {
+        clickedName = this.download
+      })
+      await downloadRunExport('run-1', format)
+      expect(fetch).toHaveBeenCalledWith(`/v1/runs/run-1/exports/${format}`, {
+        headers: { Accept: 'text/csv, application/x-ndjson, application/vnd.api+json' },
+        credentials: 'same-origin',
+      })
+      expect(clickedName).toBe(filename)
+      expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob))
+    },
+  )
+
+  it('surfaces an unavailable saved file without offering a partial download', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          reply({ errors: [{ status: '409', detail: 'saved export missing' }] }, 409),
+        ),
+    )
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click')
+    await expect(downloadRunExport('run-1', 'csv')).rejects.toEqual(
+      new ApiError(409, 'saved export missing'),
+    )
+    expect(click).not.toHaveBeenCalled()
   })
 })
