@@ -10,8 +10,8 @@ request examples, recovery semantics, and local test commands.
 The [project objective](OBJECTIVE.md) and [technology policy](TECHNOLOGY.md)
 explain the operating boundaries.
 
-The private, read-only dashboard is served at `/` by the Compose image. It shows
-targets, scan plans, run history, and positive open-port results. The browser
+The private dashboard is served at `/` by the Compose image. It manages Targets
+and shows scan plans, run history, and positive open-port results. The browser
 does not start or stop scans, and missing results do not establish closed ports.
 The server has no built-in authentication; keep the dashboard on loopback or a
 private listener. See [frontend development](docs/frontend.md) for local build,

@@ -76,15 +76,61 @@ const result = {
 }
 
 test.beforeEach(async ({ page }) => {
+  let targetState: typeof target & {
+    attributes: typeof target.attributes & { archived_at?: string }
+  } = structuredClone(target)
   await page.route('**/healthz', (route) => route.fulfill({ json: { status: 'ready' } }))
   await page.route('**/v1/**', (route) => {
     const requestURL = new URL(route.request().url())
     const path = requestURL.pathname
+    const method = route.request().method()
+    if (path === '/v1/targets' && method === 'POST') {
+      const body = route.request().postDataJSON() as {
+        data: { attributes: { name: string; entries: string[] } }
+      }
+      targetState = {
+        ...targetState,
+        attributes: {
+          ...targetState.attributes,
+          name: body.data.attributes.name,
+          entries: body.data.attributes.entries.map((input, position) => ({
+            id: `e-${position + 1}`,
+            position,
+            kind: 'ip',
+            selector: `${input}/32`,
+            input,
+          })),
+        },
+      }
+      return route.fulfill({
+        status: 201,
+        contentType: 'application/vnd.api+json',
+        body: JSON.stringify({ data: targetState }),
+      })
+    }
+    if (path === '/v1/targets/t-1' && method === 'PATCH') {
+      const body = route.request().postDataJSON() as {
+        data: { attributes: { revision: number; name?: string; archived?: boolean } }
+      }
+      targetState = {
+        ...targetState,
+        attributes: {
+          ...targetState.attributes,
+          name: body.data.attributes.name ?? targetState.attributes.name,
+          revision: targetState.attributes.revision + 1,
+          ...(body.data.attributes.archived ? { archived_at: '2026-01-03T00:00:00Z' } : {}),
+        },
+      }
+      return route.fulfill({
+        contentType: 'application/vnd.api+json',
+        body: JSON.stringify({ data: targetState }),
+      })
+    }
     const data =
       path === '/v1/targets'
-        ? [target]
+        ? [targetState]
         : path === '/v1/targets/t-1'
-          ? target
+          ? targetState
           : path === '/v1/scan-plans'
             ? [plan]
             : path === '/v1/scan-plans/p-1'
@@ -111,7 +157,7 @@ test.beforeEach(async ({ page }) => {
   })
 })
 
-test('navigates read-only pages and captures the design', async ({ page }, testInfo) => {
+test('navigates inventory pages and captures the design', async ({ page }, testInfo) => {
   await page.goto('/')
   await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath('overview-light.png'), fullPage: true })
@@ -135,6 +181,34 @@ test('navigates read-only pages and captures the design', async ({ page }, testI
   expect(report.violations.filter((v) => ['critical', 'serious'].includes(v.impact ?? ''))).toEqual(
     [],
   )
+})
+
+test('creates, edits, and archives a Target with accessible confirmation', async ({
+  page,
+}, testInfo) => {
+  await page.goto('/targets/new')
+  await expect(page.getByRole('heading', { name: 'Create target' })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('target-create-light.png'), fullPage: true })
+  await page.getByRole('textbox', { name: 'Name' }).fill('New authorized network')
+  await page.getByRole('textbox', { name: 'Selector 1' }).fill('192.0.2.1')
+  await page.getByRole('button', { name: 'Create target' }).click()
+  await expect(page.getByRole('heading', { name: 'New authorized network' })).toBeVisible()
+  await page.getByRole('link', { name: 'Edit target' }).click()
+  await page.getByRole('textbox', { name: 'Name' }).fill('Renamed network')
+  await page.getByRole('button', { name: 'Save target' }).click()
+  await expect(page.getByRole('heading', { name: 'Renamed network' })).toBeVisible()
+  await page.getByRole('button', { name: 'Use dark theme' }).click()
+  await page.getByRole('button', { name: 'Archive target' }).click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.getByRole('heading', { name: 'Archive this Target?' })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('target-archive-dark.png'), fullPage: true })
+  const report = await new AxeBuilder({ page }).analyze()
+  expect(report.violations.filter((v) => ['critical', 'serious'].includes(v.impact ?? ''))).toEqual(
+    [],
+  )
+  await dialog.getByRole('button', { name: 'Archive target' }).click()
+  await expect(page.getByText(/This Target is retained for history/)).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Edit target' })).toHaveCount(0)
 })
 
 test('shows server result filters and coverage', async ({ page }) => {

@@ -114,7 +114,7 @@ export function AppLayout() {
           </span>
           <div className="ml-auto flex items-center gap-2">
             <span className="hidden rounded-full border px-2.5 py-1 text-xs text-muted-foreground sm:inline">
-              Read only
+              Private listener
             </span>
             <Button
               variant="ghost"

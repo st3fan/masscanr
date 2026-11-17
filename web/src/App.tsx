@@ -10,6 +10,12 @@ const DashboardPage = lazy(() =>
   import('@/pages/dashboard').then((m) => ({ default: m.DashboardPage })),
 )
 const TargetsPage = lazy(() => import('@/pages/targets').then((m) => ({ default: m.TargetsPage })))
+const TargetNewPage = lazy(() =>
+  import('@/pages/targets').then((m) => ({ default: m.TargetNewPage })),
+)
+const TargetEditPage = lazy(() =>
+  import('@/pages/targets').then((m) => ({ default: m.TargetEditPage })),
+)
 const TargetDetailPage = lazy(() =>
   import('@/pages/targets').then((m) => ({ default: m.TargetDetailPage })),
 )
@@ -54,6 +60,8 @@ export function App() {
               <Route element={<AppLayout />}>
                 <Route index element={<DashboardPage />} />
                 <Route path="targets" element={<TargetsPage />} />
+                <Route path="targets/new" element={<TargetNewPage />} />
+                <Route path="targets/:id/edit" element={<TargetEditPage />} />
                 <Route path="targets/:id" element={<TargetDetailPage />} />
                 <Route path="scan-plans" element={<PlansPage />} />
                 <Route path="scan-plans/:id" element={<PlanDetailPage />} />
