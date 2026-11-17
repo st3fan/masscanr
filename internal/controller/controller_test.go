@@ -589,3 +589,20 @@ func TestFinalizeRunOnlyAfterConfirmedWorkerCleanup(t *testing.T) {
 		t.Fatalf("failed to finalize after cleanup: err=%v calls=%d", err, provider.finalized)
 	}
 }
+
+func TestTaggedWorkerReadiness(t *testing.T) {
+	const run = "11111111-2222-3333-4444-555555555555"
+	provider := newProvider()
+	worker := cloud.Worker{ID: "droplet", Label: "masscanr-worker-slot", Tags: []string{cloud.Label, "masscanr-run-" + run}, Password: "fixture-secret", Ready: true}
+	provider.workers[worker.ID] = worker
+	controller := Controller{Provider: provider, Timeouts: DefaultTimeouts()}
+	ready, err := controller.ready(t.Context(), worker, run)
+	if err != nil || ready.ID != worker.ID {
+		t.Fatalf("tagged worker rejected: %+v %v", ready, err)
+	}
+	worker.Tags = []string{"masscanr-run-" + run}
+	provider.workers[worker.ID] = worker
+	if _, err := controller.ready(t.Context(), worker, run); err == nil {
+		t.Fatal("worker without application ownership tag was accepted")
+	}
+}
