@@ -561,3 +561,31 @@ func TestAcceptedFindingCountsOverrideNativePackets(t *testing.T) {
 		t.Fatal(summary, err)
 	}
 }
+
+type finalizingProvider struct {
+	*fakeProvider
+	finalized int
+}
+
+func (p *finalizingProvider) FinalizeRun(_ context.Context, _ string) error {
+	p.finalized++
+	return nil
+}
+
+func TestFinalizeRunOnlyAfterConfirmedWorkerCleanup(t *testing.T) {
+	const run = "11111111-2222-3333-4444-555555555555"
+	provider := &finalizingProvider{fakeProvider: newProvider()}
+	provider.workers["owned"] = cloud.Worker{ID: "owned", Label: cloud.Label, Tags: []string{"masscanr-run-" + run}}
+	provider.deleteFail = true
+	controller := Controller{Provider: provider, Timeouts: DefaultTimeouts()}
+	controller.Timeouts.Poll = time.Millisecond
+	_, _, err := controller.CleanupRun(t.Context(), run)
+	if err == nil || provider.finalized != 0 {
+		t.Fatalf("finalized before cleanup: err=%v calls=%d", err, provider.finalized)
+	}
+	provider.deleteFail = false
+	_, _, err = controller.CleanupRun(t.Context(), run)
+	if err != nil || provider.finalized != 1 {
+		t.Fatalf("failed to finalize after cleanup: err=%v calls=%d", err, provider.finalized)
+	}
+}

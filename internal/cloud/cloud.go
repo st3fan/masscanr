@@ -59,3 +59,9 @@ type Provider interface {
 	List(context.Context, string) ([]Worker, error)
 	Delete(context.Context, Worker, string) error
 }
+
+// RunFinalizer releases provider resources shared by all workers in a run.
+// The controller invokes it only after every worker deletion is confirmed.
+type RunFinalizer interface {
+	FinalizeRun(context.Context, string) error
+}

@@ -441,6 +441,13 @@ func (c *Controller) cleanup(ctx context.Context, runID string, initial []tracke
 		failure = errors.Join(failure, fmt.Errorf("undeleted instance %s: %w", id, err))
 	}
 	slices.Sort(remaining)
+	if len(remaining) == 0 && reconciliation == nil {
+		if finalizer, ok := c.Provider.(cloud.RunFinalizer); ok {
+			if err := finalizer.FinalizeRun(ctx, runID); err != nil {
+				reconciliation = fmt.Errorf("finalize run %s: %w", runID, err)
+			}
+		}
+	}
 	return remaining, reconciliation != nil, errors.Join(failure, reconciliation)
 }
 
