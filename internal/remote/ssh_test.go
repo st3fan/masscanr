@@ -23,6 +23,10 @@ import (
 )
 
 func sshFixture(t *testing.T, handle func(string, ssh.Channel) uint32) (*SSH, cloud.Worker) {
+	return sshFixtureAuth(t, handle, false)
+}
+
+func sshFixtureAuth(t *testing.T, handle func(string, ssh.Channel) uint32, useKey bool) (*SSH, cloud.Worker) {
 	t.Helper()
 	_, key, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -38,6 +42,20 @@ func sshFixture(t *testing.T, handle func(string, ssh.Channel) uint32) (*SSH, cl
 		}
 		return nil, nil
 	}}
+	_, clientKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientSigner, err := ssh.NewSignerFromKey(clientKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.PublicKeyCallback = func(meta ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
+		if meta.User() != "root" || !bytes.Equal(key.Marshal(), clientSigner.PublicKey().Marshal()) {
+			return nil, fmt.Errorf("authentication failed")
+		}
+		return nil, nil
+	}
 	config.AddHostKey(signer)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -103,7 +121,74 @@ func sshFixture(t *testing.T, handle func(string, ssh.Channel) uint32) (*SSH, cl
 	runner := NewSSH()
 	runner.Port = port
 	runner.RetryDelay = time.Millisecond
-	return runner, cloud.Worker{ID: "fixture", IP: "127.0.0.1", Password: "test-password"}
+	worker := cloud.Worker{ID: "fixture", IP: "127.0.0.1", Password: "test-password"}
+	if useKey {
+		worker.Password = ""
+		worker.Key, err = cloud.NewSSHKey(clientKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	return runner, worker
+}
+
+func TestSSHKeyAuthentication(t *testing.T) {
+	runner, worker := sshFixtureAuth(t, func(command string, ch ssh.Channel) uint32 {
+		if command != "id -u" {
+			t.Errorf("unexpected command %q", command)
+			return 1
+		}
+		fmt.Fprint(ch, "0")
+		return 0
+	}, true)
+	var out bytes.Buffer
+	if err := runner.command(t.Context(), worker, "id -u", &out, io.Discard); err != nil || out.String() != "0" {
+		t.Fatal(err, out.String())
+	}
+	worker.Password = "unexpected"
+	if err := runner.command(t.Context(), worker, "id -u", io.Discard, io.Discard); err == nil {
+		t.Fatal("accepted ambiguous SSH authentication")
+	}
+}
+
+func TestFedoraPreparationWithSSHKey(t *testing.T) {
+	var installed atomic.Bool
+	runner, worker := sshFixtureAuth(t, func(command string, ch ssh.Channel) uint32 {
+		switch {
+		case command == "id -u":
+			fmt.Fprint(ch, "0\n")
+		case command == "cat /etc/os-release":
+			fmt.Fprint(ch, "ID=fedora\nVERSION_ID=44\n")
+		case command == "uname -m":
+			fmt.Fprint(ch, "x86_64\n")
+		case strings.HasPrefix(command, "exec 'dnf' "):
+			if !strings.Contains(command, "'--disablerepo=*'") || !strings.Contains(command, "'--setopt=fedora.gpgcheck=1'") || !strings.Contains(command, "'--setopt=updates.gpgcheck=1'") || !strings.HasSuffix(command, "'masscan-1.3.2-15.fc44.x86_64' 'coreutils' >&2") {
+				t.Error(command)
+				return 1
+			}
+			installed.Store(true)
+		case command == "'stdbuf' '-oL' 'masscan' '--version'":
+			fmt.Fprintln(ch, "Masscan version 1.3.2 (fixture)")
+			return 1
+		case command == "'sha256sum' '/usr/bin/masscan'":
+			fmt.Fprintln(ch, masscan.FedoraBinarySHA256+"  /usr/bin/masscan")
+		case strings.HasPrefix(command, "'rpm' '-q' '--queryformat' "):
+			fmt.Fprint(ch, "masscan-1.3.2-15.fc44.x86_64\ncoreutils-9.7-1.fc44.x86_64\n")
+		default:
+			t.Error(command)
+			return 1
+		}
+		return 0
+	}, true)
+	worker.Platform = "fedora44"
+	p, err := (masscan.Backend{}).PreparationFor(worker.Platform)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := runner.Prepare(t.Context(), worker, p)
+	if err != nil || !installed.Load() || prepared.Release != "44" || prepared.Identity.Version != "1.3.2" {
+		t.Fatal(prepared, err)
+	}
 }
 
 func alpinePreparationFixture(command string, ch ssh.Channel) (bool, uint32) {

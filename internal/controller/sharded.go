@@ -299,7 +299,11 @@ func (c *Controller) runSlot(ctx context.Context, cfg scan.Config, manifest scan
 				return err
 			}
 			prepCtx, prepStop := context.WithTimeout(ctx, c.Timeouts.Prepare)
-			prepared, prepErr := c.Runner.Prepare(prepCtx, worker, c.Backend.Preparation())
+			preparation, prepErr := preparationFor(c.Backend, worker)
+			var prepared scan.Prepared
+			if prepErr == nil {
+				prepared, prepErr = c.Runner.Prepare(prepCtx, worker, preparation)
+			}
 			prepStop()
 			if prepErr != nil {
 				if ctx.Err() != nil || setupFailures >= 2 {

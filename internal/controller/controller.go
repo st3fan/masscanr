@@ -304,7 +304,11 @@ func (c *Controller) prepare(ctx context.Context, workers []tracked, runID strin
 				notify(Event{Shard: item.shard, ID: w.ID, IP: w.IP, State: "preparing"})
 				prepCtx, stop := context.WithTimeout(ctx, c.Timeouts.Prepare)
 				var prepared scan.Prepared
-				prepared, err = c.Runner.Prepare(prepCtx, w, c.Backend.Preparation())
+				var preparation backend.Preparation
+				preparation, err = preparationFor(c.Backend, w)
+				if err == nil {
+					prepared, err = c.Runner.Prepare(prepCtx, w, preparation)
+				}
 				versions[index] = prepared.Identity
 				stop()
 				if err == nil {
@@ -347,7 +351,10 @@ func (c *Controller) ready(ctx context.Context, initial cloud.Worker, runID stri
 		if w.Password == "" {
 			w.Password = initial.Password
 		}
-		if w.Ready && w.Password != "" {
+		if w.Key == nil {
+			w.Key = initial.Key
+		}
+		if w.Ready && w.HasAuth() {
 			return w, nil
 		}
 		if err = pause(ctx, c.Timeouts.Poll); err != nil {

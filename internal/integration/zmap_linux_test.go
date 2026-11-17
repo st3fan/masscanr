@@ -30,11 +30,16 @@ func zmapBinary(t *testing.T) string {
 
 func TestZMapCapabilities(t *testing.T) {
 	program := zmapBinary(t)
+	platform := os.Getenv("ZMAP_TEST_PLATFORM")
+	version := "zmap v4.3.4"
+	if platform == "fedora44" {
+		version = "zmap v4.4.0"
+	}
 	for _, check := range []struct {
 		args []string
 		want []string
 	}{
-		{[]string{"--config", "/dev/null", "--disable-syslog", "--version"}, []string{"zmap v4.3.4"}},
+		{[]string{"--config", "/dev/null", "--disable-syslog", "--version"}, []string{version}},
 		{[]string{"--config", "/dev/null", "--disable-syslog", "--probe-module", "tcp_synscan", "--list-output-fields"}, []string{"saddr", "sport", "timestamp_ts", "success", "classification", "repeat"}},
 	} {
 		data, err := exec.CommandContext(t.Context(), program, check.args...).Output()
@@ -47,8 +52,22 @@ func TestZMapCapabilities(t *testing.T) {
 			}
 		}
 	}
-	data, err := exec.CommandContext(t.Context(), "apk", "--no-network", "info", "--installed", "-v", "zmap").Output()
-	if err != nil || strings.TrimSpace(string(data)) != "zmap-4.3.4-r0" {
+	var packageCommand *exec.Cmd
+	var err error
+	preparation := (zmap.Backend{}).Preparation()
+	expected := "zmap-4.3.4-r0"
+	if platform == "fedora44" {
+		packageCommand = exec.CommandContext(t.Context(), "rpm", "-q", "--queryformat", "%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\\n", "zmap")
+		preparation, err = (zmap.Backend{}).PreparationFor(platform)
+		if err != nil {
+			t.Fatal(err)
+		}
+		expected = "zmap-4.4.0-1.fc44.x86_64"
+	} else {
+		packageCommand = exec.CommandContext(t.Context(), "apk", "--no-network", "info", "--installed", "-v", "zmap")
+	}
+	data, err := packageCommand.Output()
+	if err != nil || strings.TrimSpace(string(data)) != expected {
 		t.Fatal(err, string(data))
 	}
 	checksum, err := exec.CommandContext(t.Context(), "sha256sum", program).Output()
@@ -56,7 +75,6 @@ func TestZMapCapabilities(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("%s; %s", strings.TrimSpace(string(data)), strings.TrimSpace(string(checksum)))
-	preparation := (zmap.Backend{}).Preparation()
 	outputs := make([]string, len(preparation.Probes))
 	for i, probe := range preparation.Probes {
 		result, err := exec.CommandContext(t.Context(), probe.Command.Executable, probe.Command.Args...).Output()

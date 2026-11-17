@@ -22,9 +22,15 @@ type Probe struct {
 	ExitCodes []int
 }
 type Preparation struct {
+	Platform string   // Empty means Alpine for existing workers.
 	Packages []string // APK constraints, e.g. masscan~1.3.2.
 	Probes   []Probe
 	Verify   func(outputs []string, installed string) (scan.Identity, error)
+}
+
+// PlatformBackend adds preparation for workers beyond the existing Alpine path.
+type PlatformBackend interface {
+	PreparationFor(string) (Preparation, error)
 }
 
 type File struct{ Name, Content string } // Private basename in a run-owned directory.
