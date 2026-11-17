@@ -294,6 +294,16 @@ and scan start. DigitalOcean plans freeze the `fedora-44-x64` image and
 from the scanner catalog; cleanup still checks the separate GPU Droplet list
 before retiring a run's SSH key.
 
+The DigitalOcean token needs `droplet:read`, `droplet:create`, `droplet:delete`,
+`ssh_key:read`, `ssh_key:create`, `ssh_key:delete`, `tag:read`, `tag:create`,
+`regions:read`, `sizes:read`, `actions:read`, `image:read`, `snapshot:read`, and
+`vpc:read`. These include the [required scopes for Droplet creation](https://docs.digitalocean.com/reference/api/scopes/droplet/create/),
+[Droplet deletion](https://docs.digitalocean.com/reference/api/scopes/droplet/delete/),
+and [tag creation](https://docs.digitalocean.com/reference/api/scopes/tag/create/).
+The provider validates catalog and owned-worker read access before creating a
+worker. Use the manual live checks below to verify a new or rotated token's
+create and delete access before its first scan.
+
 ## Development and validation
 
 ```sh
@@ -311,3 +321,17 @@ PostgreSQL tests create and clean up uniquely named databases when
 compatibility in network-disabled Alpine test containers. Running the actual
 application, a live scan, or a cloud worker check requires separate authorization
 and must follow [repository guidance](AGENTS.md).
+
+After separate authorization, run the opt-in DigitalOcean checks in order:
+
+```sh
+python3 scripts/check-digitalocean-live.py catalog
+python3 scripts/check-digitalocean-live.py keys
+python3 scripts/check-digitalocean-live.py droplet
+```
+
+The helper reads only `DIGITALOCEAN_API_TOKEN` and `DIGITALOCEAN_SSH_SEED` from
+ignored `.env` or the environment. The final check creates one billable,
+run-tagged Droplet and confirms its deletion and the run key's deletion. It
+does not start the application or scan. Ordinary `go test ./...` never includes
+these live checks.
