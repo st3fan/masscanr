@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 
@@ -150,5 +151,26 @@ func TestShardedControllerStopsAfterTwoRetries(t *testing.T) {
 	state, replayErr := scanfile.Replay(bytes.NewReader(out.Bytes()), nil)
 	if replayErr != nil || state.Finished == nil || state.Finished.ScanOutcome != "failed" || summary.CompletedShards != 0 || p.created != 3 || p.deleted != 3 || len(state.ShardAttempts()) != 6 {
 		t.Fatalf("summary=%+v created=%d deleted=%d attempts=%+v replay=%v", summary, p.created, p.deleted, state.ShardAttempts(), replayErr)
+	}
+}
+
+func TestShardedRecoveryRejectsProviderChange(t *testing.T) {
+	provider := newProvider()
+	controller := testController(provider, fakeRunner{scan: func(context.Context, cloud.Worker, []string, io.Writer, func(scan.Progress)) error { return nil }})
+	controller.RunID, controller.ShardStore = "fixture-provider", &shardMemory{}
+	cfg := testConfig()
+	var journal bytes.Buffer
+	if _, err := controller.RunSharded(t.Context(), cfg, &journal, nil, scanfile.State{}); err != nil {
+		t.Fatal(err)
+	}
+	state, err := scanfile.Replay(bytes.NewReader(journal.Bytes()), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.Finished = nil // Model the unfinished journal after a service restart.
+	cfg.Provider = "digitalocean"
+	var output bytes.Buffer
+	if _, err := controller.RunSharded(t.Context(), cfg, &output, nil, state); err == nil || !strings.Contains(err.Error(), "differs from frozen preflight") {
+		t.Fatalf("accepted provider change on recovery: %v", err)
 	}
 }

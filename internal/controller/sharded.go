@@ -84,7 +84,14 @@ func (c *Controller) RunSharded(ctx context.Context, cfg scan.Config, out io.Wri
 		}
 	} else {
 		h := resume.Header
-		if h.Schema != scanfile.ShardedSchema || h.RunID != c.RunID || resume.Truncated || resume.Finished != nil || c.Epoch < 1 || h.Config.RequestedWorkers != cfg.Workers || h.Config.Workers != effective || h.Config.ShardCount != manifest.Count || h.Config.Ports != cfg.PortSpec() || h.Config.Backend != cfg.Backend || h.Config.Rate != cfg.Rate || h.Config.Region != cfg.Region || h.Config.InstanceType != cfg.InstanceType || !slices.Equal(h.Config.Targets, cfg.Targets) || !reflect.DeepEqual(h.Config.RequestedTargets, cfg.RequestedTargets) {
+		frozenProvider, journalProvider := cfg.Provider, h.Config.Provider
+		if frozenProvider == "" {
+			frozenProvider = "vultr"
+		}
+		if journalProvider == "" {
+			journalProvider = "vultr"
+		}
+		if h.Schema != scanfile.ShardedSchema || h.RunID != c.RunID || resume.Truncated || resume.Finished != nil || c.Epoch < 1 || h.Config.RequestedWorkers != cfg.Workers || h.Config.Workers != effective || h.Config.ShardCount != manifest.Count || h.Config.Ports != cfg.PortSpec() || h.Config.Backend != cfg.Backend || journalProvider != frozenProvider || h.Config.Rate != cfg.Rate || h.Config.Region != cfg.Region || h.Config.InstanceType != cfg.InstanceType || !slices.Equal(h.Config.Targets, cfg.Targets) || !reflect.DeepEqual(h.Config.RequestedTargets, cfg.RequestedTargets) {
 			return summary, fmt.Errorf("recovered journal differs from frozen preflight")
 		}
 		summary.Seed, err = strconv.ParseUint(h.Config.Seed, 10, 64)

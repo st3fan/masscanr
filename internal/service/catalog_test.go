@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/st3fan/masscanr/internal/cloud"
+	"github.com/st3fan/masscanr/internal/cloud/digitalocean"
 )
 
 type catalogFixture struct {
@@ -84,5 +85,21 @@ func TestDigitalOceanCatalogSelector(t *testing.T) {
 		if response = request(h, "GET", path, ""); response.Code != 400 {
 			t.Fatalf("%s: %d %s", path, response.Code, response.Body)
 		}
+	}
+}
+
+func TestDigitalOceanCatalogCredentialErrors(t *testing.T) {
+	f := &catalogFixture{err: digitalocean.ErrTokenRequired}
+	h := (&API{Catalogs: map[string]cloud.Catalog{"digitalocean": f}}).Handler()
+	for _, path := range []string{"/v1/catalog/regions?provider=digitalocean", "/v1/catalog/instance-types?provider=digitalocean&region=tor1"} {
+		response := request(h, "GET", path, "")
+		if response.Code != 503 || !strings.Contains(response.Body.String(), "DIGITALOCEAN_API_TOKEN is required") {
+			t.Fatalf("missing token: %d %s", response.Code, response.Body)
+		}
+	}
+	f.err = &digitalocean.HTTPError{Status: 403, Path: "/regions"}
+	response := request(h, "GET", "/v1/catalog/regions?provider=digitalocean", "")
+	if response.Code != 502 || !strings.Contains(response.Body.String(), "lacks catalog permission") || strings.Contains(response.Body.String(), "fixture-secret") {
+		t.Fatalf("denied token: %d %s", response.Code, response.Body)
 	}
 }

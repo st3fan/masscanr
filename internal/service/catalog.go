@@ -9,6 +9,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/st3fan/masscanr/internal/cloud"
+	"github.com/st3fan/masscanr/internal/cloud/digitalocean"
 	"github.com/st3fan/masscanr/internal/scan"
 )
 
@@ -44,6 +45,9 @@ func (a *API) regions(c fiber.Ctx) error {
 	defer cancel()
 	regions, err := catalog.Regions(ctx)
 	if err != nil {
+		if handled, response := digitalOceanCatalogError(c, c.Query("provider"), err); handled {
+			return response
+		}
 		return respond(c, 502, map[string]string{"error": "provider catalog unavailable"})
 	}
 	result := make([]regionResponse, 0, len(regions))
@@ -77,6 +81,9 @@ func (a *API) instanceTypes(c fiber.Ctx) error {
 	defer cancel()
 	plans, err := catalog.InstanceTypes(ctx, region)
 	if err != nil {
+		if handled, response := digitalOceanCatalogError(c, provider, err); handled {
+			return response
+		}
 		if errors.Is(err, cloud.ErrNotFound) {
 			return respond(c, 404, map[string]string{"error": "region unavailable"})
 		} else {
@@ -89,6 +96,20 @@ func (a *API) instanceTypes(c fiber.Ctx) error {
 	}
 	slices.SortFunc(result, func(a, b instanceTypeResponse) int { return strings.Compare(a.ID, b.ID) })
 	return respond(c, 200, result)
+}
+
+func digitalOceanCatalogError(c fiber.Ctx, provider string, err error) (bool, error) {
+	if provider != "digitalocean" {
+		return false, nil
+	}
+	if errors.Is(err, digitalocean.ErrTokenRequired) {
+		return true, respond(c, 503, map[string]string{"error": "DIGITALOCEAN_API_TOKEN is required for the DigitalOcean catalog"})
+	}
+	var apiErr *digitalocean.HTTPError
+	if errors.As(err, &apiErr) && (apiErr.Status == 401 || apiErr.Status == 403) {
+		return true, respond(c, 502, map[string]string{"error": "DigitalOcean API token was rejected or lacks catalog permission"})
+	}
+	return false, nil
 }
 
 func (a *API) catalogFor(provider string) (cloud.Catalog, error) {
