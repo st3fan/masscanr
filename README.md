@@ -32,8 +32,8 @@ both services attached to your terminal. If no `.env` or exported database
 password exists, it creates a private ignored `.env` with a random password. If
 `.env` already exists, provide `MASSCANR_POSTGRES_PASSWORD` there or in the
 launching environment; see
-[.env.example](.env.example). Set `VULTR_API_TOKEN` only if you intend to start a
-scan through the API or CLI. No scan starts automatically.
+[.env.example](.env.example). Set the credentials for your chosen worker provider
+only if you intend to start a scan through the API or CLI. No scan starts automatically.
 
 Open `http://127.0.0.1:18080/` for the dashboard, or check the API from another
 terminal:
@@ -95,9 +95,12 @@ go build -tags webui -o masscanr-server ./cmd/masscanr-server
 ```
 
 The service initializes its PostgreSQL and DBOS schemas automatically. Keep the
-same database and artifact directory when restarting. Set `VULTR_API_TOKEN` in
-the service's environment through your secret manager before starting scans;
-CRUD and preflight work without it. For example, with 1Password:
+same database and artifact directory when restarting. Set `VULTR_API_TOKEN` for
+Vultr or both `DIGITALOCEAN_API_TOKEN` and `DIGITALOCEAN_SSH_SEED` for
+DigitalOcean in the service environment before starting scans; CRUD and
+preflight work without them. Keep the DigitalOcean seed stable across service
+restarts so a run can recover its SSH identity. Generate it with
+`openssl rand -base64 32` and store it with the API token. For example, with 1Password:
 
 ```sh
 VULTR_API_TOKEN='op://Company/Vultr/api-token' \
@@ -277,11 +280,29 @@ Use the [scan document format](docs/scan-format.md) for the journal contract.
 ```sh
 curl --fail-with-body -sS http://127.0.0.1:18080/v1/catalog/regions | jq .
 curl --fail-with-body -sS 'http://127.0.0.1:18080/v1/catalog/instance-types?region=atl' | jq .
+curl --fail-with-body -sS 'http://127.0.0.1:18080/v1/catalog/regions?provider=digitalocean' | jq .
+curl --fail-with-body -sS 'http://127.0.0.1:18080/v1/catalog/instance-types?provider=digitalocean&region=tor1' | jq .
 ```
 
-Catalog responses come from Vultr's public API. They are read-only and do not
-need a Vultr token. Regional availability may change between catalog lookup and
-scan start; preflight validates the frozen plan.
+Vultr catalog responses are public and need no Vultr token. The DigitalOcean
+catalog requires the service's DigitalOcean API token. Its ScanPlans use
+`provider: "digitalocean"`, a region from the DigitalOcean catalog, and a size
+available in that region. The provider checks the Fedora 44 image, region, and
+size before creating a worker. Availability may change between catalog lookup
+and scan start. DigitalOcean plans freeze the `fedora-44-x64` image and
+`per-run-ed25519` SSH mode in run and journal evidence. GPU sizes are excluded
+from the scanner catalog; cleanup still checks the separate GPU Droplet list
+before retiring a run's SSH key.
+
+The DigitalOcean token needs `droplet:read`, `droplet:create`, `droplet:delete`,
+`ssh_key:read`, `ssh_key:create`, `ssh_key:delete`, `tag:read`, `tag:create`,
+`regions:read`, `sizes:read`, `actions:read`, `image:read`, `snapshot:read`, and
+`vpc:read`. These include the [required scopes for Droplet creation](https://docs.digitalocean.com/reference/api/scopes/droplet/create/),
+[Droplet deletion](https://docs.digitalocean.com/reference/api/scopes/droplet/delete/),
+and [tag creation](https://docs.digitalocean.com/reference/api/scopes/tag/create/).
+The provider validates catalog and owned-worker read access before creating a
+worker. Use the manual live checks below to verify a new or rotated token's
+create and delete access before its first scan.
 
 ## Development and validation
 
@@ -300,3 +321,17 @@ PostgreSQL tests create and clean up uniquely named databases when
 compatibility in network-disabled Alpine test containers. Running the actual
 application, a live scan, or a cloud worker check requires separate authorization
 and must follow [repository guidance](AGENTS.md).
+
+After separate authorization, run the opt-in DigitalOcean checks in order:
+
+```sh
+python3 scripts/check-digitalocean-live.py catalog
+python3 scripts/check-digitalocean-live.py keys
+python3 scripts/check-digitalocean-live.py droplet
+```
+
+The helper reads only `DIGITALOCEAN_API_TOKEN` and `DIGITALOCEAN_SSH_SEED` from
+ignored `.env` or the environment. The final check creates one billable,
+run-tagged Droplet and confirms its deletion and the run key's deletion. It
+does not start the application or scan. Ordinary `go test ./...` never includes
+these live checks.

@@ -561,3 +561,48 @@ func TestAcceptedFindingCountsOverrideNativePackets(t *testing.T) {
 		t.Fatal(summary, err)
 	}
 }
+
+type finalizingProvider struct {
+	*fakeProvider
+	finalized int
+}
+
+func (p *finalizingProvider) FinalizeRun(_ context.Context, _ string) error {
+	p.finalized++
+	return nil
+}
+
+func TestFinalizeRunOnlyAfterConfirmedWorkerCleanup(t *testing.T) {
+	const run = "11111111-2222-3333-4444-555555555555"
+	provider := &finalizingProvider{fakeProvider: newProvider()}
+	provider.workers["owned"] = cloud.Worker{ID: "owned", Label: cloud.Label, Tags: []string{"masscanr-run-" + run}}
+	provider.deleteFail = true
+	controller := Controller{Provider: provider, Timeouts: DefaultTimeouts()}
+	controller.Timeouts.Poll = time.Millisecond
+	_, _, err := controller.CleanupRun(t.Context(), run)
+	if err == nil || provider.finalized != 0 {
+		t.Fatalf("finalized before cleanup: err=%v calls=%d", err, provider.finalized)
+	}
+	provider.deleteFail = false
+	_, _, err = controller.CleanupRun(t.Context(), run)
+	if err != nil || provider.finalized != 1 {
+		t.Fatalf("failed to finalize after cleanup: err=%v calls=%d", err, provider.finalized)
+	}
+}
+
+func TestTaggedWorkerReadiness(t *testing.T) {
+	const run = "11111111-2222-3333-4444-555555555555"
+	provider := newProvider()
+	worker := cloud.Worker{ID: "droplet", Label: "masscanr-worker-slot", Tags: []string{cloud.Label, "masscanr-run-" + run}, Password: "fixture-secret", Ready: true}
+	provider.workers[worker.ID] = worker
+	controller := Controller{Provider: provider, Timeouts: DefaultTimeouts()}
+	ready, err := controller.ready(t.Context(), worker, run)
+	if err != nil || ready.ID != worker.ID {
+		t.Fatalf("tagged worker rejected: %+v %v", ready, err)
+	}
+	worker.Tags = []string{"masscanr-run-" + run}
+	provider.workers[worker.ID] = worker
+	if _, err := controller.ready(t.Context(), worker, run); err == nil {
+		t.Fatal("worker without application ownership tag was accepted")
+	}
+}

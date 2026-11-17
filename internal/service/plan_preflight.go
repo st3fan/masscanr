@@ -90,6 +90,10 @@ func (a *API) preflightScanPlan(c fiber.Ctx) error {
 	return respond(c, 201, preflight)
 }
 
+func (s *Store) GetPreflight(ctx context.Context, id string) (Plan, error) {
+	return readJSON[Plan](ctx, s.Pool, `SELECT data FROM masscanr.scan_preflights WHERE id=$1`, id)
+}
+
 func (s *Store) ReserveScanPlan(ctx context.Context, scanPlanID, preflightID, key string, confirm bool) (Run, error) {
 	var run Run
 	err := s.tx(ctx, func(tx pgx.Tx) error {

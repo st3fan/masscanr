@@ -84,7 +84,14 @@ func (c *Controller) RunSharded(ctx context.Context, cfg scan.Config, out io.Wri
 		}
 	} else {
 		h := resume.Header
-		if h.Schema != scanfile.ShardedSchema || h.RunID != c.RunID || resume.Truncated || resume.Finished != nil || c.Epoch < 1 || h.Config.RequestedWorkers != cfg.Workers || h.Config.Workers != effective || h.Config.ShardCount != manifest.Count || h.Config.Ports != cfg.PortSpec() || h.Config.Backend != cfg.Backend || h.Config.Rate != cfg.Rate || h.Config.Region != cfg.Region || h.Config.InstanceType != cfg.InstanceType || !slices.Equal(h.Config.Targets, cfg.Targets) || !reflect.DeepEqual(h.Config.RequestedTargets, cfg.RequestedTargets) {
+		frozenProvider, journalProvider := cfg.Provider, h.Config.Provider
+		if frozenProvider == "" {
+			frozenProvider = "vultr"
+		}
+		if journalProvider == "" {
+			journalProvider = "vultr"
+		}
+		if h.Schema != scanfile.ShardedSchema || h.RunID != c.RunID || resume.Truncated || resume.Finished != nil || c.Epoch < 1 || h.Config.RequestedWorkers != cfg.Workers || h.Config.Workers != effective || h.Config.ShardCount != manifest.Count || h.Config.Ports != cfg.PortSpec() || h.Config.Backend != cfg.Backend || journalProvider != frozenProvider || h.Config.Image != cfg.Image || h.Config.SSHAuth != cfg.SSHAuth || h.Config.Rate != cfg.Rate || h.Config.Region != cfg.Region || h.Config.InstanceType != cfg.InstanceType || !slices.Equal(h.Config.Targets, cfg.Targets) || !reflect.DeepEqual(h.Config.RequestedTargets, cfg.RequestedTargets) {
 			return summary, fmt.Errorf("recovered journal differs from frozen preflight")
 		}
 		summary.Seed, err = strconv.ParseUint(h.Config.Seed, 10, 64)
@@ -249,7 +256,11 @@ func newShardedJournal(out io.Writer, cfg scan.Config, t Timeouts, runID string,
 	if d, ok := out.(interface{ ScanPaths() (string, [2]string) }); ok {
 		output, exports = d.ScanPaths()
 	}
-	h := scanfile.Header{Format: scanfile.Format, Schema: scanfile.ShardedSchema, RunID: runID, CreatedAt: time.Now().UTC(), ControllerVersion: "v10", Label: "masscanr", OwnershipTag: "masscanr-run-" + runID, Config: scanfile.Config{Targets: cfg.Targets, RequestedTargets: cfg.RequestedTargets, Ports: cfg.PortSpec(), Backend: cfg.Backend, Seed: strconv.FormatUint(seed, 10), RequestedWorkers: cfg.Workers, Workers: workers, ShardCount: manifest.Count, PartitionVersion: manifest.Version, MaxProbesPerUnit: scan.MaxProbesPerShard, Rate: cfg.Rate, Provider: "vultr", Region: cfg.Region, InstanceType: cfg.InstanceType, Output: output, Exports: exports, Timeouts: map[string]string{"create": t.Create.String(), "ready": t.Ready.String(), "prepare": t.Prepare.String(), "scan": t.Scan.String(), "cleanup": t.Cleanup.String(), "delete": t.Delete.String(), "poll": t.Poll.String()}}}
+	provider := cfg.Provider
+	if provider == "" {
+		provider = "vultr"
+	}
+	h := scanfile.Header{Format: scanfile.Format, Schema: scanfile.ShardedSchema, RunID: runID, CreatedAt: time.Now().UTC(), ControllerVersion: "v10", Label: "masscanr", OwnershipTag: "masscanr-run-" + runID, Config: scanfile.Config{Targets: cfg.Targets, RequestedTargets: cfg.RequestedTargets, Ports: cfg.PortSpec(), Backend: cfg.Backend, Seed: strconv.FormatUint(seed, 10), RequestedWorkers: cfg.Workers, Workers: workers, ShardCount: manifest.Count, PartitionVersion: manifest.Version, MaxProbesPerUnit: scan.MaxProbesPerShard, Rate: cfg.Rate, Provider: provider, Image: cfg.Image, SSHAuth: cfg.SSHAuth, Region: cfg.Region, InstanceType: cfg.InstanceType, Output: output, Exports: exports, Timeouts: map[string]string{"create": t.Create.String(), "ready": t.Ready.String(), "prepare": t.Prepare.String(), "scan": t.Scan.String(), "cleanup": t.Cleanup.String(), "delete": t.Delete.String(), "poll": t.Poll.String()}}}
 	return scanfile.NewWriter(out, h, func(error) { cancel() })
 }
 
@@ -299,7 +310,11 @@ func (c *Controller) runSlot(ctx context.Context, cfg scan.Config, manifest scan
 				return err
 			}
 			prepCtx, prepStop := context.WithTimeout(ctx, c.Timeouts.Prepare)
-			prepared, prepErr := c.Runner.Prepare(prepCtx, worker, c.Backend.Preparation())
+			preparation, prepErr := preparationFor(c.Backend, worker)
+			var prepared scan.Prepared
+			if prepErr == nil {
+				prepared, prepErr = c.Runner.Prepare(prepCtx, worker, preparation)
+			}
 			prepStop()
 			if prepErr != nil {
 				if ctx.Err() != nil || setupFailures >= 2 {

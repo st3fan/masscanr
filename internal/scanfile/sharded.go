@@ -21,8 +21,11 @@ func (c Config) ValidateSharded() (scan.Manifest, error) {
 	if err = cfg.Validate(); err != nil {
 		return scan.Manifest{}, err
 	}
-	if c.Shards != 0 || cfg.PortSpec() != c.Ports || c.Provider != "vultr" || c.Output == "" || (c.Backend != "masscan" && c.Backend != "zmap") {
+	if c.Shards != 0 || cfg.PortSpec() != c.Ports || (c.Provider != "vultr" && c.Provider != "digitalocean") || c.Output == "" || (c.Backend != "masscan" && c.Backend != "zmap") {
 		return scan.Manifest{}, fmt.Errorf("invalid sharded scan configuration")
+	}
+	if c.Provider == "digitalocean" && (c.Image != "fedora-44-x64" || c.SSHAuth != "per-run-ed25519") {
+		return scan.Manifest{}, fmt.Errorf("invalid DigitalOcean image or SSH contract")
 	}
 	values := make([]string, len(c.Targets))
 	for i, p := range c.Targets {

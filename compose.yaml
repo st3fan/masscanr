@@ -24,6 +24,8 @@ services:
       DBOS_SYSTEM_DATABASE_URL: host=postgres port=5432 dbname=masscanr user=masscanr sslmode=disable
       PGPASSWORD: ${MASSCANR_POSTGRES_PASSWORD:?Set MASSCANR_POSTGRES_PASSWORD in .env or the environment}
       VULTR_API_TOKEN: ${VULTR_API_TOKEN:-}
+      DIGITALOCEAN_API_TOKEN: ${DIGITALOCEAN_API_TOKEN:-}
+      DIGITALOCEAN_SSH_SEED: ${DIGITALOCEAN_SSH_SEED:-}
     ports:
       - "${MASSCANR_BIND_ADDRESS:-127.0.0.1}:${MASSCANR_PORT:-18080}:18080"
     volumes:

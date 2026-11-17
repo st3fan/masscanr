@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/st3fan/masscanr/internal/backend"
+	"github.com/st3fan/masscanr/internal/fedora"
 	"github.com/st3fan/masscanr/internal/scan"
 )
 
@@ -29,6 +30,40 @@ func (Backend) Validate(s scan.Spec, shards int) error {
 }
 
 var versionPattern = regexp.MustCompile(`Masscan version ([^\s]+)`)
+
+const FedoraBinarySHA256 = "fa6bc391e6857e045f3302e669d258a679928d8acbf86148e25d208018c63c13"
+
+func (Backend) PreparationFor(platform string) (backend.Preparation, error) {
+	if platform != fedora.Platform {
+		return backend.Preparation{}, fmt.Errorf("unsupported masscan platform %q", platform)
+	}
+	return backend.Preparation{
+		Platform: fedora.Platform,
+		Packages: []string{"masscan-1.3.2-15.fc44.x86_64", "coreutils"},
+		Probes: []backend.Probe{
+			{Command: backend.Command{Executable: "stdbuf", Args: []string{"-oL", "masscan", "--version"}}, ExitCodes: []int{0, 1}},
+			{Command: backend.Command{Executable: "sha256sum", Args: []string{"/usr/bin/masscan"}}, ExitCodes: []int{0}},
+		},
+		Verify: func(outputs []string, installed string) (scan.Identity, error) {
+			m := versionPattern.FindStringSubmatch(outputs[0])
+			if m == nil || m[1] != "1.3.2" {
+				return scan.Identity{}, fmt.Errorf("unsupported Fedora masscan version")
+			}
+			fields := strings.Split(installed, ", ")
+			if len(fields) != 2 || fields[0] != "masscan-1.3.2-15.fc44.x86_64" || !strings.HasPrefix(fields[1], "coreutils-") || !strings.HasSuffix(fields[1], ".x86_64") {
+				return scan.Identity{}, fmt.Errorf("unsupported Fedora masscan/coreutils packages")
+			}
+			build, err := backend.BinaryBuild(installed, outputs[1])
+			if err != nil {
+				return scan.Identity{}, err
+			}
+			if strings.Fields(outputs[1])[0] != FedoraBinarySHA256 {
+				return scan.Identity{}, fmt.Errorf("unsupported Fedora masscan executable checksum")
+			}
+			return scan.Identity{Name: "masscan", Version: "1.3.2", Build: build}, nil
+		},
+	}, nil
+}
 
 func (Backend) Preparation() backend.Preparation {
 	return backend.Preparation{

@@ -139,3 +139,25 @@ func TestPreparationRejectsDrift(t *testing.T) {
 		t.Fatal("accepted unverified revision")
 	}
 }
+
+func TestFedoraPreparationIdentity(t *testing.T) {
+	p, err := (Backend{}).PreparationFor("fedora44")
+	if err != nil || p.Platform != "fedora44" {
+		t.Fatal(err, p.Platform)
+	}
+	fields := "saddr string: source\nsport int: target port\ntimestamp_ts int: epoch\nsuccess bool: successful\nclassification string: response\nrepeat bool: repeat\n"
+	outputs := []string{"zmap v4.4.0\n", FedoraBinarySHA256 + "  /usr/bin/zmap\n", fields}
+	if id, err := p.Verify(outputs, "zmap-4.4.0-1.fc44.x86_64"); err != nil || !id.Valid() || id.Version != "4.4.0" {
+		t.Fatal(id, err)
+	}
+	for i := range outputs {
+		bad := append([]string(nil), outputs...)
+		bad[i] = "unsupported"
+		if _, err := p.Verify(bad, "zmap-4.4.0-1.fc44.x86_64"); err == nil {
+			t.Fatal("accepted incompatible Fedora probe", i)
+		}
+	}
+	if _, err := p.Verify(outputs, "zmap-4.4.0-2.fc44.x86_64"); err == nil {
+		t.Fatal("accepted unverified Fedora package")
+	}
+}

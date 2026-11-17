@@ -10,13 +10,46 @@ import (
 	"strings"
 
 	"github.com/st3fan/masscanr/internal/backend"
+	"github.com/st3fan/masscanr/internal/fedora"
 	"github.com/st3fan/masscanr/internal/scan"
 )
 
 const Fields = "saddr,sport,timestamp_ts,success,classification,repeat"
 const BinarySHA256 = "fee78888264d48120a71df24bef0963f3dbf6c40970460528614eb75e7d3c229"
+const FedoraBinarySHA256 = "9eb4cdac6b3768afb1015e29d3527712166b48c12f09b3d30c1244249d3a670a"
 
 type Backend struct{}
+
+func (Backend) PreparationFor(platform string) (backend.Preparation, error) {
+	if platform != fedora.Platform {
+		return backend.Preparation{}, fmt.Errorf("unsupported ZMap platform %q", platform)
+	}
+	return backend.Preparation{
+		Platform: fedora.Platform,
+		Packages: []string{"zmap-4.4.0-1.fc44.x86_64"},
+		Probes: []backend.Probe{
+			{Command: backend.Command{Executable: "zmap", Args: []string{"--config", "/dev/null", "--disable-syslog", "--version"}}, ExitCodes: []int{0}},
+			{Command: backend.Command{Executable: "sha256sum", Args: []string{"/usr/bin/zmap"}}, ExitCodes: []int{0}},
+			{Command: backend.Command{Executable: "zmap", Args: []string{"--config", "/dev/null", "--disable-syslog", "--probe-module", "tcp_synscan", "--list-output-fields"}}, ExitCodes: []int{0}},
+		},
+		Verify: func(outputs []string, installed string) (scan.Identity, error) {
+			if strings.TrimSpace(outputs[0]) != "zmap v4.4.0" || installed != "zmap-4.4.0-1.fc44.x86_64" {
+				return scan.Identity{}, fmt.Errorf("unsupported Fedora ZMap package")
+			}
+			build, err := backend.BinaryBuild(installed, outputs[1])
+			if err != nil {
+				return scan.Identity{}, err
+			}
+			if strings.Fields(outputs[1])[0] != FedoraBinarySHA256 {
+				return scan.Identity{}, fmt.Errorf("unsupported Fedora ZMap executable checksum")
+			}
+			if err := verifyFields(outputs[2]); err != nil {
+				return scan.Identity{}, err
+			}
+			return scan.Identity{Name: "zmap", Version: "4.4.0", Build: build}, nil
+		},
+	}, nil
+}
 
 func (Backend) Name() string    { return "zmap" }
 func (Backend) MaxSeed() uint64 { return math.MaxInt64 }
@@ -73,21 +106,28 @@ func (Backend) Preparation() backend.Preparation {
 			if strings.Fields(outputs[1])[0] != BinarySHA256 {
 				return scan.Identity{}, fmt.Errorf("unsupported ZMap executable checksum for Alpine x64")
 			}
-			fields := map[string]string{}
-			for _, line := range strings.Split(outputs[2], "\n") {
-				parts := strings.Fields(line)
-				if len(parts) >= 2 {
-					fields[parts[0]] = strings.TrimSuffix(parts[1], ":")
-				}
-			}
-			for name, kind := range map[string]string{"saddr": "string", "sport": "int", "timestamp_ts": "int", "success": "bool", "classification": "string", "repeat": "bool"} {
-				if fields[name] != kind {
-					return scan.Identity{}, fmt.Errorf("ZMap missing expected field %s (%s)", name, kind)
-				}
+			if err := verifyFields(outputs[2]); err != nil {
+				return scan.Identity{}, err
 			}
 			return scan.Identity{Name: "zmap", Version: "4.3.4", Build: build}, nil
 		},
 	}
+}
+
+func verifyFields(output string) error {
+	fields := map[string]string{}
+	for _, line := range strings.Split(output, "\n") {
+		parts := strings.Fields(line)
+		if len(parts) >= 2 {
+			fields[parts[0]] = strings.TrimSuffix(parts[1], ":")
+		}
+	}
+	for name, kind := range map[string]string{"saddr": "string", "sport": "int", "timestamp_ts": "int", "success": "bool", "classification": "string", "repeat": "bool"} {
+		if fields[name] != kind {
+			return fmt.Errorf("ZMap missing expected field %s (%s)", name, kind)
+		}
+	}
+	return nil
 }
 
 func (b Backend) Build(s scan.Spec, shard scan.Shard, seed uint64) (backend.Plan, error) {

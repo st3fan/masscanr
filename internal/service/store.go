@@ -81,15 +81,22 @@ func Open(ctx context.Context, url string) (*Store, error) {
 	err = store.tx(ctx, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `CREATE SCHEMA IF NOT EXISTS masscanr;
 CREATE TABLE IF NOT EXISTS masscanr.version (version integer PRIMARY KEY);
-INSERT INTO masscanr.version VALUES (4) ON CONFLICT DO NOTHING;`); err != nil {
+INSERT INTO masscanr.version SELECT 5 WHERE NOT EXISTS (SELECT 1 FROM masscanr.version);`); err != nil {
 			return err
 		}
 		var count, version int
 		if err := tx.QueryRow(ctx, `SELECT count(*), max(version) FROM masscanr.version`).Scan(&count, &version); err != nil {
 			return err
 		}
-		if count != 1 || version != 4 {
+		if count != 1 || (version != 4 && version != 5) {
 			return fmt.Errorf("unsupported database schema: use a fresh development database")
+		}
+		if version == 4 {
+			if _, err := tx.Exec(ctx, `ALTER TABLE masscanr.scan_plans DROP CONSTRAINT scan_plans_provider_check;
+ALTER TABLE masscanr.scan_plans ADD CONSTRAINT scan_plans_provider_check CHECK (provider IN ('vultr', 'digitalocean'));
+UPDATE masscanr.version SET version=5;`); err != nil {
+				return err
+			}
 		}
 		return initDomainSchema(ctx, tx)
 	})

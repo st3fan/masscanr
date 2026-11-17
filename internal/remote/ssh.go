@@ -17,6 +17,7 @@ import (
 	"github.com/st3fan/masscanr/internal/alpine"
 	"github.com/st3fan/masscanr/internal/backend"
 	"github.com/st3fan/masscanr/internal/cloud"
+	"github.com/st3fan/masscanr/internal/fedora"
 	"github.com/st3fan/masscanr/internal/scan"
 	"golang.org/x/crypto/ssh"
 )
@@ -41,8 +42,21 @@ func (s *SSH) dial(ctx context.Context, w cloud.Worker) (*ssh.Client, error) {
 	if _, err := netip.ParseAddr(w.IP); err != nil {
 		return nil, fmt.Errorf("worker has invalid IP")
 	}
-	if w.Password == "" || w.ID == "" {
-		return nil, fmt.Errorf("worker has no root password or ID")
+	if !w.HasAuth() || w.ID == "" {
+		return nil, fmt.Errorf("worker has no SSH authentication or ID")
+	}
+	var auth ssh.AuthMethod
+	if w.Key != nil {
+		if w.Password != "" {
+			return nil, fmt.Errorf("worker has invalid SSH authentication")
+		}
+		signer, err := ssh.NewSignerFromKey(w.Key.Signer())
+		if err != nil {
+			return nil, fmt.Errorf("worker has invalid SSH key")
+		}
+		auth = ssh.PublicKeys(signer)
+	} else {
+		auth = ssh.Password(w.Password)
 	}
 	dialer := net.Dialer{Timeout: 10 * time.Second}
 	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(w.IP, s.Port))
@@ -52,7 +66,7 @@ func (s *SSH) dial(ctx context.Context, w cloud.Worker) (*ssh.Client, error) {
 	stop := context.AfterFunc(ctx, func() { conn.Close() })
 	defer stop()
 	conn.SetDeadline(time.Now().Add(10 * time.Second))
-	config := &ssh.ClientConfig{User: "root", Auth: []ssh.AuthMethod{ssh.Password(w.Password)}, HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error {
+	config := &ssh.ClientConfig{User: "root", Auth: []ssh.AuthMethod{auth}, HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		previous, exists := s.keys[w.ID]
@@ -104,6 +118,15 @@ func (s *SSH) Prepare(ctx context.Context, w cloud.Worker, preparation backend.P
 	var prepared scan.Prepared
 	if preparation.Verify == nil || len(preparation.Packages) == 0 || len(preparation.Probes) == 0 {
 		return prepared, fmt.Errorf("incomplete backend preparation")
+	}
+	if preparation.Platform == fedora.Platform {
+		if w.Platform != fedora.Platform {
+			return prepared, fmt.Errorf("Fedora preparation requires Fedora worker")
+		}
+		return s.prepareFedora(ctx, w, preparation)
+	}
+	if preparation.Platform != "" && preparation.Platform != "alpine" || w.Platform != "" && w.Platform != "alpine" {
+		return prepared, fmt.Errorf("unsupported worker preparation platform")
 	}
 	for _, pkg := range preparation.Packages {
 		if len(strings.FieldsFunc(pkg, func(r rune) bool { return r == '~' || r == '=' || r == '<' || r == '>' })) == 0 {
@@ -210,6 +233,93 @@ func (s *SSH) Prepare(ctx context.Context, w cloud.Worker, preparation backend.P
 		return prepared, fmt.Errorf("backend returned unknown identity")
 	}
 
+	return prepared, nil
+}
+
+func (s *SSH) prepareFedora(ctx context.Context, w cloud.Worker, preparation backend.Preparation) (scan.Prepared, error) {
+	var prepared scan.Prepared
+	for {
+		var uid limitedBuffer
+		err := s.command(ctx, w, "id -u", &uid, io.Discard)
+		if err == nil {
+			if strings.TrimSpace(uid.String()) != "0" {
+				return prepared, fmt.Errorf("worker login is not root")
+			}
+			break
+		}
+		timer := time.NewTimer(s.RetryDelay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return prepared, fmt.Errorf("SSH readiness: %w", ctx.Err())
+		case <-timer.C:
+		}
+	}
+	release, err := s.readText(ctx, w, "cat /etc/os-release")
+	if err != nil {
+		return prepared, fmt.Errorf("read Fedora release: %w", err)
+	}
+	if err := fedora.CheckRelease(release); err != nil {
+		return prepared, err
+	}
+	arch, err := s.readText(ctx, w, "uname -m")
+	if err != nil || strings.TrimSpace(arch) != "x86_64" {
+		return prepared, fmt.Errorf("Fedora worker requires x86_64 architecture")
+	}
+	prepared.Release = fedora.Release
+	// Limit package sources to Fedora's stable release and updates repositories.
+	// DNF must verify package signatures even if image defaults are changed.
+	args := []string{"dnf", "-y", "--releasever=44", "--disablerepo=*", "--enablerepo=fedora", "--enablerepo=updates", "--setopt=fedora.gpgcheck=1", "--setopt=updates.gpgcheck=1", "install"}
+	args = append(args, preparation.Packages...)
+	var diagnostics limitedBuffer
+	if err := s.command(ctx, w, "exec "+QuoteArgs(args)+" >&2", io.Discard, &diagnostics); err != nil {
+		return prepared, fmt.Errorf("Fedora package installation failed: %w (%s)", err, strings.TrimSpace(diagnostics.String()))
+	}
+	outputs := make([]string, len(preparation.Probes))
+	for i, probe := range preparation.Probes {
+		var out textBuffer
+		diagnostics = limitedBuffer{}
+		err := s.command(ctx, w, QuoteArgs(probe.Command.Argv()), &out, &diagnostics)
+		code := 0
+		if err != nil {
+			var exit *ssh.ExitError
+			if !errors.As(err, &exit) {
+				return prepared, fmt.Errorf("backend probe failed: %w (%s)", err, strings.TrimSpace(diagnostics.String()))
+			}
+			code = exit.ExitStatus()
+		}
+		if !slices.Contains(probe.ExitCodes, code) {
+			return prepared, fmt.Errorf("backend probe exit %d: %w (%s)", code, err, strings.TrimSpace(diagnostics.String()))
+		}
+		if out.overflow {
+			return prepared, fmt.Errorf("backend probe exceeds 64 KiB")
+		}
+		outputs[i] = out.String()
+	}
+	names := make([]string, len(preparation.Packages))
+	for i, pkg := range preparation.Packages {
+		name, _, _ := strings.Cut(pkg, "-")
+		if name == "" {
+			return prepared, fmt.Errorf("invalid Fedora package identity")
+		}
+		names[i] = name
+	}
+	info, err := s.readText(ctx, w, QuoteArgs(append([]string{"rpm", "-q", "--queryformat", "%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\\n"}, names...)))
+	if err != nil {
+		return prepared, fmt.Errorf("read installed Fedora packages: %w", err)
+	}
+	fields := strings.Fields(info)
+	if len(fields) != len(names) {
+		return prepared, fmt.Errorf("installed Fedora package identities were not recognized")
+	}
+	prepared.Packages = strings.Join(fields, ", ")
+	prepared.Identity, err = preparation.Verify(outputs, prepared.Packages)
+	if err != nil {
+		return prepared, err
+	}
+	if !prepared.Identity.Valid() {
+		return prepared, fmt.Errorf("backend returned unknown identity")
+	}
 	return prepared, nil
 }
 

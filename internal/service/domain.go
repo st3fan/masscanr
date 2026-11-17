@@ -85,11 +85,20 @@ func DefaultScanPlanSettings() ScanPlanSettings {
 }
 
 func (s ScanPlanSettings) Config(targetInputs []string) (scan.Config, controller.Timeouts, error) {
-	if s.Provider != "vultr" {
+	if s.Provider != "vultr" && s.Provider != "digitalocean" {
 		return scan.Config{}, controller.Timeouts{}, fmt.Errorf("unsupported provider %q", s.Provider)
 	}
 	d := Definition{Targets: targetInputs, Backend: s.Backend, Ports: s.Ports, Workers: s.Workers, Rate: s.Rate, Region: s.Region, InstanceType: s.InstanceType, Timeout: s.Timeout, CleanupTimeout: s.CleanupTimeout}
-	return d.Config()
+	c, timeouts, err := d.Config()
+	c.Provider = s.Provider
+	if s.Provider == "digitalocean" {
+		c.Image = "fedora-44-x64"
+		c.SSHAuth = "per-run-ed25519"
+	}
+	if err != nil {
+		return c, timeouts, err
+	}
+	return c, timeouts, c.ValidateOptions()
 }
 
 type ScanPlan struct {

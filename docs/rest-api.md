@@ -11,15 +11,16 @@ Set `DBOS_SYSTEM_DATABASE_URL` to an existing PostgreSQL database. For local
 development, create a uniquely named database as your current OS user and use
 a socket DSN such as `host=/tmp dbname=masscanr_dev_<unique-id> sslmode=disable`.
 The service creates its own application and DBOS schemas. One server process owns
-a database through a session advisory lock. Set `VULTR_API_TOKEN` in the server
-environment before starting a scan; management and preflight do not need it.
+a database through a session advisory lock. Set `VULTR_API_TOKEN` for Vultr, or
+`DIGITALOCEAN_API_TOKEN` and a stable `DIGITALOCEAN_SSH_SEED` for DigitalOcean,
+in the server environment before starting a scan; management and preflight do
+not need them.
 
-This development version requires a **fresh database**. Older application schemas
-are rejected. There is no backfill or compatibility layer for old `/v1/scans`
-resources or persisted rows. Create a new uniquely named database when updating
-to this version; retain or deliberately discard old data and artifacts according
-to your development needs. Keep the database and artifact directory together
-when restarting the same version. Never reuse or drop an unrelated database.
+Application schema version 4 is upgraded to version 5 on startup to allow
+DigitalOcean ScanPlans. Earlier application schemas are rejected. There is no
+backfill or compatibility layer for old `/v1/scans` resources. Keep the database
+and artifact directory together when restarting. Never reuse or drop an
+unrelated database.
 
 PostgreSQL is the primary query store for normalized open-port results. A `.scan`
 journal still records every accepted observation, including duplicates, and is
@@ -68,8 +69,8 @@ Create a Target and ScanPlan:
 The example addresses are documentation-only. Omitted ScanPlan `settings` use
 server defaults. A supplied settings object must contain valid values for all
 settings (`backend`, `ports`, `provider`, `workers`, `rate`, `region`,
-`instance_type`, `timeout`, `cleanup_timeout`). Only `vultr` is supported as a
-provider today. `PATCH` accepts a partial settings object and a matching
+`instance_type`, `timeout`, `cleanup_timeout`). Supported providers are `vultr`
+and `digitalocean`. `PATCH` accepts a partial settings object and a matching
 `revision`; it retains omitted fields and increments the revision:
 
 ```json
@@ -101,8 +102,8 @@ preflight. An active run keeps its frozen scope and configuration.
 | `GET /v1/scan-results` | 200 positive open-port results with coverage metadata |
 | `GET /v1/runs/{id}/inspection` | 200 validated journal inspection |
 | `GET /v1/runs/{id}/exports/{csv\|jsonl}` | 200 saved complete export |
-| `GET /v1/catalog/regions` | 200 region catalog |
-| `GET /v1/catalog/instance-types?region=atl` | 200 instance catalog |
+| `GET /v1/catalog/regions?provider=vultr` | 200 region catalog; provider defaults to `vultr` |
+| `GET /v1/catalog/instance-types?provider=digitalocean&region=tor1` | 200 instance catalog; DigitalOcean requires an explicit region |
 
 Target, ScanPlan, run-history, per-plan run, physical worker, and result lists accept `limit` (1–1000,
 default 100) and an opaque `after` cursor from `links.next`. Run history accepts

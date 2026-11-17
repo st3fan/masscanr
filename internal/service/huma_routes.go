@@ -108,6 +108,9 @@ func (a *API) register(method, path, operationID, summary string, model any, han
 	if operationID == "listInstanceTypes" {
 		op.Parameters = append(op.Parameters, &huma.Param{Name: "region", In: "query", Schema: &huma.Schema{Type: "string"}})
 	}
+	if operationID == "listRegions" || operationID == "listInstanceTypes" {
+		op.Parameters = append(op.Parameters, &huma.Param{Name: "provider", In: "query", Schema: &huma.Schema{Type: "string", Enum: []any{"vultr", "digitalocean"}}})
+	}
 	if operationID == "startScanPlan" {
 		op.Parameters = append(op.Parameters, &huma.Param{Name: "Idempotency-Key", In: "header", Required: true, Schema: &huma.Schema{Type: "string", MinLength: intPtr(1), MaxLength: intPtr(200)}})
 	}

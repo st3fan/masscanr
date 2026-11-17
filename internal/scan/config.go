@@ -27,6 +27,9 @@ const TopPorts = "7,9,13,21,22,23,25,26,37,53,79,80,81,88,106,110,111,113,119,13
 
 type Config struct {
 	Backend          string
+	Provider         string
+	Image            string
+	SSHAuth          string
 	Targets          []netip.Prefix
 	RequestedTargets []Target
 	Ports            []uint16
@@ -38,7 +41,7 @@ type Config struct {
 
 func Defaults() Config {
 	ports, _ := ParsePorts(TopPorts)
-	return Config{Backend: "masscan", Ports: ports, Workers: DefaultWorkers, Rate: DefaultRate, Region: DefaultRegion, InstanceType: DefaultInstanceType}
+	return Config{Backend: "masscan", Provider: "vultr", Ports: ports, Workers: DefaultWorkers, Rate: DefaultRate, Region: DefaultRegion, InstanceType: DefaultInstanceType}
 }
 
 // ParseTargets masks host bits and removes duplicate/contained prefixes.
@@ -109,6 +112,12 @@ func (c Config) Validate() error {
 
 // ValidateOptions checks local settings before any target resolution.
 func (c Config) ValidateOptions() error {
+	if c.Provider != "" && c.Provider != "vultr" && c.Provider != "digitalocean" {
+		return fmt.Errorf("unsupported provider %q", c.Provider)
+	}
+	if c.Provider == "digitalocean" && (c.Image != "fedora-44-x64" || c.SSHAuth != "per-run-ed25519") {
+		return fmt.Errorf("DigitalOcean requires Fedora 44 and per-run Ed25519 SSH")
+	}
 	if len(c.Ports) == 0 {
 		return fmt.Errorf("provide at least one TCP port")
 	}

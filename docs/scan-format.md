@@ -10,10 +10,13 @@ these documents. Configuration records describe the effective authorized scope.
 New runs use schema 3. The header freezes the normalized effective scope,
 requested target selectors and AS-resolution provenance, canonical TCP ports,
 backend seed, requested and effective worker counts, logical `shard_count`,
-`partition_version: 1`, and `max_probes_per_shard: 1048576`. The partitioner
-assigns whole IP addresses and all selected ports to each logical shard. A
-shard has at most 1,048,576 address/port probes; it is derived on demand from
-the frozen target union. The header does not enumerate every shard. For
+`partition_version: 1`, and `max_probes_per_shard: 1048576`. The header also
+freezes the provider, region, size, and, for DigitalOcean, the `fedora-44-x64`
+image and `per-run-ed25519` SSH mode. Recovery rejects a different effective
+worker contract. The partitioner assigns whole IP addresses and all selected
+ports to each logical shard. A shard has at most 1,048,576 address/port probes;
+it is derived on demand from the frozen target union. The header does not
+enumerate every shard. For
 256,000 IPs and 65,535 ports, the manifest has 16,000 logical shards.
 
 `worker` records identify physical instances by `slot` and `instance_id`.

@@ -304,7 +304,11 @@ func (c *Controller) prepare(ctx context.Context, workers []tracked, runID strin
 				notify(Event{Shard: item.shard, ID: w.ID, IP: w.IP, State: "preparing"})
 				prepCtx, stop := context.WithTimeout(ctx, c.Timeouts.Prepare)
 				var prepared scan.Prepared
-				prepared, err = c.Runner.Prepare(prepCtx, w, c.Backend.Preparation())
+				var preparation backend.Preparation
+				preparation, err = preparationFor(c.Backend, w)
+				if err == nil {
+					prepared, err = c.Runner.Prepare(prepCtx, w, preparation)
+				}
 				versions[index] = prepared.Identity
 				stop()
 				if err == nil {
@@ -341,13 +345,16 @@ func (c *Controller) ready(ctx context.Context, initial cloud.Worker, runID stri
 		if err != nil {
 			return initial, err
 		}
-		if w.ID != initial.ID || w.Label != cloud.Label || !slices.Contains(w.Tags, "masscanr-run-"+runID) {
+		if w.ID != initial.ID || (w.Label != cloud.Label && !slices.Contains(w.Tags, cloud.Label)) || !slices.Contains(w.Tags, "masscanr-run-"+runID) {
 			return initial, fmt.Errorf("worker %s is not owned by this run", initial.ID)
 		}
 		if w.Password == "" {
 			w.Password = initial.Password
 		}
-		if w.Ready && w.Password != "" {
+		if w.Key == nil {
+			w.Key = initial.Key
+		}
+		if w.Ready && w.HasAuth() {
 			return w, nil
 		}
 		if err = pause(ctx, c.Timeouts.Poll); err != nil {
@@ -434,6 +441,13 @@ func (c *Controller) cleanup(ctx context.Context, runID string, initial []tracke
 		failure = errors.Join(failure, fmt.Errorf("undeleted instance %s: %w", id, err))
 	}
 	slices.Sort(remaining)
+	if len(remaining) == 0 && reconciliation == nil {
+		if finalizer, ok := c.Provider.(cloud.RunFinalizer); ok {
+			if err := finalizer.FinalizeRun(ctx, runID); err != nil {
+				reconciliation = fmt.Errorf("finalize run %s: %w", runID, err)
+			}
+		}
+	}
 	return remaining, reconciliation != nil, errors.Join(failure, reconciliation)
 }
 

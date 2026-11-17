@@ -52,3 +52,27 @@ func TestUnrepresentableETAStaysUnknown(t *testing.T) {
 		}
 	}
 }
+
+func TestFedoraPreparationIdentity(t *testing.T) {
+	p, err := (Backend{}).PreparationFor("fedora44")
+	if err != nil || p.Platform != "fedora44" {
+		t.Fatal(err, p.Platform)
+	}
+	outputs := []string{"Masscan version 1.3.2 (fixture)\n", FedoraBinarySHA256 + "  /usr/bin/masscan\n"}
+	installed := "masscan-1.3.2-15.fc44.x86_64, coreutils-9.7-1.fc44.x86_64"
+	if id, err := p.Verify(outputs, installed); err != nil || !id.Valid() {
+		t.Fatal(id, err)
+	}
+	for _, bad := range []struct {
+		outputs   []string
+		installed string
+	}{
+		{[]string{"Masscan version 1.3.3\n", outputs[1]}, installed},
+		{[]string{outputs[0], strings.Repeat("a", 64) + "  /usr/bin/masscan\n"}, installed},
+		{outputs, "masscan-1.3.2-16.fc45.x86_64, coreutils-9.7-1.fc44.x86_64"},
+	} {
+		if _, err := p.Verify(bad.outputs, bad.installed); err == nil {
+			t.Fatal("accepted incompatible Fedora build")
+		}
+	}
+}

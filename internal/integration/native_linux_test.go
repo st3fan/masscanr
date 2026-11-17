@@ -18,6 +18,7 @@ import (
 
 	"github.com/st3fan/masscanr/internal/alpine"
 	"github.com/st3fan/masscanr/internal/backend/masscan"
+	"github.com/st3fan/masscanr/internal/fedora"
 	"github.com/st3fan/masscanr/internal/scan"
 	"golang.org/x/sys/unix"
 )
@@ -50,6 +51,36 @@ func TestAlpineRuntime(t *testing.T) {
 		t.Fatal(err, string(packages))
 	}
 	t.Logf("Alpine %s; %s", strings.TrimSpace(string(release)), strings.TrimSpace(string(packages)))
+}
+
+func TestFedoraRuntime(t *testing.T) {
+	if os.Getenv("MASSCAN_TEST_FEDORA") != "1" {
+		t.Skip("requires the isolated Fedora compatibility image")
+	}
+	release, err := os.ReadFile("/etc/os-release")
+	if err != nil || fedora.CheckRelease(string(release)) != nil {
+		t.Fatal("wrong Fedora image", err)
+	}
+	packageInfo, err := exec.CommandContext(t.Context(), "rpm", "-q", "--queryformat", "%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\\n", "masscan", "coreutils").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	preparation, err := (masscan.Backend{}).PreparationFor(fedora.Platform)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outputs := make([]string, len(preparation.Probes))
+	for i, probe := range preparation.Probes {
+		data, err := exec.CommandContext(t.Context(), probe.Command.Executable, probe.Command.Args...).CombinedOutput()
+		var exit *exec.ExitError
+		if err != nil && (!errors.As(err, &exit) || exit.ExitCode() != 1 || i != 0) {
+			t.Fatal(err, string(data))
+		}
+		outputs[i] = string(data)
+	}
+	if identity, err := preparation.Verify(outputs, strings.Join(strings.Fields(string(packageInfo)), ", ")); err != nil || !identity.Valid() {
+		t.Fatal(identity, err)
+	}
 }
 
 // A FIFO keeps the native saved-result replay alive after its first finding.

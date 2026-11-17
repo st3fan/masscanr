@@ -44,7 +44,7 @@ type instance struct {
 
 func (i instance) worker() cloud.Worker {
 	ip, err := netip.ParseAddr(i.IP)
-	return cloud.Worker{ID: i.ID, IP: i.IP, Password: i.Password, Label: i.Label, Tags: i.Tags,
+	return cloud.Worker{ID: i.ID, IP: i.IP, Password: i.Password, Platform: "alpine", Label: i.Label, Tags: i.Tags,
 		Ready: err == nil && ip.Is4() && !ip.IsUnspecified() && i.Status == "active" && i.Power == "running" && i.Server == "ok"}
 }
 

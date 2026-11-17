@@ -23,6 +23,31 @@ func shardedHeader() Header {
 	}
 }
 
+func TestDigitalOceanShardedHeaderContract(t *testing.T) {
+	h := shardedHeader()
+	h.Config.Provider, h.Config.Image, h.Config.SSHAuth = "digitalocean", "fedora-44-x64", "per-run-ed25519"
+	h.Config.Region, h.Config.InstanceType = "tor1", "s-1vcpu-1gb"
+	if _, err := h.Config.ValidateSharded(); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	w, err := NewWriter(&out, h, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	state, err := Replay(bytes.NewReader(out.Bytes()), nil)
+	if err != nil || state.Header == nil || state.Header.Config.Provider != h.Config.Provider || state.Header.Config.Image != h.Config.Image || state.Header.Config.SSHAuth != h.Config.SSHAuth {
+		t.Fatal(state.Header, err)
+	}
+	h.Config.SSHAuth = ""
+	if _, err := h.Config.ValidateSharded(); err == nil {
+		t.Fatal("accepted missing SSH contract")
+	}
+}
+
 func TestShardedJournalRetryAndReplay(t *testing.T) {
 	var out bytes.Buffer
 	w, err := NewWriter(&out, shardedHeader(), nil)

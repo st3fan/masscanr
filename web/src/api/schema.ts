@@ -443,12 +443,15 @@ export interface components {
         };
         scanConfig: {
             Backend: string;
+            Image: string;
             InstanceType: string;
             Ports: number[] | null;
+            Provider: string;
             /** Format: int64 */
             Rate: number;
             Region: string;
             RequestedTargets: components["schemas"]["scanTarget"][] | null;
+            SSHAuth: string;
             Targets: string[] | null;
             /** Format: int64 */
             Workers: number;
@@ -486,6 +489,7 @@ export interface components {
         scanfileConfig: {
             backend: string;
             exports: string[] | null;
+            image?: string;
             instance_type: string;
             /** Format: int64 */
             max_probes_per_shard?: number;
@@ -505,6 +509,7 @@ export interface components {
             shard_count?: number;
             /** Format: int64 */
             shards?: number;
+            ssh_auth?: string;
             targets: string[] | null;
             timeouts: {
                 [key: string]: string;
@@ -596,6 +601,7 @@ export interface operations {
         parameters: {
             query?: {
                 region?: string;
+                provider?: "vultr" | "digitalocean";
             };
             header?: never;
             path?: never;
@@ -910,7 +916,9 @@ export interface operations {
     };
     listRegions: {
         parameters: {
-            query?: never;
+            query?: {
+                provider?: "vultr" | "digitalocean";
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1240,11 +1248,14 @@ export interface operations {
                      *             "preflight": {
                      *               "config": {
                      *                 "Backend": "",
+                     *                 "Image": "",
                      *                 "InstanceType": "",
                      *                 "Ports": null,
+                     *                 "Provider": "",
                      *                 "Rate": 0,
                      *                 "Region": "",
                      *                 "RequestedTargets": null,
+                     *                 "SSHAuth": "",
                      *                 "Targets": null,
                      *                 "Workers": 0
                      *               },
@@ -1612,11 +1623,14 @@ export interface operations {
                      *           "preflight": {
                      *             "config": {
                      *               "Backend": "",
+                     *               "Image": "",
                      *               "InstanceType": "",
                      *               "Ports": null,
+                     *               "Provider": "",
                      *               "Rate": 0,
                      *               "Region": "",
                      *               "RequestedTargets": null,
+                     *               "SSHAuth": "",
                      *               "Targets": null,
                      *               "Workers": 0
                      *             },
@@ -2594,11 +2608,14 @@ export interface operations {
                      *           "preflight": {
                      *             "config": {
                      *               "Backend": "",
+                     *               "Image": "",
                      *               "InstanceType": "",
                      *               "Ports": null,
+                     *               "Provider": "",
                      *               "Rate": 0,
                      *               "Region": "",
                      *               "RequestedTargets": null,
+                     *               "SSHAuth": "",
                      *               "Targets": null,
                      *               "Workers": 0
                      *             },
@@ -4621,11 +4638,14 @@ export interface operations {
                      *         "attributes": {
                      *           "config": {
                      *             "Backend": "",
+                     *             "Image": "",
                      *             "InstanceType": "",
                      *             "Ports": null,
+                     *             "Provider": "",
                      *             "Rate": 0,
                      *             "Region": "",
                      *             "RequestedTargets": null,
+                     *             "SSHAuth": "",
                      *             "Targets": null,
                      *             "Workers": 0
                      *           },
@@ -4969,11 +4989,14 @@ export interface operations {
                      *             "preflight": {
                      *               "config": {
                      *                 "Backend": "",
+                     *                 "Image": "",
                      *                 "InstanceType": "",
                      *                 "Ports": null,
+                     *                 "Provider": "",
                      *                 "Rate": 0,
                      *                 "Region": "",
                      *                 "RequestedTargets": null,
+                     *                 "SSHAuth": "",
                      *                 "Targets": null,
                      *                 "Workers": 0
                      *               },
@@ -5365,11 +5388,14 @@ export interface operations {
                      *           "preflight": {
                      *             "config": {
                      *               "Backend": "",
+                     *               "Image": "",
                      *               "InstanceType": "",
                      *               "Ports": null,
+                     *               "Provider": "",
                      *               "Rate": 0,
                      *               "Region": "",
                      *               "RequestedTargets": null,
+                     *               "SSHAuth": "",
                      *               "Targets": null,
                      *               "Workers": 0
                      *             },
