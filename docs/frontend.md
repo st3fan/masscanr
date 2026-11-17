@@ -1,10 +1,25 @@
 # Browser dashboard development
 
-The dashboard is a read-only React client built from `web/`. The Go service owns scope,
+The dashboard is a React client built from `web/`. Approved Target management can
+write through the Go JSON:API. The Go service owns scope,
 scan execution, persistence, API validation, and access boundaries. The current listener
 must stay on loopback or a private network because the server has no authentication.
 The dashboard never stores API credentials or tokens. Adding authentication requires a
 separate Intent.
+
+Browser requests to `/v1` are accepted only from the listener's concrete HTTP
+origin or an origin supplied with `--browser-origin`. Set that flag to the
+private browser-facing origin when using Vite or a reverse proxy (for example,
+`--browser-origin http://127.0.0.1:5173` for the local Vite server). A wildcard
+listener has no implicit browser origin; configure one explicitly. The Docker
+image and default Compose service allow `http://127.0.0.1:18080`; Compose can
+override it with `MASSCANR_BROWSER_ORIGIN`, and `scripts/start.sh` derives that
+value from its bind address and port. The server checks `Host` on all `/v1`
+requests and also checks browser `Origin` and `Sec-Fetch-Site` headers.
+Headerless CLI/API clients need no browser headers but must use a configured
+Host. JSON:API media types remain required for request bodies. These checks
+reduce browser cross-origin and DNS rebinding requests; they do not authenticate
+clients that can reach the listener.
 
 ## Build and run
 

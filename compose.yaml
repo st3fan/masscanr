@@ -19,6 +19,13 @@ services:
   masscanr:
     build:
       context: .
+    command:
+      - --listen
+      - 0.0.0.0:18080
+      - --data-dir
+      - /data
+      - --browser-origin
+      - ${MASSCANR_BROWSER_ORIGIN:-http://127.0.0.1:18080}
     environment:
       # Keyword DSN plus PGPASSWORD avoids URL-encoding the password.
       DBOS_SYSTEM_DATABASE_URL: host=postgres port=5432 dbname=masscanr user=masscanr sslmode=disable

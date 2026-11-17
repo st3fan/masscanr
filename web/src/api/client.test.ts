@@ -69,6 +69,65 @@ describe('JSON:API client', () => {
       'External',
     )
   })
+  it('serializes Target create, revisioned update, and archive envelopes', async () => {
+    const fetch = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        reply({
+          data: { type: 'targets', id: 't-1', attributes: { name: 'External', entries: [] } },
+        }),
+      ),
+    )
+    vi.stubGlobal('fetch', fetch)
+    await api.createTarget({ name: 'External', entries: ['192.0.2.1', 'AS3333'] })
+    await api.updateTarget('t-1', { revision: 2, name: 'Updated', entries: ['192.0.2.0/24'] })
+    await api.archiveTarget('t-1', 3)
+    expect(
+      fetch.mock.calls.map(([path, options]) => [path, options.method, JSON.parse(options.body)]),
+    ).toEqual([
+      [
+        '/v1/targets',
+        'POST',
+        {
+          data: {
+            type: 'targets',
+            attributes: { name: 'External', entries: ['192.0.2.1', 'AS3333'] },
+          },
+        },
+      ],
+      [
+        '/v1/targets/t-1',
+        'PATCH',
+        {
+          data: {
+            type: 'targets',
+            id: 't-1',
+            attributes: { revision: 2, name: 'Updated', entries: ['192.0.2.0/24'] },
+          },
+        },
+      ],
+      [
+        '/v1/targets/t-1',
+        'PATCH',
+        { data: { type: 'targets', id: 't-1', attributes: { revision: 3, archived: true } } },
+      ],
+    ])
+    for (const [, options] of fetch.mock.calls) {
+      expect(options.credentials).toBe('same-origin')
+      expect(options.headers).toEqual({
+        Accept: 'application/vnd.api+json',
+        'Content-Type': 'application/vnd.api+json',
+      })
+    }
+  })
+  it('preserves revision-conflict status and JSON:API detail', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(reply({ errors: [{ status: '409', detail: 'conflict' }] }, 409)),
+    )
+    await expect(api.updateTarget('t-1', { revision: 1, name: 'Changed' })).rejects.toEqual(
+      new ApiError(409, 'conflict'),
+    )
+  })
 })
 
 describe('run exports', () => {

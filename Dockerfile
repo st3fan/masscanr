@@ -27,4 +27,4 @@ USER 10001:10001
 WORKDIR /data
 EXPOSE 18080
 ENTRYPOINT ["/usr/local/bin/masscanr-server"]
-CMD ["--listen", "0.0.0.0:18080", "--data-dir", "/data"]
+CMD ["--listen", "0.0.0.0:18080", "--data-dir", "/data", "--browser-origin", "http://127.0.0.1:18080"]

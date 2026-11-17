@@ -18,6 +18,14 @@ project=${MASSCANR_LOCAL_PROJECT:-masscanr-local}
 MASSCANR_PORT=${MASSCANR_PORT:-18080}
 MASSCANR_BIND_ADDRESS=${MASSCANR_BIND_ADDRESS:-127.0.0.1}
 export MASSCANR_PORT MASSCANR_BIND_ADDRESS
+if [ -z "${MASSCANR_BROWSER_ORIGIN:-}" ]; then
+    if [ "$MASSCANR_BIND_ADDRESS" = 0.0.0.0 ] || [ "$MASSCANR_BIND_ADDRESS" = :: ]; then
+        printf 'Set MASSCANR_BROWSER_ORIGIN to the private browser-facing origin for a wildcard bind.\n' >&2
+        exit 2
+    fi
+    MASSCANR_BROWSER_ORIGIN="http://$MASSCANR_BIND_ADDRESS:$MASSCANR_PORT"
+fi
+export MASSCANR_BROWSER_ORIGIN
 
 if [ ! -e .env ] && [ -z "${MASSCANR_POSTGRES_PASSWORD:-}" ]; then
     command -v openssl >/dev/null 2>&1 || { printf 'openssl is required to create .env\n' >&2; exit 1; }
