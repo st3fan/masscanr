@@ -22,6 +22,7 @@ type fixture struct {
 	mu              sync.Mutex
 	key             accountKey
 	droplets        map[int64]droplet
+	gpuDroplets     map[int64]droplet
 	posts           int
 	deletes         int
 	keyDeletes      int
@@ -31,6 +32,7 @@ type fixture struct {
 	omitSize        bool
 	omitImage       bool
 	paginate        bool
+	gpuSize         bool
 }
 
 func (f *fixture) handler(w http.ResponseWriter, r *http.Request) {
@@ -76,7 +78,11 @@ func (f *fixture) handler(w http.ResponseWriter, r *http.Request) {
 			json.NewEncoder(w).Encode(map[string]any{"sizes": []any{}})
 			return
 		}
-		json.NewEncoder(w).Encode(map[string]any{"sizes": []map[string]any{{"slug": "s-1vcpu-1gb", "vcpus": 1, "memory": 1024, "disk": 25, "available": true, "regions": []string{"tor1"}}}})
+		sizes := []map[string]any{{"slug": "s-1vcpu-1gb", "vcpus": 1, "memory": 1024, "disk": 25, "available": true, "regions": []string{"tor1"}}}
+		if f.gpuSize {
+			sizes = append(sizes, map[string]any{"slug": "gpu-test", "vcpus": 8, "memory": 32768, "disk": 100, "available": true, "regions": []string{"tor1"}, "gpu_info": map[string]any{"count": 1}})
+		}
+		json.NewEncoder(w).Encode(map[string]any{"sizes": sizes})
 	case r.Method == "GET" && path == "/images":
 		if f.omitImage {
 			json.NewEncoder(w).Encode(map[string]any{"images": []any{}})
@@ -89,7 +95,11 @@ func (f *fixture) handler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var ds []droplet
-		for _, d := range f.droplets {
+		selected := f.droplets
+		if r.URL.Query().Get("type") == "gpus" {
+			selected = f.gpuDroplets
+		}
+		for _, d := range selected {
 			ds = append(ds, d)
 		}
 		json.NewEncoder(w).Encode(map[string]any{"droplets": ds})
@@ -150,7 +160,7 @@ func parsePublic(encoded string) (string, error) {
 
 func newFixture(t *testing.T) (*Client, *fixture, func()) {
 	t.Helper()
-	f := &fixture{droplets: map[int64]droplet{}, token: "fixture-token"}
+	f := &fixture{droplets: map[int64]droplet{}, gpuDroplets: map[int64]droplet{}, token: "fixture-token"}
 	s := httptest.NewServer(http.HandlerFunc(f.handler))
 	c := New(f.token, base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)), testRun)
 	c.BaseURL = s.URL + "/v2"
@@ -265,6 +275,29 @@ func TestRunListingPaginatesAndFiltersOwnership(t *testing.T) {
 	workers, err := client.List(t.Context(), testRun)
 	if err != nil || len(workers) != 1 || workers[0].ID != "1" {
 		t.Fatalf("paginated owned workers: %+v %v", workers, err)
+	}
+}
+
+func TestGPUCollectionBlocksKeyRetirement(t *testing.T) {
+	client, fixture, done := newFixture(t)
+	defer done()
+	fixture.gpuDroplets[99] = droplet{ID: 99, Name: workerName(testRun, 1), Tags: []string{cloud.Label, "masscanr-run-" + testRun}}
+	if err := client.FinalizeRun(t.Context(), testRun); err == nil {
+		t.Fatal("retired run key while an owned GPU Droplet remained")
+	}
+	workers, err := client.List(t.Context(), testRun)
+	if err != nil || len(workers) != 1 || workers[0].ID != "99" {
+		t.Fatalf("GPU Droplet omitted from owned-worker list: %+v %v", workers, err)
+	}
+}
+
+func TestGPUSizeExcludedFromCatalog(t *testing.T) {
+	client, fixture, done := newFixture(t)
+	defer done()
+	fixture.gpuSize = true
+	sizes, err := client.InstanceTypes(t.Context(), "tor1")
+	if err != nil || len(sizes) != 1 || sizes[0].ID != "s-1vcpu-1gb" {
+		t.Fatalf("GPU size offered for scanner worker: %+v %v", sizes, err)
 	}
 }
 

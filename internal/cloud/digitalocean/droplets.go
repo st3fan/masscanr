@@ -209,31 +209,44 @@ func (c *Client) List(ctx context.Context, runID string) ([]cloud.Worker, error)
 	if err != nil {
 		return nil, err
 	}
-	path := "/droplets?tag_name=" + url.QueryEscape(tag) + "&per_page=200"
-	var out []cloud.Worker
-	for page := 0; page < 100; page++ {
-		var response struct {
-			Droplets []droplet `json:"droplets"`
-			pages
-		}
-		if err := c.request(ctx, "GET", path, nil, &response); err != nil {
-			return nil, err
-		}
-		for _, d := range response.Droplets {
-			w := d.worker(derived.private)
-			if owned(w, tag) {
-				out = append(out, w)
+	// Tag-filtered listings omit GPU Droplets. Inspect that collection too so
+	// cleanup cannot retire the SSH key while a tagged GPU Droplet remains.
+	byID := map[string]cloud.Worker{}
+	for _, first := range []string{"/droplets?tag_name=" + url.QueryEscape(tag) + "&per_page=200", "/droplets?type=gpus&per_page=200"} {
+		path := first
+		finished := false
+		for page := 0; page < 100; page++ {
+			var response struct {
+				Droplets []droplet `json:"droplets"`
+				pages
+			}
+			if err := c.request(ctx, "GET", path, nil, &response); err != nil {
+				return nil, err
+			}
+			for _, d := range response.Droplets {
+				w := d.worker(derived.private)
+				if d.ID > 0 && owned(w, tag) {
+					byID[w.ID] = w
+				}
+			}
+			path, err = c.nextPath(response.Links.Pages.Next)
+			if err != nil {
+				return nil, err
+			}
+			if path == "" {
+				finished = true
+				break
 			}
 		}
-		path, err = c.nextPath(response.Links.Pages.Next)
-		if err != nil {
-			return nil, err
-		}
-		if path == "" {
-			return out, nil
+		if !finished {
+			return nil, fmt.Errorf("DigitalOcean Droplet pagination limit exceeded")
 		}
 	}
-	return nil, fmt.Errorf("DigitalOcean Droplet pagination limit exceeded")
+	out := make([]cloud.Worker, 0, len(byID))
+	for _, worker := range byID {
+		out = append(out, worker)
+	}
+	return out, nil
 }
 
 func (c *Client) Delete(ctx context.Context, worker cloud.Worker, runID string) error {

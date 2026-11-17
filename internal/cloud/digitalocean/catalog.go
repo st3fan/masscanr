@@ -57,7 +57,7 @@ func (c *Client) InstanceTypes(ctx context.Context, region string) ([]cloud.Inst
 	if !validSlug(region) {
 		return nil, fmt.Errorf("invalid DigitalOcean region")
 	}
-	path := "/sizes?per_page=200"
+	path := "/sizes?per_page=200&gpu_maximum=0"
 	var out []cloud.InstanceType
 	for page := 0; page < 100; page++ {
 		var response struct {
@@ -68,6 +68,9 @@ func (c *Client) InstanceTypes(ctx context.Context, region string) ([]cloud.Inst
 				Disk      int      `json:"disk"`
 				Available bool     `json:"available"`
 				Regions   []string `json:"regions"`
+				GPUInfo   *struct {
+					Count int `json:"count"`
+				} `json:"gpu_info"`
 			} `json:"sizes"`
 			pages
 		}
@@ -75,7 +78,7 @@ func (c *Client) InstanceTypes(ctx context.Context, region string) ([]cloud.Inst
 			return nil, err
 		}
 		for _, s := range response.Sizes {
-			if s.Available && slices.Contains(s.Regions, region) && s.Disk > 0 {
+			if s.Available && (s.GPUInfo == nil || s.GPUInfo.Count == 0) && slices.Contains(s.Regions, region) && s.Disk > 0 {
 				out = append(out, cloud.InstanceType{ID: s.Slug, Family: "droplet", VCPUs: s.VCPUs, MemoryMB: s.Memory, DiskGB: s.Disk, DiskCount: 1})
 			}
 		}
