@@ -21,6 +21,8 @@ import (
 const apiURL = "https://api.digitalocean.com/v2"
 const maxResponse = 4 << 20
 
+var ErrTokenRequired = errors.New("DIGITALOCEAN_API_TOKEN is required")
+
 type Client struct {
 	HTTP      *http.Client
 	BaseURL   string
@@ -45,7 +47,7 @@ func (e *HTTPError) Error() string { return fmt.Sprintf("DigitalOcean %s: HTTP %
 
 func (c *Client) request(ctx context.Context, method, path string, payload, dest any) error {
 	if strings.TrimSpace(c.token) == "" {
-		return fmt.Errorf("DIGITALOCEAN_API_TOKEN is required")
+		return ErrTokenRequired
 	}
 	var data []byte
 	var err error
