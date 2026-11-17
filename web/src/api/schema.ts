@@ -445,6 +445,7 @@ export interface components {
             Backend: string;
             InstanceType: string;
             Ports: number[] | null;
+            Provider: string;
             /** Format: int64 */
             Rate: number;
             Region: string;
@@ -596,6 +597,7 @@ export interface operations {
         parameters: {
             query?: {
                 region?: string;
+                provider?: "vultr" | "digitalocean";
             };
             header?: never;
             path?: never;
@@ -910,7 +912,9 @@ export interface operations {
     };
     listRegions: {
         parameters: {
-            query?: never;
+            query?: {
+                provider?: "vultr" | "digitalocean";
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1242,6 +1246,7 @@ export interface operations {
                      *                 "Backend": "",
                      *                 "InstanceType": "",
                      *                 "Ports": null,
+                     *                 "Provider": "",
                      *                 "Rate": 0,
                      *                 "Region": "",
                      *                 "RequestedTargets": null,
@@ -1614,6 +1619,7 @@ export interface operations {
                      *               "Backend": "",
                      *               "InstanceType": "",
                      *               "Ports": null,
+                     *               "Provider": "",
                      *               "Rate": 0,
                      *               "Region": "",
                      *               "RequestedTargets": null,
@@ -2596,6 +2602,7 @@ export interface operations {
                      *               "Backend": "",
                      *               "InstanceType": "",
                      *               "Ports": null,
+                     *               "Provider": "",
                      *               "Rate": 0,
                      *               "Region": "",
                      *               "RequestedTargets": null,
@@ -4623,6 +4630,7 @@ export interface operations {
                      *             "Backend": "",
                      *             "InstanceType": "",
                      *             "Ports": null,
+                     *             "Provider": "",
                      *             "Rate": 0,
                      *             "Region": "",
                      *             "RequestedTargets": null,
@@ -4971,6 +4979,7 @@ export interface operations {
                      *                 "Backend": "",
                      *                 "InstanceType": "",
                      *                 "Ports": null,
+                     *                 "Provider": "",
                      *                 "Rate": 0,
                      *                 "Region": "",
                      *                 "RequestedTargets": null,
@@ -5367,6 +5376,7 @@ export interface operations {
                      *               "Backend": "",
                      *               "InstanceType": "",
                      *               "Ports": null,
+                     *               "Provider": "",
                      *               "Rate": 0,
                      *               "Region": "",
                      *               "RequestedTargets": null,

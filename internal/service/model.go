@@ -29,7 +29,7 @@ func Defaults() Definition {
 	return Definition{Backend: c.Backend, Ports: c.PortSpec(), Workers: c.Workers, Rate: c.Rate, Region: c.Region, InstanceType: c.InstanceType, Timeout: "24h", CleanupTimeout: "5m"}
 }
 func (d Definition) Config() (scan.Config, controller.Timeouts, error) {
-	c := scan.Config{Backend: d.Backend, Workers: d.Workers, Rate: d.Rate, Region: d.Region, InstanceType: d.InstanceType}
+	c := scan.Config{Backend: d.Backend, Provider: "vultr", Workers: d.Workers, Rate: d.Rate, Region: d.Region, InstanceType: d.InstanceType}
 	t := controller.DefaultTimeouts()
 	var err error
 	if c.RequestedTargets, err = scan.ParseRequestedTargets(d.Targets); err != nil {

@@ -33,12 +33,16 @@ type instanceTypeResponse struct {
 }
 
 func (a *API) regions(c fiber.Ctx) error {
-	if a.Catalog == nil {
+	catalog, err := a.catalogFor(c.Query("provider"))
+	if err != nil {
+		return bad(c, err)
+	}
+	if catalog == nil {
 		return respond(c, 503, map[string]string{"error": "provider catalog unavailable"})
 	}
 	ctx, cancel := context.WithTimeout(c.Context(), time.Minute)
 	defer cancel()
-	regions, err := a.Catalog.Regions(ctx)
+	regions, err := catalog.Regions(ctx)
 	if err != nil {
 		return respond(c, 502, map[string]string{"error": "provider catalog unavailable"})
 	}
@@ -51,19 +55,27 @@ func (a *API) regions(c fiber.Ctx) error {
 }
 
 func (a *API) instanceTypes(c fiber.Ctx) error {
+	provider := c.Query("provider")
+	catalog, err := a.catalogFor(provider)
+	if err != nil {
+		return bad(c, err)
+	}
 	region := c.Query("region")
 	if region == "" {
+		if provider == "digitalocean" {
+			return bad(c, errors.New("region is required for DigitalOcean"))
+		}
 		region = scan.DefaultRegion
 	}
 	if len(region) > 64 || strings.IndexFunc(region, func(ch rune) bool { return ch != '-' && (ch < 'a' || ch > 'z') && (ch < '0' || ch > '9') }) >= 0 {
 		return bad(c, errors.New("invalid region ID"))
 	}
-	if a.Catalog == nil {
+	if catalog == nil {
 		return respond(c, 503, map[string]string{"error": "provider catalog unavailable"})
 	}
 	ctx, cancel := context.WithTimeout(c.Context(), time.Minute)
 	defer cancel()
-	plans, err := a.Catalog.InstanceTypes(ctx, region)
+	plans, err := catalog.InstanceTypes(ctx, region)
 	if err != nil {
 		if errors.Is(err, cloud.ErrNotFound) {
 			return respond(c, 404, map[string]string{"error": "region unavailable"})
@@ -77,4 +89,14 @@ func (a *API) instanceTypes(c fiber.Ctx) error {
 	}
 	slices.SortFunc(result, func(a, b instanceTypeResponse) int { return strings.Compare(a.ID, b.ID) })
 	return respond(c, 200, result)
+}
+
+func (a *API) catalogFor(provider string) (cloud.Catalog, error) {
+	if provider == "" || provider == "vultr" {
+		return a.Catalog, nil
+	}
+	if provider != "digitalocean" {
+		return nil, errors.New("unsupported provider")
+	}
+	return a.Catalogs[provider], nil
 }

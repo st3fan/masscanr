@@ -32,8 +32,8 @@ both services attached to your terminal. If no `.env` or exported database
 password exists, it creates a private ignored `.env` with a random password. If
 `.env` already exists, provide `MASSCANR_POSTGRES_PASSWORD` there or in the
 launching environment; see
-[.env.example](.env.example). Set `VULTR_API_TOKEN` only if you intend to start a
-scan through the API or CLI. No scan starts automatically.
+[.env.example](.env.example). Set the credentials for your chosen worker provider
+only if you intend to start a scan through the API or CLI. No scan starts automatically.
 
 Open `http://127.0.0.1:18080/` for the dashboard, or check the API from another
 terminal:
@@ -95,9 +95,12 @@ go build -tags webui -o masscanr-server ./cmd/masscanr-server
 ```
 
 The service initializes its PostgreSQL and DBOS schemas automatically. Keep the
-same database and artifact directory when restarting. Set `VULTR_API_TOKEN` in
-the service's environment through your secret manager before starting scans;
-CRUD and preflight work without it. For example, with 1Password:
+same database and artifact directory when restarting. Set `VULTR_API_TOKEN` for
+Vultr or both `DIGITALOCEAN_API_TOKEN` and `DIGITALOCEAN_SSH_SEED` for
+DigitalOcean in the service environment before starting scans; CRUD and
+preflight work without them. Keep the DigitalOcean seed stable across service
+restarts so a run can recover its SSH identity. Generate it with
+`openssl rand -base64 32` and store it with the API token. For example, with 1Password:
 
 ```sh
 VULTR_API_TOKEN='op://Company/Vultr/api-token' \
@@ -277,11 +280,16 @@ Use the [scan document format](docs/scan-format.md) for the journal contract.
 ```sh
 curl --fail-with-body -sS http://127.0.0.1:18080/v1/catalog/regions | jq .
 curl --fail-with-body -sS 'http://127.0.0.1:18080/v1/catalog/instance-types?region=atl' | jq .
+curl --fail-with-body -sS 'http://127.0.0.1:18080/v1/catalog/regions?provider=digitalocean' | jq .
+curl --fail-with-body -sS 'http://127.0.0.1:18080/v1/catalog/instance-types?provider=digitalocean&region=tor1' | jq .
 ```
 
-Catalog responses come from Vultr's public API. They are read-only and do not
-need a Vultr token. Regional availability may change between catalog lookup and
-scan start; preflight validates the frozen plan.
+Vultr catalog responses are public and need no Vultr token. The DigitalOcean
+catalog requires the service's DigitalOcean API token. Its ScanPlans use
+`provider: "digitalocean"`, a region from the DigitalOcean catalog, and a size
+available in that region. The provider checks the Fedora 44 image, region, and
+size before creating a worker. Availability may change between catalog lookup
+and scan start.
 
 ## Development and validation
 

@@ -249,7 +249,11 @@ func newShardedJournal(out io.Writer, cfg scan.Config, t Timeouts, runID string,
 	if d, ok := out.(interface{ ScanPaths() (string, [2]string) }); ok {
 		output, exports = d.ScanPaths()
 	}
-	h := scanfile.Header{Format: scanfile.Format, Schema: scanfile.ShardedSchema, RunID: runID, CreatedAt: time.Now().UTC(), ControllerVersion: "v10", Label: "masscanr", OwnershipTag: "masscanr-run-" + runID, Config: scanfile.Config{Targets: cfg.Targets, RequestedTargets: cfg.RequestedTargets, Ports: cfg.PortSpec(), Backend: cfg.Backend, Seed: strconv.FormatUint(seed, 10), RequestedWorkers: cfg.Workers, Workers: workers, ShardCount: manifest.Count, PartitionVersion: manifest.Version, MaxProbesPerUnit: scan.MaxProbesPerShard, Rate: cfg.Rate, Provider: "vultr", Region: cfg.Region, InstanceType: cfg.InstanceType, Output: output, Exports: exports, Timeouts: map[string]string{"create": t.Create.String(), "ready": t.Ready.String(), "prepare": t.Prepare.String(), "scan": t.Scan.String(), "cleanup": t.Cleanup.String(), "delete": t.Delete.String(), "poll": t.Poll.String()}}}
+	provider := cfg.Provider
+	if provider == "" {
+		provider = "vultr"
+	}
+	h := scanfile.Header{Format: scanfile.Format, Schema: scanfile.ShardedSchema, RunID: runID, CreatedAt: time.Now().UTC(), ControllerVersion: "v10", Label: "masscanr", OwnershipTag: "masscanr-run-" + runID, Config: scanfile.Config{Targets: cfg.Targets, RequestedTargets: cfg.RequestedTargets, Ports: cfg.PortSpec(), Backend: cfg.Backend, Seed: strconv.FormatUint(seed, 10), RequestedWorkers: cfg.Workers, Workers: workers, ShardCount: manifest.Count, PartitionVersion: manifest.Version, MaxProbesPerUnit: scan.MaxProbesPerShard, Rate: cfg.Rate, Provider: provider, Region: cfg.Region, InstanceType: cfg.InstanceType, Output: output, Exports: exports, Timeouts: map[string]string{"create": t.Create.String(), "ready": t.Ready.String(), "prepare": t.Prepare.String(), "scan": t.Scan.String(), "cleanup": t.Cleanup.String(), "delete": t.Delete.String(), "poll": t.Poll.String()}}}
 	return scanfile.NewWriter(out, h, func(error) { cancel() })
 }
 

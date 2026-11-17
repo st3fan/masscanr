@@ -27,6 +27,7 @@ const TopPorts = "7,9,13,21,22,23,25,26,37,53,79,80,81,88,106,110,111,113,119,13
 
 type Config struct {
 	Backend          string
+	Provider         string
 	Targets          []netip.Prefix
 	RequestedTargets []Target
 	Ports            []uint16
@@ -38,7 +39,7 @@ type Config struct {
 
 func Defaults() Config {
 	ports, _ := ParsePorts(TopPorts)
-	return Config{Backend: "masscan", Ports: ports, Workers: DefaultWorkers, Rate: DefaultRate, Region: DefaultRegion, InstanceType: DefaultInstanceType}
+	return Config{Backend: "masscan", Provider: "vultr", Ports: ports, Workers: DefaultWorkers, Rate: DefaultRate, Region: DefaultRegion, InstanceType: DefaultInstanceType}
 }
 
 // ParseTargets masks host bits and removes duplicate/contained prefixes.

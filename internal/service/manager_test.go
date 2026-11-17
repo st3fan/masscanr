@@ -7,6 +7,8 @@ import (
 	"github.com/st3fan/masscanr/internal/backend"
 	"github.com/st3fan/masscanr/internal/backend/registry"
 	"github.com/st3fan/masscanr/internal/cloud"
+	"github.com/st3fan/masscanr/internal/cloud/digitalocean"
+	"github.com/st3fan/masscanr/internal/cloud/vultr"
 	"github.com/st3fan/masscanr/internal/controller"
 	"github.com/st3fan/masscanr/internal/scan"
 	"net/netip"
@@ -307,5 +309,16 @@ func TestProcessCrashRecovery(t *testing.T) {
 	got := waitRun(t, s, r.ID)
 	if got.Summary.ScanOutcome != "interrupted" || got.Summary.CleanupOutcome != "complete" || p.creates != 0 {
 		t.Fatal(got)
+	}
+}
+
+func TestProviderFollowsFrozenRunSnapshot(t *testing.T) {
+	run := Run{ID: newID()}
+	if _, ok := providerFor(run).(*vultr.Client); !ok {
+		t.Fatal("legacy run did not retain Vultr")
+	}
+	run.Plan.Config.Provider = "digitalocean"
+	if _, ok := providerFor(run).(*digitalocean.Client); !ok {
+		t.Fatal("DigitalOcean snapshot did not select DigitalOcean")
 	}
 }

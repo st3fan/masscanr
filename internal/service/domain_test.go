@@ -38,6 +38,12 @@ func TestScanPlanSettingsRequireSupportedProviderAndValidOptions(t *testing.T) {
 	if _, _, err := settings.Config([]string{"192.0.2.0/24"}); err != nil {
 		t.Fatal(err)
 	}
+	settings.Provider = "digitalocean"
+	settings.Region = "tor1"
+	settings.InstanceType = "s-1vcpu-1gb"
+	if config, _, err := settings.Config([]string{"192.0.2.0/24"}); err != nil || config.Provider != "digitalocean" {
+		t.Fatalf("DigitalOcean configuration: %+v %v", config, err)
+	}
 	settings.Provider = "other"
 	if _, _, err := settings.Config([]string{"192.0.2.0/24"}); err == nil {
 		t.Fatal("accepted unsupported provider")

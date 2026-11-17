@@ -14,6 +14,8 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/jackc/pgx/v5"
 	"github.com/st3fan/masscanr/internal/backend/registry"
+	"github.com/st3fan/masscanr/internal/cloud"
+	"github.com/st3fan/masscanr/internal/cloud/digitalocean"
 	"github.com/st3fan/masscanr/internal/cloud/vultr"
 	"github.com/st3fan/masscanr/internal/controller"
 	"github.com/st3fan/masscanr/internal/remote"
@@ -35,11 +37,18 @@ func NewManager(s *Store, dc dbos.Context, dir string) *Manager {
 	m := &Manager{Store: s, DBOS: dc, Dir: dir, cancel: map[string]context.CancelFunc{}}
 	m.Factory = func(r Run) *controller.Controller {
 		b, _ := registry.Resolve(r.Plan.Config.Backend)
-		return &controller.Controller{RunID: r.ID, Backend: b, Provider: vultr.New(os.Getenv("VULTR_API_TOKEN")), Runner: remote.NewSSH(), Timeouts: r.Plan.Timeouts, ShardStore: s, ExpectedIdentity: r.Summary.Identity}
+		return &controller.Controller{RunID: r.ID, Backend: b, Provider: providerFor(r), Runner: remote.NewSSH(), Timeouts: r.Plan.Timeouts, ShardStore: s, ExpectedIdentity: r.Summary.Identity}
 	}
 	dbos.RegisterWorkflow(dc, m.cleanupWorkflow, dbos.WithWorkflowName("masscanr.cleanup.v10"))
 	dbos.RegisterWorkflow(dc, m.workflow, dbos.WithWorkflowName("masscanr.scan.v10"))
 	return m
+}
+
+func providerFor(r Run) cloud.Provider {
+	if r.Plan.Config.Provider == "digitalocean" {
+		return digitalocean.New(os.Getenv("DIGITALOCEAN_API_TOKEN"), os.Getenv("DIGITALOCEAN_SSH_SEED"), r.ID)
+	}
+	return vultr.New(os.Getenv("VULTR_API_TOKEN"))
 }
 func (s *Store) mutateRun(ctx context.Context, id string, f func(*Run)) error {
 	return s.tx(ctx, func(tx pgx.Tx) error {
@@ -148,7 +157,7 @@ func (m *Manager) execute(ctx context.Context, id string) error {
 			return e
 		}
 	}
-	dest := privateArtifact{Destination: scanfile.Destination{Writer: file, SyncFunc: file.Sync, Output: path, Exports: [2]string{path[:len(path)-5] + ".csv", path[:len(path)-5] + ".jsonl"}}, token: os.Getenv("VULTR_API_TOKEN")}
+	dest := privateArtifact{Destination: scanfile.Destination{Writer: file, SyncFunc: file.Sync, Output: path, Exports: [2]string{path[:len(path)-5] + ".csv", path[:len(path)-5] + ".jsonl"}}, secrets: []string{os.Getenv("VULTR_API_TOKEN"), os.Getenv("DIGITALOCEAN_API_TOKEN"), os.Getenv("DIGITALOCEAN_SSH_SEED")}}
 	runner := m.Factory(r)
 	runner.ShardStore = m.Store
 	if resuming {
@@ -259,12 +268,14 @@ func (m *Manager) listRunWorkers(c fiber.Ctx) error {
 
 type privateArtifact struct {
 	scanfile.Destination
-	token string
+	secrets []string
 }
 
 func (d privateArtifact) Sanitize(s string) string {
-	if d.token != "" {
-		s = strings.ReplaceAll(s, d.token, "[REDACTED]")
+	for _, secret := range d.secrets {
+		if secret != "" {
+			s = strings.ReplaceAll(s, secret, "[REDACTED]")
+		}
 	}
 	return s
 }
@@ -290,8 +301,21 @@ func (m *Manager) startScanPlan(c fiber.Ctx) error {
 	if key == "" || len(key) > 200 {
 		return bad(c, fmt.Errorf("Idempotency-Key of 1..200 bytes required"))
 	}
-	if os.Getenv("VULTR_API_TOKEN") == "" {
-		return respond(c, 503, map[string]string{"error": "VULTR_API_TOKEN is required to start scans"})
+	preflight, err := m.Store.GetPreflight(c.Context(), in.PreflightID)
+	if err != nil {
+		return problem(c, err)
+	}
+	switch preflight.Config.Provider {
+	case "", "vultr":
+		if os.Getenv("VULTR_API_TOKEN") == "" {
+			return respond(c, 503, map[string]string{"error": "VULTR_API_TOKEN is required to start scans"})
+		}
+	case "digitalocean":
+		if os.Getenv("DIGITALOCEAN_API_TOKEN") == "" || os.Getenv("DIGITALOCEAN_SSH_SEED") == "" {
+			return respond(c, 503, map[string]string{"error": "DIGITALOCEAN_API_TOKEN and DIGITALOCEAN_SSH_SEED are required to start scans"})
+		}
+	default:
+		return respond(c, 503, map[string]string{"error": "unsupported provider"})
 	}
 	run, err := m.Store.ReserveScanPlan(c.Context(), c.Params("id"), in.PreflightID, key, in.Confirm)
 	if err != nil {

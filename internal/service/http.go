@@ -18,13 +18,14 @@ import (
 )
 
 type API struct {
-	Huma    huma.API
-	Resolve func(context.Context, []scan.Target) ([]scan.Target, error)
-	Catalog cloud.Catalog
-	Store   *Store
-	Ready   func() bool
-	Extra   func(*fiber.App)
-	Base    context.Context
+	Huma     huma.API
+	Resolve  func(context.Context, []scan.Target) ([]scan.Target, error)
+	Catalog  cloud.Catalog
+	Catalogs map[string]cloud.Catalog
+	Store    *Store
+	Ready    func() bool
+	Extra    func(*fiber.App)
+	Base     context.Context
 }
 
 func (a *API) Handler() *fiber.App {

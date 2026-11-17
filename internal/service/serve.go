@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
+	"github.com/st3fan/masscanr/internal/cloud"
+	"github.com/st3fan/masscanr/internal/cloud/digitalocean"
 	"github.com/st3fan/masscanr/internal/cloud/vultr"
 	"github.com/st3fan/masscanr/internal/webui"
 
@@ -74,7 +76,7 @@ func Serve(ctx context.Context, args []string, out io.Writer) (result error) {
 	if e = manager.ResumeReserved(recovery); e != nil {
 		return fmt.Errorf("workflow recovery failed")
 	}
-	api := &API{Store: s, Catalog: vultr.New(""), Base: ctx, Ready: func() bool { manager.mu.Lock(); defer manager.mu.Unlock(); return !manager.closing }}
+	api := &API{Store: s, Catalog: vultr.New(""), Catalogs: map[string]cloud.Catalog{"digitalocean": digitalocean.New(os.Getenv("DIGITALOCEAN_API_TOKEN"), os.Getenv("DIGITALOCEAN_SSH_SEED"), "")}, Base: ctx, Ready: func() bool { manager.mu.Lock(); defer manager.mu.Unlock(); return !manager.closing }}
 	api.Extra = func(app *fiber.App) { manager.Routes(api, app) }
 	srv := api.Handler()
 	webui.Register(srv, webui.Assets())

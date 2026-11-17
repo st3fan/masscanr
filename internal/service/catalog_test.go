@@ -66,3 +66,23 @@ func TestCatalogAPIErrorsDoNotLeakProviderDetails(t *testing.T) {
 		t.Fatal(w.Code, w.Body)
 	}
 }
+
+func TestDigitalOceanCatalogSelector(t *testing.T) {
+	do := &catalogFixture{regions: []cloud.Region{{ID: "tor1", Name: "Toronto"}}, plans: []cloud.InstanceType{{ID: "s-1vcpu-1gb", MemoryMB: 1024}}}
+	api := &API{Catalog: &catalogFixture{}, Catalogs: map[string]cloud.Catalog{"digitalocean": do}}
+	h := api.Handler()
+	response := request(h, "GET", "/v1/catalog/regions?provider=digitalocean", "")
+	var regions []regionResponse
+	if err := decodeTestList(response.Body.Bytes(), &regions); err != nil || response.Code != 200 || len(regions) != 1 || regions[0].ID != "tor1" {
+		t.Fatalf("regions: %d %s %v", response.Code, response.Body, err)
+	}
+	response = request(h, "GET", "/v1/catalog/instance-types?provider=digitalocean&region=tor1", "")
+	if response.Code != 200 || do.region != "tor1" {
+		t.Fatalf("size catalog: %d %s", response.Code, response.Body)
+	}
+	for _, path := range []string{"/v1/catalog/regions?provider=unknown", "/v1/catalog/instance-types?provider=digitalocean"} {
+		if response = request(h, "GET", path, ""); response.Code != 400 {
+			t.Fatalf("%s: %d %s", path, response.Code, response.Body)
+		}
+	}
+}
