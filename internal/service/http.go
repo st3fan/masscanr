@@ -18,14 +18,17 @@ import (
 )
 
 type API struct {
-	Huma     huma.API
-	Resolve  func(context.Context, []scan.Target) ([]scan.Target, error)
-	Catalog  cloud.Catalog
-	Catalogs map[string]cloud.Catalog
-	Store    *Store
-	Ready    func() bool
-	Extra    func(*fiber.App)
-	Base     context.Context
+	Huma huma.API
+	// BrowserOrigins are the exact origins allowed to access /v1 from a browser.
+	// Non-browser API clients do not send browser origin/fetch metadata headers.
+	BrowserOrigins []string
+	Resolve        func(context.Context, []scan.Target) ([]scan.Target, error)
+	Catalog        cloud.Catalog
+	Catalogs       map[string]cloud.Catalog
+	Store          *Store
+	Ready          func() bool
+	Extra          func(*fiber.App)
+	Base           context.Context
 }
 
 func (a *API) Handler() *fiber.App {
@@ -52,6 +55,9 @@ func (a *API) Handler() *fiber.App {
 	})
 	app.Use(func(c fiber.Ctx) error {
 		if strings.HasPrefix(c.Path(), "/v1/") {
+			if !allowedBrowserRequest(c, a.BrowserOrigins) {
+				return respond(c, 403, map[string]string{"error": "browser origin not allowed"})
+			}
 			if !acceptsResponse(c.Get("Accept"), strings.Contains(c.Path(), "/exports/")) {
 				return respond(c, 406, map[string]string{"error": "JSON:API response not acceptable"})
 			}

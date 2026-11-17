@@ -46,6 +46,14 @@ type and contain `data` or an `errors` array. Use `Accept: application/vnd.api+j
 downloads are format exceptions. API errors, including failed downloads, use
 JSON:API `errors`. Request JSON is limited to 1 MiB; the transport limit is 2 MiB.
 
+`/v1` requests must use a configured private Host. A concrete `--listen` address
+provides its HTTP origin automatically; a wildcard listener needs
+`--browser-origin` with the exact browser-facing origin. The Docker/Compose
+default is `http://127.0.0.1:18080`, and Compose accepts
+`MASSCANR_BROWSER_ORIGIN` for a different private origin. Browser requests also
+undergo same-origin and Fetch Metadata checks. These checks do not replace
+private network access controls or add API authentication.
+
 The main resources are:
 
 | Resource | Purpose |

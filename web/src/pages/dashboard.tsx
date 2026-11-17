@@ -103,7 +103,7 @@ export function DashboardPage() {
             </div>
             <div className="flex justify-between border-b pb-3">
               <span className="text-muted-foreground">Dashboard</span>
-              <span>Read only</span>
+              <span>Target management</span>
             </div>
             <p className="text-muted-foreground">
               Results are positive open-port observations. Missing findings never prove a port is

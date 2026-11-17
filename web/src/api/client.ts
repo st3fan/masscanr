@@ -11,6 +11,10 @@ export type ListResults =
 export type ListRunWorkers =
   operations['listRunWorkers']['responses'][200]['content']['application/vnd.api+json']
 export type Target = ListTargets['data'][number]
+export type CreateTargetAttributes =
+  operations['createTarget']['requestBody']['content']['application/vnd.api+json']['data']['attributes']
+export type UpdateTargetAttributes =
+  operations['updateTarget']['requestBody']['content']['application/vnd.api+json']['data']['attributes']
 export type ScanPlan = ListScanPlans['data'][number]
 export type ScanRun = ListRuns['data'][number]
 export type ScanResult = ListResults['data'][number]
@@ -153,10 +157,15 @@ async function request<T>(
   type: string,
   collection: boolean,
   signal?: AbortSignal,
+  mutation?: { method: 'POST' | 'PATCH'; body: unknown },
 ): Promise<T> {
   if (!path.startsWith('/v1/')) throw new ApiError(400, 'Invalid API path')
+  const headers: Record<string, string> = { Accept: 'application/vnd.api+json' }
+  if (mutation) headers['Content-Type'] = 'application/vnd.api+json'
   const response = await fetch(path, {
-    headers: { Accept: 'application/vnd.api+json' },
+    method: mutation?.method,
+    body: mutation ? JSON.stringify(mutation.body) : undefined,
+    headers,
     credentials: 'same-origin',
     signal,
   })
@@ -200,6 +209,24 @@ export const api = {
     request<ListTargets>(url('/v1/targets', query), 'targets', true, signal),
   target: (id: string, signal?: AbortSignal) =>
     request<{ data: Target }>(`/v1/targets/${encodeURIComponent(id)}`, 'targets', false, signal),
+  createTarget: (attributes: CreateTargetAttributes) =>
+    request<{ data: Target }>('/v1/targets', 'targets', false, undefined, {
+      method: 'POST',
+      body: { data: { type: 'targets', attributes } },
+    }),
+  updateTarget: (id: string, attributes: UpdateTargetAttributes) =>
+    request<{ data: Target }>(
+      `/v1/targets/${encodeURIComponent(id)}`,
+      'targets',
+      false,
+      undefined,
+      {
+        method: 'PATCH',
+        body: { data: { type: 'targets', id, attributes } },
+      },
+    ),
+  archiveTarget: (id: string, revision: number) =>
+    api.updateTarget(id, { revision, archived: true }),
   plans: (query?: Record<string, string | number | undefined>, signal?: AbortSignal) =>
     request<ListScanPlans>(url('/v1/scan-plans', query), 'scan-plans', true, signal),
   plan: (id: string, signal?: AbortSignal) =>

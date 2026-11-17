@@ -33,7 +33,8 @@ contains unrelated projects.
   Run `gofmt`, `go test ./...`, and checks appropriate to the change.
 - For dashboard changes, use the `web/` workspace, regenerate OpenAPI types when
   the API changes, and run typecheck, lint, formatting, unit tests, and build.
-  Reuse shared JSON:API client and shadcn components; keep browser views read-only.
+  Reuse shared JSON:API client and shadcn components. Browser writes require an
+  approved Intent, same-origin private access, and server-side request safeguards.
 - Ask before running the actual app. Existing user authorization in the current
   session remains valid for the approved run and necessary retries.
 - Tests may target the authorized IPv4 prefix `64.98.138.0/22` (masked:
