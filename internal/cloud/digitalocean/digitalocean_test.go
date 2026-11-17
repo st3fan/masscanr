@@ -19,13 +19,18 @@ import (
 const testRun = "11111111-2222-3333-4444-555555555555"
 
 type fixture struct {
-	mu         sync.Mutex
-	key        accountKey
-	droplets   map[int64]droplet
-	posts      int
-	deletes    int
-	keyDeletes int
-	token      string
+	mu              sync.Mutex
+	key             accountKey
+	droplets        map[int64]droplet
+	posts           int
+	deletes         int
+	keyDeletes      int
+	token           string
+	createAmbiguous bool
+	createDenied    bool
+	omitSize        bool
+	omitImage       bool
+	paginate        bool
 }
 
 func (f *fixture) handler(w http.ResponseWriter, r *http.Request) {
@@ -67,10 +72,22 @@ func (f *fixture) handler(w http.ResponseWriter, r *http.Request) {
 	case r.Method == "GET" && path == "/regions":
 		json.NewEncoder(w).Encode(map[string]any{"regions": []map[string]any{{"slug": "tor1", "name": "Toronto", "available": true}}})
 	case r.Method == "GET" && path == "/sizes":
+		if f.omitSize {
+			json.NewEncoder(w).Encode(map[string]any{"sizes": []any{}})
+			return
+		}
 		json.NewEncoder(w).Encode(map[string]any{"sizes": []map[string]any{{"slug": "s-1vcpu-1gb", "vcpus": 1, "memory": 1024, "disk": 25, "available": true, "regions": []string{"tor1"}}}})
 	case r.Method == "GET" && path == "/images":
+		if f.omitImage {
+			json.NewEncoder(w).Encode(map[string]any{"images": []any{}})
+			return
+		}
 		json.NewEncoder(w).Encode(map[string]any{"images": []map[string]any{{"slug": fedoraImage, "status": "available", "regions": []string{"tor1"}}}})
 	case r.Method == "GET" && path == "/droplets":
+		if f.paginate && r.URL.Query().Get("page") == "" {
+			json.NewEncoder(w).Encode(map[string]any{"droplets": []any{}, "links": map[string]any{"pages": map[string]any{"next": "http://" + r.Host + "/v2/droplets?page=2"}}})
+			return
+		}
 		var ds []droplet
 		for _, d := range f.droplets {
 			ds = append(ds, d)
@@ -78,6 +95,10 @@ func (f *fixture) handler(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{"droplets": ds})
 	case r.Method == "POST" && path == "/droplets":
 		f.posts++
+		if f.createDenied {
+			w.WriteHeader(403)
+			return
+		}
 		var in struct {
 			Name    string   `json:"name"`
 			Tags    []string `json:"tags"`
@@ -94,6 +115,10 @@ func (f *fixture) handler(w http.ResponseWriter, r *http.Request) {
 			Type string `json:"type"`
 		}{"203.0.113.42", "public"})
 		f.droplets[42] = d
+		if f.createAmbiguous {
+			w.WriteHeader(500)
+			return
+		}
 		json.NewEncoder(w).Encode(map[string]any{"droplet": d})
 	case r.Method == "GET" && strings.HasPrefix(path, "/droplets/"):
 		var id int64
@@ -196,5 +221,63 @@ func TestCredentialsRedactedAndPaginationBounded(t *testing.T) {
 	err := c.Validate(t.Context(), cloud.Spec{RunID: testRun, Region: "tor1", InstanceType: "s-1vcpu-1gb"})
 	if err == nil || strings.Contains(err.Error(), c.token) {
 		t.Fatalf("credential leak: %v", err)
+	}
+}
+
+func TestAmbiguousCreateReconcilesWithoutSecondPost(t *testing.T) {
+	client, fixture, done := newFixture(t)
+	defer done()
+	fixture.createAmbiguous = true
+	spec := cloud.Spec{RunID: testRun, Shard: 1, Region: "tor1", InstanceType: "s-1vcpu-1gb"}
+	if err := client.Validate(t.Context(), spec); err != nil {
+		t.Fatal(err)
+	}
+	worker, err := client.Create(t.Context(), spec)
+	if err != nil || worker.ID != "42" || fixture.posts != 2 {
+		t.Fatalf("create reconciliation: worker=%+v error=%v posts=%d", worker, err, fixture.posts)
+	}
+}
+
+func TestValidationRejectsMissingSizeOrFedoraImage(t *testing.T) {
+	for _, missing := range []string{"size", "image"} {
+		t.Run(missing, func(t *testing.T) {
+			client, fixture, done := newFixture(t)
+			defer done()
+			fixture.omitSize = missing == "size"
+			fixture.omitImage = missing == "image"
+			spec := cloud.Spec{RunID: testRun, Shard: 1, Region: "tor1", InstanceType: "s-1vcpu-1gb"}
+			if err := client.Validate(t.Context(), spec); err == nil {
+				t.Fatal("accepted unavailable worker image or size")
+			}
+			if _, err := client.Create(t.Context(), spec); err == nil || fixture.posts != 0 {
+				t.Fatalf("created worker after validation failure: %v posts=%d", err, fixture.posts)
+			}
+		})
+	}
+}
+
+func TestRunListingPaginatesAndFiltersOwnership(t *testing.T) {
+	client, fixture, done := newFixture(t)
+	defer done()
+	fixture.paginate = true
+	fixture.droplets[1] = droplet{ID: 1, Name: workerName(testRun, 1), Tags: []string{cloud.Label, "masscanr-run-" + testRun}}
+	fixture.droplets[2] = droplet{ID: 2, Name: "unrelated", Tags: []string{"masscanr-run-" + testRun}}
+	workers, err := client.List(t.Context(), testRun)
+	if err != nil || len(workers) != 1 || workers[0].ID != "1" {
+		t.Fatalf("paginated owned workers: %+v %v", workers, err)
+	}
+}
+
+func TestCreateKeepsProviderStatusWhenReconciliationFindsNothing(t *testing.T) {
+	client, fixture, done := newFixture(t)
+	defer done()
+	fixture.createDenied = true
+	spec := cloud.Spec{RunID: testRun, Shard: 1, Region: "tor1", InstanceType: "s-1vcpu-1gb"}
+	if err := client.Validate(t.Context(), spec); err != nil {
+		t.Fatal(err)
+	}
+	_, err := client.Create(t.Context(), spec)
+	if err == nil || !strings.Contains(err.Error(), "HTTP 403") || fixture.posts != 2 {
+		t.Fatalf("lost provider denial: %v posts=%d", err, fixture.posts)
 	}
 }
