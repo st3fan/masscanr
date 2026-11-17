@@ -21,8 +21,8 @@ class Failure(Exception):
 
 def safe(value):
     text = str(value)
-    for name in ("VULTR_API_TOKEN", "PGPASSWORD", "MASSCANR_POSTGRES_PASSWORD",
-                 "DBOS_SYSTEM_DATABASE_URL"):
+    for name in ("VULTR_API_TOKEN", "DIGITALOCEAN_API_TOKEN", "DIGITALOCEAN_SSH_SEED",
+                 "PGPASSWORD", "MASSCANR_POSTGRES_PASSWORD", "DBOS_SYSTEM_DATABASE_URL"):
         secret = os.environ.get(name)
         if secret:
             text = text.replace(secret, "[REDACTED]")
@@ -40,9 +40,10 @@ class NoRedirect(request.HTTPRedirectHandler):
 
 
 class Client:
-    def __init__(self, server, timeout):
+    def __init__(self, server, timeout, provider):
         self.server = server.rstrip("/")
         self.timeout = timeout
+        self.provider = provider
         self.opener = request.build_opener(NoRedirect)
 
     def call(self, stage, method, path, expected, body=None, headers=None, resource_id=None):
@@ -81,13 +82,15 @@ class Client:
             raise Failure(f"{stage}: response exceeded {MAX_RESPONSE} bytes")
         text = raw.decode("utf-8", errors="replace")
         if status != expected:
+            credentials = ("DIGITALOCEAN_API_TOKEN and DIGITALOCEAN_SSH_SEED"
+                           if self.provider == "digitalocean" else "VULTR_API_TOKEN")
             hints = {
                 400: "Check the request fields and target/port syntax shown above.",
                 404: "Check the server address, API version, and resource IDs.",
                 409: "Another run may be active, the preflight may be expired/stale, "
                      "or confirmation/idempotency may not match.",
                 422: "Target resolution failed; check the AS target and service/RIPE connectivity.",
-                503: "Check service readiness and VULTR_API_TOKEN in the SERVICE environment. "
+                503: f"Check service readiness and {credentials} in the SERVICE environment. "
                      "A launch-pending response may already have reserved a run.",
             }
             raise Failure(f"{stage}: expected HTTP {expected}, got {status}.\n"
@@ -128,12 +131,19 @@ def seconds(value):
     return number
 
 
+def provider_identifier(value):
+    return bool(value) and len(value) <= 100 and all(
+        "a" <= char <= "z" or "0" <= char <= "9" or char == "-" for char in value)
+
+
 def arguments(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("targets", nargs="+", help="explicit authorized IPv4/CIDR/AS targets")
     p.add_argument("--server", default="http://127.0.0.1:18080")
     p.add_argument("--ports", help="TCP ports/ranges; omitted uses service defaults")
     p.add_argument("--backend", choices=("masscan", "zmap"))
+    p.add_argument("--provider", choices=("vultr", "digitalocean"), default="vultr",
+                   help="worker provider (default: vultr)")
     p.add_argument("--workers", "--shards", dest="workers", type=int,
                    help="requested worker instances; reduced when fewer logical shards exist")
     p.add_argument("--rate", type=int, help="packets/sec per worker")
@@ -159,11 +169,17 @@ def arguments(argv=None):
         p.error("--server must be an HTTP(S) URL without credentials, query, or fragment")
     if any(v is not None and v <= 0 for v in (a.workers, a.rate)):
         p.error("--workers and --rate must be positive")
+    if a.provider == "digitalocean" and (not a.region or not a.instance_type):
+        p.error("--provider digitalocean requires both --region and --instance-type")
+    if any(value is not None and not provider_identifier(value)
+           for value in (a.region, a.instance_type)):
+        p.error("--region and --instance-type must be nonempty lowercase provider identifiers")
     return a
 
 
 def run(a):
-    client = Client(a.server, a.http_timeout)
+    client = Client(a.server, a.http_timeout, a.provider)
+    log(f"Requested provider: {a.provider}")
     health = client.call("health", "GET", "/healthz", 200)
     if health.get("status") != "ready":
         raise Failure(f"health: service did not report ready: {health}")
@@ -173,10 +189,12 @@ def run(a):
     created = client.call("create scan plan", "POST", "/v1/scan-plans", 201,
                           {"name": "CLI scan plan", "target_id": target_id})
     scan_plan_id = identifier(created, "id", "create scan plan")
-    settings = created.get("settings")
-    if not isinstance(settings, dict):
+    initial_settings = created.get("settings")
+    if not isinstance(initial_settings, dict):
         raise Failure("create scan plan: missing settings")
-    changed = False
+    settings = dict(initial_settings)
+    changed = settings.get("provider") != a.provider
+    settings["provider"] = a.provider
     for field in ("ports", "backend", "workers", "rate", "region", "instance_type", "cleanup_timeout"):
         if getattr(a, field) is not None:
             settings[field] = getattr(a, field)
@@ -189,6 +207,12 @@ def run(a):
         created = client.call("update scan plan", "PATCH", path, 200,
                               {"revision": created.get("revision"), "settings": settings},
                               resource_id=scan_plan_id)
+    saved = created.get("settings")
+    expected_placement = {key: settings.get(key) for key in ("provider", "region", "instance_type")}
+    if (not isinstance(saved, dict)
+            or any(not isinstance(value, str) or not value for value in expected_placement.values())
+            or any(saved.get(key) != value for key, value in expected_placement.items())):
+        raise Failure("saved ScanPlan provider/placement differs from the requested settings; no start requested")
     log(f"Target ID: {target_id}\nScanPlan ID: {scan_plan_id}\nSaved settings: {json.dumps(created.get('settings'), sort_keys=True)}")
     plan = client.call("preflight", "POST", path + "/preflight", 201)
     plan_id = identifier(plan, "id", "preflight")
@@ -204,6 +228,10 @@ def run(a):
             or any(type(work.get(k)) is not int or work[k] <= 0
                    for k in ("Addresses", "Ports", "Probes"))):
         raise Failure("preflight: missing/invalid frozen scope, workload, or confirmation fields")
+    frozen_placement = {"provider": cfg.get("Provider"), "region": cfg.get("Region"),
+                        "instance_type": cfg.get("InstanceType")}
+    if frozen_placement != expected_placement:
+        raise Failure("preflight: frozen provider/placement differs from the saved ScanPlan; no start requested")
     if work["Probes"] != work["Addresses"] * work["Ports"]:
         raise Failure("preflight: inconsistent probe count")
     if plan["requires_confirmation"] != (work["Probes"] > 1_000_000):
@@ -212,6 +240,7 @@ def run(a):
         f"Planned probes: {work['Probes']:,} = {work['Addresses']:,} addresses x {work['Ports']:,} ports")
     log("Frozen targets/provenance: " + json.dumps(cfg.get("RequestedTargets"), indent=2))
     log("Effective scope: " + json.dumps(cfg["Targets"]))
+    log("Frozen provider/placement: " + json.dumps(expected_placement, sort_keys=True))
     if a.preflight_only:
         log("Preflight only: Target and ScanPlan saved; no start requested.")
         return 0
