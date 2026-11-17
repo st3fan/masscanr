@@ -345,7 +345,7 @@ func (c *Controller) ready(ctx context.Context, initial cloud.Worker, runID stri
 		if err != nil {
 			return initial, err
 		}
-		if w.ID != initial.ID || w.Label != cloud.Label || !slices.Contains(w.Tags, "masscanr-run-"+runID) {
+		if w.ID != initial.ID || (w.Label != cloud.Label && !slices.Contains(w.Tags, cloud.Label)) || !slices.Contains(w.Tags, "masscanr-run-"+runID) {
 			return initial, fmt.Errorf("worker %s is not owned by this run", initial.ID)
 		}
 		if w.Password == "" {

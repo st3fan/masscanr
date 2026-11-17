@@ -160,6 +160,9 @@ func (c *Client) Create(ctx context.Context, spec cloud.Spec) (cloud.Worker, err
 		if len(matches) == 1 {
 			return matches[0], nil
 		}
+		if err != nil {
+			return cloud.Worker{}, fmt.Errorf("DigitalOcean create for run %s slot %d failed; found %d matching Droplets: %w", spec.RunID, spec.Shard, len(matches), err)
+		}
 		return cloud.Worker{}, fmt.Errorf("DigitalOcean create ambiguous for run %s slot %d; found %d matching Droplets", spec.RunID, spec.Shard, len(matches))
 	}
 	w := response.Droplet.worker(private)

@@ -109,7 +109,11 @@ func (c *Client) ensureKey(ctx context.Context, runID string) (accountKey, *clou
 			key = response.Key
 		} else {
 			// POST may have succeeded despite a lost response. Never repeat it.
+			postErr := err
 			key, err = c.getKey(ctx, expected.fingerprint)
+			if errors.Is(err, cloud.ErrNotFound) {
+				err = postErr
+			}
 		}
 	}
 	if err != nil {
