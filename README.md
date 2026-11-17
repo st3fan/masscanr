@@ -232,15 +232,21 @@ server errors, and the scan/plan/run IDs:
 # Inspect the created Target, ScanPlan, and preflight without starting a scan.
 python3 scripts/start-scan.py --preflight-only --ports 22,80,443 64.98.138.0/22
 
+# Select DigitalOcean explicitly, including its region and Droplet size.
+python3 scripts/start-scan.py --preflight-only --provider digitalocean \
+  --region tor1 --instance-type s-1vcpu-1gb --ports 22,80,443 64.98.138.0/22
+
 # Create and start a scan, then observe status for early asynchronous errors.
 python3 scripts/start-scan.py --ports 22,80,443 --wait 60 64.98.138.0/22
 ```
 
 The example uses the authorized company test prefix; substitute only networks you
 are authorized to scan. `--server` changes the API URL (default
-`http://127.0.0.1:18080`). Run `python3 scripts/start-scan.py --help` for backend,
+`http://127.0.0.1:18080`). `--provider` defaults to Vultr. DigitalOcean requires
+both `--region` and `--instance-type`; the script checks the saved plan and frozen
+preflight before starting. Run `python3 scripts/start-scan.py --help` for backend,
 shard, rate, placement, and timeout options. It uses only Python's standard library.
-The Vultr token must be configured on the service, not on this client.
+Provider credentials must be configured on the service, not on this client.
 
 Large scans require interactive approval of the displayed frozen plan, or an
 explicit `--yes`. `--preflight-only` still saves a Target and ScanPlan. The script
