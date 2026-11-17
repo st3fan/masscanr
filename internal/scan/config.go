@@ -28,6 +28,8 @@ const TopPorts = "7,9,13,21,22,23,25,26,37,53,79,80,81,88,106,110,111,113,119,13
 type Config struct {
 	Backend          string
 	Provider         string
+	Image            string
+	SSHAuth          string
 	Targets          []netip.Prefix
 	RequestedTargets []Target
 	Ports            []uint16
@@ -110,6 +112,12 @@ func (c Config) Validate() error {
 
 // ValidateOptions checks local settings before any target resolution.
 func (c Config) ValidateOptions() error {
+	if c.Provider != "" && c.Provider != "vultr" && c.Provider != "digitalocean" {
+		return fmt.Errorf("unsupported provider %q", c.Provider)
+	}
+	if c.Provider == "digitalocean" && (c.Image != "fedora-44-x64" || c.SSHAuth != "per-run-ed25519") {
+		return fmt.Errorf("DigitalOcean requires Fedora 44 and per-run Ed25519 SSH")
+	}
 	if len(c.Ports) == 0 {
 		return fmt.Errorf("provide at least one TCP port")
 	}

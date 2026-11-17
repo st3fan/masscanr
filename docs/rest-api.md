@@ -16,12 +16,11 @@ a database through a session advisory lock. Set `VULTR_API_TOKEN` for Vultr, or
 in the server environment before starting a scan; management and preflight do
 not need them.
 
-This development version requires a **fresh database**. Older application schemas
-are rejected. There is no backfill or compatibility layer for old `/v1/scans`
-resources or persisted rows. Create a new uniquely named database when updating
-to this version; retain or deliberately discard old data and artifacts according
-to your development needs. Keep the database and artifact directory together
-when restarting the same version. Never reuse or drop an unrelated database.
+Application schema version 4 is upgraded to version 5 on startup to allow
+DigitalOcean ScanPlans. Earlier application schemas are rejected. There is no
+backfill or compatibility layer for old `/v1/scans` resources. Keep the database
+and artifact directory together when restarting. Never reuse or drop an
+unrelated database.
 
 PostgreSQL is the primary query store for normalized open-port results. A `.scan`
 journal still records every accepted observation, including duplicates, and is

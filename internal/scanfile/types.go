@@ -34,6 +34,8 @@ type Config struct {
 	MaxProbesPerUnit uint64            `json:"max_probes_per_shard,omitempty"`
 	Rate             uint64            `json:"rate_per_worker"`
 	Provider         string            `json:"provider"`
+	Image            string            `json:"image,omitempty"`
+	SSHAuth          string            `json:"ssh_auth,omitempty"`
 	Region           string            `json:"region"`
 	InstanceType     string            `json:"instance_type"`
 	Timeouts         map[string]string `json:"timeouts"`
@@ -50,8 +52,11 @@ func (c Config) Validate() error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
-	if cfg.PortSpec() != c.Ports || c.Shards > MaxShards || (c.Backend != "masscan" && c.Backend != "zmap") || c.Provider != "vultr" || c.Output == "" {
+	if cfg.PortSpec() != c.Ports || c.Shards > MaxShards || (c.Backend != "masscan" && c.Backend != "zmap") || (c.Provider != "vultr" && c.Provider != "digitalocean") || c.Output == "" {
 		return fmt.Errorf("invalid effective scan configuration")
+	}
+	if c.Provider == "digitalocean" && (c.Image != "fedora-44-x64" || c.SSHAuth != "per-run-ed25519") {
+		return fmt.Errorf("invalid DigitalOcean image or SSH contract")
 	}
 	values := make([]string, len(c.Targets))
 	for i, p := range c.Targets {

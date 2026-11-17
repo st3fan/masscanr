@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS masscanr.scan_plans (
     target_id text NOT NULL REFERENCES masscanr.targets(id),
     name text NOT NULL CHECK (length(trim(name)) > 0),
     revision bigint NOT NULL CHECK (revision > 0),
-    provider text NOT NULL CHECK (provider = 'vultr'),
+    provider text NOT NULL CHECK (provider IN ('vultr', 'digitalocean')),
     settings jsonb NOT NULL CHECK (jsonb_typeof(settings) = 'object'),
     created_at timestamptz NOT NULL,
     updated_at timestamptz NOT NULL

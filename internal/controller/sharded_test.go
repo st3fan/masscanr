@@ -169,6 +169,7 @@ func TestShardedRecoveryRejectsProviderChange(t *testing.T) {
 	}
 	state.Finished = nil // Model the unfinished journal after a service restart.
 	cfg.Provider = "digitalocean"
+	cfg.Image, cfg.SSHAuth = "fedora-44-x64", "per-run-ed25519"
 	var output bytes.Buffer
 	if _, err := controller.RunSharded(t.Context(), cfg, &output, nil, state); err == nil || !strings.Contains(err.Error(), "differs from frozen preflight") {
 		t.Fatalf("accepted provider change on recovery: %v", err)

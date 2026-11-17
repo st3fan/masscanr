@@ -66,7 +66,11 @@ func startJournal(out io.Writer, cfg scan.Config, t Timeouts, run string, seed u
 	if len(cfg.RequestedTargets) == 0 {
 		cfg.RequestedTargets = scan.DirectTargets(cfg.Targets)
 	}
-	h := scanfile.Header{Format: scanfile.Format, Schema: scanfile.Schema, RunID: run, CreatedAt: time.Now().UTC(), ControllerVersion: "v9", Label: "masscanr", OwnershipTag: "masscanr-run-" + run, Config: scanfile.Config{Targets: cfg.Targets, RequestedTargets: cfg.RequestedTargets, Ports: cfg.PortSpec(), Backend: cfg.Backend, Seed: strconv.FormatUint(seed, 10), Shards: cfg.Workers, Rate: cfg.Rate, Provider: "vultr", Region: cfg.Region, InstanceType: cfg.InstanceType, Output: output, Exports: exports, Timeouts: map[string]string{"create": t.Create.String(), "ready": t.Ready.String(), "prepare": t.Prepare.String(), "scan": t.Scan.String(), "cleanup": t.Cleanup.String(), "delete": t.Delete.String(), "poll": t.Poll.String()}}}
+	provider := cfg.Provider
+	if provider == "" {
+		provider = "vultr"
+	}
+	h := scanfile.Header{Format: scanfile.Format, Schema: scanfile.Schema, RunID: run, CreatedAt: time.Now().UTC(), ControllerVersion: "v9", Label: "masscanr", OwnershipTag: "masscanr-run-" + run, Config: scanfile.Config{Targets: cfg.Targets, RequestedTargets: cfg.RequestedTargets, Ports: cfg.PortSpec(), Backend: cfg.Backend, Seed: strconv.FormatUint(seed, 10), Shards: cfg.Workers, Rate: cfg.Rate, Provider: provider, Image: cfg.Image, SSHAuth: cfg.SSHAuth, Region: cfg.Region, InstanceType: cfg.InstanceType, Output: output, Exports: exports, Timeouts: map[string]string{"create": t.Create.String(), "ready": t.Ready.String(), "prepare": t.Prepare.String(), "scan": t.Scan.String(), "cleanup": t.Cleanup.String(), "delete": t.Delete.String(), "poll": t.Poll.String()}}}
 	w, err := scanfile.NewWriter(out, h, func(error) { cancel() })
 	return w, r, err
 }

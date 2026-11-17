@@ -41,7 +41,7 @@ func TestScanPlanSettingsRequireSupportedProviderAndValidOptions(t *testing.T) {
 	settings.Provider = "digitalocean"
 	settings.Region = "tor1"
 	settings.InstanceType = "s-1vcpu-1gb"
-	if config, _, err := settings.Config([]string{"192.0.2.0/24"}); err != nil || config.Provider != "digitalocean" {
+	if config, _, err := settings.Config([]string{"192.0.2.0/24"}); err != nil || config.Provider != "digitalocean" || config.Image != "fedora-44-x64" || config.SSHAuth != "per-run-ed25519" {
 		t.Fatalf("DigitalOcean configuration: %+v %v", config, err)
 	}
 	settings.Provider = "other"
@@ -59,7 +59,7 @@ func TestFreshDomainSchemaConstraints(t *testing.T) {
 	store := testStore(t)
 	ctx := context.Background()
 	var version int
-	if err := store.Pool.QueryRow(ctx, `SELECT version FROM masscanr.version`).Scan(&version); err != nil || version != 4 {
+	if err := store.Pool.QueryRow(ctx, `SELECT version FROM masscanr.version`).Scan(&version); err != nil || version != 5 {
 		t.Fatalf("schema version %d: %v", version, err)
 	}
 	now := time.Now().UTC()
@@ -76,10 +76,40 @@ func TestFreshDomainSchemaConstraints(t *testing.T) {
 	if _, err := store.Pool.Exec(ctx, `INSERT INTO masscanr.scan_plans(id,target_id,name,revision,provider,settings,created_at,updated_at) VALUES($1,$2,'Daily',1,'vultr','{}',$3,$3)`, planID, targetID, now); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := store.Pool.Exec(ctx, `INSERT INTO masscanr.scan_plans(id,target_id,name,revision,provider,settings,created_at,updated_at) VALUES($1,$2,'Other',1,'digitalocean','{}',$3,$3)`, newID(), targetID, now); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := store.Pool.Exec(ctx, `INSERT INTO masscanr.scan_plans(id,target_id,name,revision,provider,settings,created_at,updated_at) VALUES($1,$2,'Bad',1,'vultr','{}',$3,$3)`, newID(), newID(), now); err == nil {
 		t.Fatal("accepted plan with missing Target")
 	}
 	if _, err := store.Pool.Exec(ctx, `INSERT INTO masscanr.scan_plans(id,target_id,name,revision,provider,settings,created_at,updated_at) VALUES($1,$2,'Bad',1,'other','{}',$3,$3)`, newID(), targetID, now); err == nil {
 		t.Fatal("accepted unsupported provider")
+	}
+}
+
+func TestVersion4ProviderConstraintMigration(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	if _, err := store.Pool.Exec(ctx, `ALTER TABLE masscanr.scan_plans DROP CONSTRAINT scan_plans_provider_check;
+ALTER TABLE masscanr.scan_plans ADD CONSTRAINT scan_plans_provider_check CHECK (provider = 'vultr');
+UPDATE masscanr.version SET version=4;`); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(ctx, store.Pool.Config().ConnString())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(reopened.Pool.Close)
+	var version int
+	if err := reopened.Pool.QueryRow(ctx, `SELECT version FROM masscanr.version`).Scan(&version); err != nil || version != 5 {
+		t.Fatalf("migrated schema version %d: %v", version, err)
+	}
+	now := time.Now().UTC()
+	targetID := newID()
+	if _, err := reopened.Pool.Exec(ctx, `INSERT INTO masscanr.targets(id,name,revision,created_at,updated_at) VALUES($1,'Scope',1,$2,$2)`, targetID, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reopened.Pool.Exec(ctx, `INSERT INTO masscanr.scan_plans(id,target_id,name,revision,provider,settings,created_at,updated_at) VALUES($1,$2,'DigitalOcean',1,'digitalocean','{}',$3,$3)`, newID(), targetID, now); err != nil {
+		t.Fatal(err)
 	}
 }

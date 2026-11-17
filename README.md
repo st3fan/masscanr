@@ -289,7 +289,10 @@ catalog requires the service's DigitalOcean API token. Its ScanPlans use
 `provider: "digitalocean"`, a region from the DigitalOcean catalog, and a size
 available in that region. The provider checks the Fedora 44 image, region, and
 size before creating a worker. Availability may change between catalog lookup
-and scan start.
+and scan start. DigitalOcean plans freeze the `fedora-44-x64` image and
+`per-run-ed25519` SSH mode in run and journal evidence. GPU sizes are excluded
+from the scanner catalog; cleanup still checks the separate GPU Droplet list
+before retiring a run's SSH key.
 
 ## Development and validation
 
