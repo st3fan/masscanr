@@ -8,6 +8,7 @@ import { formatTime } from '@/components/domain'
 import { PageHeader } from '@/components/layout'
 import { useCursorPagination } from '@/components/pagination'
 import { ErrorState, LoadingState } from '@/components/states'
+import { TargetLink } from '@/components/target-link'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
 const columns: ColumnDef<ScanPlan>[] = [
@@ -68,12 +69,7 @@ export function PlanDetailPage() {
   const plan = query.data.data
   const settings = plan.attributes.settings
   const fields = [
-    [
-      'Target',
-      <Link to={`/targets/${plan.attributes.target_id}`} className="text-primary hover:underline">
-        {plan.attributes.target_id}
-      </Link>,
-    ],
+    ['Target', <TargetLink id={plan.attributes.target_id} />],
     ['Ports', settings.ports],
     ['Backend', settings.backend],
     ['Provider', settings.provider],

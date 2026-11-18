@@ -16,9 +16,12 @@ a database through a session advisory lock. Set `VULTR_API_TOKEN` for Vultr, or
 in the server environment before starting a scan; management and preflight do
 not need them.
 
-Application schema version 4 is upgraded to version 5 on startup to allow
-DigitalOcean ScanPlans. Earlier application schemas are rejected. There is no
-backfill or compatibility layer for old `/v1/scans` resources. Keep the database
+Application schema versions 4 and 5 are upgraded to version 6 on startup.
+Version 6 reserves unique Target names; if existing names collide after trimming
+and case-insensitive comparison, startup reports the collision and leaves the
+database unchanged. Rename the colliding records before retrying. Earlier
+application schemas are rejected. There is no backfill or compatibility layer
+for old `/v1/scans` resources. Keep the database
 and artifact directory together when restarting. Never reuse or drop an
 unrelated database.
 
@@ -71,7 +74,7 @@ Create a Target and ScanPlan:
 ```
 
 ```json
-{"data":{"type":"scan-plans","attributes":{"name":"Routine inventory","target_id":"<target-id>"}}}
+{"data":{"type":"scan-plans","attributes":{"name":"Routine inventory","target_name":"External network"}}}
 ```
 
 The example addresses are documentation-only. Omitted ScanPlan `settings` use
@@ -85,10 +88,20 @@ and `digitalocean`. `PATCH` accepts a partial settings object and a matching
 {"data":{"type":"scan-plans","id":"<scan-plan-id>","attributes":{"revision":1,"settings":{"ports":"22,80,443"}}}}
 ```
 
-Target `PATCH` similarly requires `revision` and may change `name` or `entries`,
-or set `archived:true`. Archiving is one-way, preserves run history, and blocks
+Target names are trimmed, case-insensitive for lookup and uniqueness, and cannot
+be changed after creation. Archived names remain reserved. Use
+`GET /v1/targets/by-name/{name}` to retrieve a Target and
+`PATCH /v1/targets/by-name/{name}` to update its entries or archive it; URL-encode
+the name. Both routes return the ordinary Target resource with its UUID `id`.
+Target `PATCH` requires `revision` and may change `entries` or set
+`archived:true`. Archiving is one-way, preserves run history, and blocks
 new preflights. Changing either a Target or its ScanPlan invalidates an older
 preflight. An active run keeps its frozen scope and configuration.
+
+ScanPlan create requires exactly one of `target_id` or `target_name`; update
+accepts at most one. `target_id` remains a UUID, while `target_name` resolves
+the current Target by name. The stored ScanPlan and its responses retain the
+Target UUID. An unknown name returns 404; an archived Target returns 409.
 
 | Request | Result |
 | --- | --- |
@@ -96,6 +109,8 @@ preflight. An active run keeps its frozen scope and configuration.
 | `POST /v1/targets` | 201 Target |
 | `GET /v1/targets`, `GET /v1/targets/{id}` | 200 Target list or one Target |
 | `PATCH /v1/targets/{id}` | 200 updated or archived Target |
+| `GET /v1/targets/by-name/{name}` | 200 Target by name |
+| `PATCH /v1/targets/by-name/{name}` | 200 updated or archived Target by name |
 | `POST /v1/scan-plans` | 201 ScanPlan |
 | `GET /v1/scan-plans`, `GET /v1/scan-plans/{id}` | 200 ScanPlan list or one ScanPlan |
 | `PATCH /v1/scan-plans/{id}` | 200 updated ScanPlan |
@@ -115,13 +130,15 @@ preflight. An active run keeps its frozen scope and configuration.
 
 Target, ScanPlan, run-history, per-plan run, physical worker, and result lists accept `limit` (1–1000,
 default 100) and an opaque `after` cursor from `links.next`. Run history accepts
-`filter[target_id]`, `filter[scan_plan_id]`, and `filter[phase]`. Results also accept
-`filter[run_id]`, `filter[target_id]`, `filter[ip]` (IPv4), and `filter[port]`
+`filter[target_id]` or `filter[target_name]`, `filter[scan_plan_id]`, and
+`filter[phase]`. Results also accept `filter[run_id]`,
+`filter[target_id]` or `filter[target_name]`, `filter[ip]` (IPv4), and `filter[port]`
 (TCP port), plus `sort=ip`, `-ip`, `port`, or `-port`. Sort order is stable across
 cursor pages with the run ID as a tie-breaker. `GET /v1/runs?active=true` instead returns the one-active-run view;
 other query parameters are rejected. Resource IDs and revision numbers are
 returned in the JSON:API resource. Stale revisions, stale preflights, active-run
-conflicts, and missing confirmation return 409. Invalid input returns 400;
+conflicts, duplicate Target names, and missing confirmation return 409. Name and
+UUID Target selectors cannot be combined in one request. Invalid input returns 400;
 unknown IDs return 404; failed target resolution returns 422; missing runtime
 credentials or shutdown returns 503.
 

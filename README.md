@@ -118,14 +118,14 @@ to scan, then a reusable ScanPlan. These commands use `curl` and `jq`.
 ```sh
 curl --fail-with-body http://127.0.0.1:18080/healthz
 
-target_id=$(curl --fail-with-body -sS http://127.0.0.1:18080/v1/targets \
+target_name=$(curl --fail-with-body -sS http://127.0.0.1:18080/v1/targets \
   -H 'Content-Type: application/vnd.api+json' \
   -d '{"data":{"type":"targets","attributes":{"name":"External network","entries":["YOUR_AUTHORIZED_IPV4_OR_CIDR"]}}}' \
-  | jq -r .data.id)
+  | jq -r .data.attributes.name)
 
 scan_plan_id=$(curl --fail-with-body -sS http://127.0.0.1:18080/v1/scan-plans \
   -H 'Content-Type: application/vnd.api+json' \
-  -d "{\"data\":{\"type\":\"scan-plans\",\"attributes\":{\"name\":\"Routine inventory\",\"target_id\":\"$target_id\"}}}" \
+  -d "{\"data\":{\"type\":\"scan-plans\",\"attributes\":{\"name\":\"Routine inventory\",\"target_name\":\"$target_name\"}}}" \
   | jq -r .data.id)
 
 # Resolve and inspect the exact scope before starting.

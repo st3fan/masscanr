@@ -52,7 +52,7 @@ func (m *Manager) listRuns(c fiber.Ctx) error {
 		return respond(c, 200, runapi.ActiveRuns{SnapshotVersion: runapi.SnapshotVersion, Runs: runs})
 	}
 	for key, values := range q {
-		if len(values) != 1 || (key != "limit" && key != "after" && key != "filter[target_id]" && key != "filter[scan_plan_id]" && key != "filter[phase]") {
+		if len(values) != 1 || (key != "limit" && key != "after" && key != "filter[target_id]" && key != "filter[target_name]" && key != "filter[scan_plan_id]" && key != "filter[phase]") {
 			return bad(c, fmt.Errorf("invalid run query parameter: %s", key))
 		}
 	}
@@ -61,6 +61,17 @@ func (m *Manager) listRuns(c fiber.Ctx) error {
 		return bad(c, err)
 	}
 	filter := RunFilter{TargetID: c.Query("filter[target_id]"), ScanPlanID: c.Query("filter[scan_plan_id]"), Phase: c.Query("filter[phase]"), After: c.Query("after"), Limit: limit}
+	targetName := c.Query("filter[target_name]")
+	if filter.TargetID != "" && targetName != "" {
+		return bad(c, fmt.Errorf("provide only one of filter[target_id] or filter[target_name]"))
+	}
+	if targetName != "" {
+		target, err := m.Store.GetTargetByName(c.Context(), targetName)
+		if err != nil {
+			return problem(c, err)
+		}
+		filter.TargetID = target.ID
+	}
 	runs, err := m.Store.ListRuns(c.Context(), filter)
 	if err != nil {
 		return bad(c, err)
@@ -78,7 +89,7 @@ func (m *Manager) listRuns(c fiber.Ctx) error {
 		values := url.Values{}
 		values.Set("limit", strconv.Itoa(limit))
 		values.Set("after", runs[len(runs)-1].ID)
-		for _, key := range []string{"filter[target_id]", "filter[scan_plan_id]", "filter[phase]"} {
+		for _, key := range []string{"filter[target_id]", "filter[target_name]", "filter[scan_plan_id]", "filter[phase]"} {
 			if len(q[key]) > 0 && q[key][0] != "" {
 				values.Set(key, q[key][0])
 			}

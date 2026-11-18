@@ -111,7 +111,7 @@ function TargetForm({ target, onReload }: { target?: Target; onReload?: () => Pr
   const mutation = useMutation({
     mutationFn: () =>
       target
-        ? api.updateTarget(target.id, { revision, name: checked.name, entries: checked.entries })
+        ? api.updateTarget(target.id, { revision, entries: checked.entries })
         : api.createTarget({ name: checked.name, entries: checked.entries }),
     onSuccess: async (result) => {
       await invalidateTargetViews(queryClient, result.data.id)
@@ -147,26 +147,36 @@ function TargetForm({ target, onReload }: { target?: Target; onReload?: () => Pr
       <CardContent>
         <form className="space-y-6" onSubmit={submit} noValidate>
           <div className="space-y-2">
-            <label htmlFor="target-name" className="text-sm font-medium">
-              Name
-            </label>
-            <Input
-              id="target-name"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              aria-invalid={!!checked.nameError && (attempted || !!name)}
-              aria-describedby={
-                (attempted || !!name) && checked.nameError
-                  ? 'target-name-help target-name-error'
-                  : 'target-name-help'
-              }
-              maxLength={200}
-              autoComplete="off"
-            />
+            {target ? (
+              <span className="text-sm font-medium">Name</span>
+            ) : (
+              <label htmlFor="target-name" className="text-sm font-medium">
+                Name
+              </label>
+            )}
+            {target ? (
+              <p id="target-name" className="rounded-md border bg-muted px-3 py-2 text-sm">
+                {name}
+              </p>
+            ) : (
+              <Input
+                id="target-name"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                aria-invalid={!!checked.nameError && (attempted || !!name)}
+                aria-describedby={
+                  (attempted || !!name) && checked.nameError
+                    ? 'target-name-help target-name-error'
+                    : 'target-name-help'
+                }
+                maxLength={200}
+                autoComplete="off"
+              />
+            )}
             <p id="target-name-help" className="text-xs text-muted-foreground">
-              A name operators can recognize in plans and run history.
+              Names are unique and cannot be changed after creation.
             </p>
-            {(attempted || !!name) && checked.nameError && (
+            {!target && (attempted || !!name) && checked.nameError && (
               <p id="target-name-error" className="text-sm text-destructive">
                 {checked.nameError}
               </p>
