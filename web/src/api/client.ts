@@ -4,6 +4,10 @@ export type ListTargets =
   operations['listTargets']['responses'][200]['content']['application/vnd.api+json']
 export type ListScanPlans =
   operations['listScanPlans']['responses'][200]['content']['application/vnd.api+json']
+export type ListRegions =
+  operations['listRegions']['responses'][200]['content']['application/vnd.api+json']
+export type ListInstanceTypes =
+  operations['listInstanceTypes']['responses'][200]['content']['application/vnd.api+json']
 export type ListRuns =
   operations['listRuns']['responses'][200]['content']['application/vnd.api+json']
 export type ListResults =
@@ -16,6 +20,12 @@ export type CreateTargetAttributes =
 export type UpdateTargetAttributes =
   operations['updateTarget']['requestBody']['content']['application/vnd.api+json']['data']['attributes']
 export type ScanPlan = ListScanPlans['data'][number]
+export type CreateScanPlanAttributes =
+  operations['createScanPlan']['requestBody']['content']['application/vnd.api+json']['data']['attributes']
+export type UpdateScanPlanAttributes =
+  operations['updateScanPlan']['requestBody']['content']['application/vnd.api+json']['data']['attributes']
+export type ScanPlanSettings = ScanPlan['attributes']['settings']
+export type Provider = 'vultr' | 'digitalocean'
 export type ScanRun = ListRuns['data'][number]
 export type ScanResult = ListResults['data'][number]
 export type RunWorker = ListRunWorkers['data'][number]
@@ -241,6 +251,29 @@ export const api = {
       `/v1/scan-plans/${encodeURIComponent(id)}`,
       'scan-plans',
       false,
+      signal,
+    ),
+  createPlan: (attributes: CreateScanPlanAttributes) =>
+    request<{ data: ScanPlan }>('/v1/scan-plans', 'scan-plans', false, undefined, {
+      method: 'POST',
+      body: { data: { type: 'scan-plans', attributes } },
+    }),
+  updatePlan: (id: string, attributes: UpdateScanPlanAttributes) =>
+    request<{ data: ScanPlan }>(
+      `/v1/scan-plans/${encodeURIComponent(id)}`,
+      'scan-plans',
+      false,
+      undefined,
+      { method: 'PATCH', body: { data: { type: 'scan-plans', id, attributes } } },
+    ),
+  archivePlan: (id: string, revision: number) => api.updatePlan(id, { revision, archived: true }),
+  regions: (provider: Provider, signal?: AbortSignal) =>
+    request<ListRegions>(url('/v1/catalog/regions', { provider }), 'regions', true, signal),
+  instanceTypes: (provider: Provider, region: string, signal?: AbortSignal) =>
+    request<ListInstanceTypes>(
+      url('/v1/catalog/instance-types', { provider, region }),
+      'instance-types',
+      true,
       signal,
     ),
   runs: (query?: Record<string, string | number | undefined>, signal?: AbortSignal) =>
