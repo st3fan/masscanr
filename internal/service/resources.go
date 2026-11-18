@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func validName(name string) bool { return strings.TrimSpace(name) != "" && len(name) <= 200 }
@@ -25,11 +26,19 @@ func (s *Store) CreateTarget(ctx context.Context, name string, inputs []string) 
 	target := Target{ID: newID(), Name: strings.TrimSpace(name), Revision: 1, CreatedAt: now, UpdatedAt: now, Entries: entries}
 	err = s.tx(ctx, func(tx pgx.Tx) error {
 		if _, e := tx.Exec(ctx, `INSERT INTO masscanr.targets(id,name,revision,created_at,updated_at) VALUES($1,$2,$3,$4,$5)`, target.ID, target.Name, target.Revision, now, now); e != nil {
-			return e
+			return targetNameConflict(e)
 		}
 		return writeTargetEntries(ctx, tx, target)
 	})
 	return target, err
+}
+
+func targetNameConflict(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "targets_name_unique" {
+		return fmt.Errorf("%w: target name already exists", ErrConflict)
+	}
+	return err
 }
 
 func writeTargetEntries(ctx context.Context, tx pgx.Tx, target Target) error {
@@ -76,14 +85,34 @@ func (s *Store) GetTarget(ctx context.Context, id string) (Target, error) {
 	return target, err
 }
 
+func (s *Store) GetTargetByName(ctx context.Context, name string) (Target, error) {
+	name = strings.TrimSpace(name)
+	if !validName(name) {
+		return Target{}, ErrNotFound
+	}
+	var target Target
+	err := s.tx(ctx, func(tx pgx.Tx) error {
+		var id string
+		if e := tx.QueryRow(ctx, `SELECT id FROM masscanr.targets WHERE lower(btrim(name))=lower($1)`, name).Scan(&id); e != nil {
+			if errors.Is(e, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return e
+		}
+		var e error
+		target, e = readTarget(ctx, tx, id)
+		return e
+	})
+	return target, err
+}
+
 type TargetPatch struct {
-	Name     *string   `json:"name"`
 	Entries  *[]string `json:"entries"`
 	Archived *bool     `json:"archived"`
 }
 
 func (s *Store) UpdateTarget(ctx context.Context, id string, revision int64, patch TargetPatch) (Target, error) {
-	if revision < 1 || patch.Name == nil && patch.Entries == nil && patch.Archived == nil {
+	if revision < 1 || patch.Entries == nil && patch.Archived == nil {
 		return Target{}, fmt.Errorf("revision and changed attributes are required")
 	}
 	var updated Target
@@ -96,12 +125,6 @@ func (s *Store) UpdateTarget(ctx context.Context, id string, revision int64, pat
 			return ErrConflict
 		}
 		updated = old
-		if patch.Name != nil {
-			if !validName(*patch.Name) {
-				return fmt.Errorf("target name must contain 1..200 bytes")
-			}
-			updated.Name = strings.TrimSpace(*patch.Name)
-		}
 		if patch.Entries != nil {
 			entries, e := NormalizeTargetEntries(*patch.Entries)
 			if e != nil {
@@ -127,7 +150,7 @@ func (s *Store) UpdateTarget(ctx context.Context, id string, revision int64, pat
 		}
 		updated.Revision++
 		updated.UpdatedAt = time.Now().UTC()
-		if _, err = tx.Exec(ctx, `UPDATE masscanr.targets SET name=$2,revision=$3,updated_at=$4,archived_at=$5 WHERE id=$1`, updated.ID, updated.Name, updated.Revision, updated.UpdatedAt, updated.ArchivedAt); err != nil {
+		if _, err = tx.Exec(ctx, `UPDATE masscanr.targets SET revision=$2,updated_at=$3,archived_at=$4 WHERE id=$1`, updated.ID, updated.Revision, updated.UpdatedAt, updated.ArchivedAt); err != nil {
 			return err
 		}
 		if patch.Entries != nil {

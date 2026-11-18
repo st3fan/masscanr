@@ -17,6 +17,7 @@ import { MetricCard, StatusBadge, formatTime } from '@/components/domain'
 import { PageHeader } from '@/components/layout'
 import { useCursorPagination } from '@/components/pagination'
 import { ErrorState, LoadingState } from '@/components/states'
+import { TargetLink } from '@/components/target-link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
@@ -274,12 +275,9 @@ export function RunDetailPage() {
           <CardContent className="space-y-3 text-sm">
             <div>
               Target{' '}
-              <Link
-                className="block break-all text-primary hover:underline"
-                to={`/targets/${a.target_id}`}
-              >
-                {a.target_id || 'Unknown'}
-              </Link>
+              <span className="block">
+                {a.target_id ? <TargetLink id={a.target_id} /> : 'Unknown'}
+              </span>
             </div>
             <div>
               Scan plan{' '}

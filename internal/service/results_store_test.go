@@ -99,6 +99,19 @@ func TestLiveResultsDeduplicateAndExposeCoverage(t *testing.T) {
 	if page.Code != 200 || json.Unmarshal(page.Body.Bytes(), &pageDoc) != nil || len(pageDoc.Data) != 1 || pageDoc.Links["next"] == "" {
 		t.Fatal(page.Code, page.Body)
 	}
+	namePage := request(app, "GET", "/v1/scan-results?filter[target_name]=Fixture+network&limit=1", "")
+	var nameDoc struct {
+		Links map[string]string `json:"links"`
+		Data  []json.RawMessage `json:"data"`
+	}
+	if namePage.Code != 200 || json.Unmarshal(namePage.Body.Bytes(), &nameDoc) != nil || len(nameDoc.Data) != 1 || !strings.Contains(nameDoc.Links["next"], "target_name") {
+		t.Fatal(namePage.Code, namePage.Body)
+	}
+	nameNext := request(app, "GET", nameDoc.Links["next"], "")
+	var nameResults []ScanResult
+	if nameNext.Code != 200 || decodeTestList(nameNext.Body.Bytes(), &nameResults) != nil || len(nameResults) != 1 {
+		t.Fatal(nameNext.Code, nameNext.Body)
+	}
 	next := request(app, "GET", pageDoc.Links["next"], "")
 	var nextResults []ScanResult
 	var firstResults []ScanResult

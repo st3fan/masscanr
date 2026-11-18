@@ -279,6 +279,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/targets/by-name/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a target by name */
+        get: operations["getTargetByName"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update or archive a target by name */
+        patch: operations["updateTargetByName"];
+        trace?: never;
+    };
     "/v1/targets/{id}": {
         parameters: {
             query?: never;
@@ -1219,6 +1237,7 @@ export interface operations {
             query?: {
                 active?: string;
                 "filter[target_id]"?: string;
+                "filter[target_name]"?: string;
                 "filter[scan_plan_id]"?: string;
                 "filter[phase]"?: string;
                 after?: string;
@@ -3600,7 +3619,7 @@ export interface operations {
                  *       "data": {
                  *         "attributes": {
                  *           "name": "Daily TCP",
-                 *           "target_id": "target-id"
+                 *           "target_name": "External Network"
                  *         },
                  *         "type": "scan-plans"
                  *       }
@@ -3608,6 +3627,7 @@ export interface operations {
                  */
                 "application/vnd.api+json": {
                     data: {
+                        /** @description Provide exactly one of target_id or target_name. */
                         attributes: {
                             name: string;
                             settings?: {
@@ -3623,7 +3643,8 @@ export interface operations {
                                 /** Format: int64 */
                                 workers: number;
                             };
-                            target_id: string;
+                            target_id?: string;
+                            target_name?: string;
                         };
                         id?: string;
                         /** @constant */
@@ -4283,6 +4304,7 @@ export interface operations {
                  */
                 "application/vnd.api+json": {
                     data: {
+                        /** @description Provide at most one of target_id or target_name. */
                         attributes: {
                             name?: string;
                             revision: number;
@@ -4300,6 +4322,7 @@ export interface operations {
                                 workers?: number;
                             };
                             target_id?: string;
+                            target_name?: string;
                         };
                         id: string;
                         /** @constant */
@@ -5736,6 +5759,7 @@ export interface operations {
             query?: {
                 "filter[run_id]"?: string;
                 "filter[target_id]"?: string;
+                "filter[target_name]"?: string;
                 "filter[ip]"?: string;
                 "filter[port]"?: string;
                 after?: string;
@@ -6699,6 +6723,649 @@ export interface operations {
             };
         };
     };
+    getTargetByName: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description JSON:API resource document */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "data": {
+                     *         "attributes": {
+                     *           "created_at": "0001-01-01T00:00:00Z",
+                     *           "entries": null,
+                     *           "name": "",
+                     *           "revision": 0,
+                     *           "updated_at": "0001-01-01T00:00:00Z"
+                     *         },
+                     *         "id": "example-id",
+                     *         "type": "targets"
+                     *       }
+                     *     }
+                     */
+                    "application/vnd.api+json": {
+                        data: {
+                            attributes: {
+                                /** Format: date-time */
+                                archived_at?: string;
+                                /** Format: date-time */
+                                created_at: string;
+                                entries: components["schemas"]["serviceTargetEntry"][] | null;
+                                name: string;
+                                /** Format: int64 */
+                                revision: number;
+                                /** Format: date-time */
+                                updated_at: string;
+                            };
+                            id: string;
+                            links?: {
+                                [key: string]: unknown;
+                            };
+                            relationships?: {
+                                [key: string]: unknown;
+                            };
+                            /** @constant */
+                            type: "targets";
+                        };
+                        links?: {
+                            [key: string]: unknown;
+                        };
+                        meta?: {
+                            [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description JSON:API error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "errors": [
+                     *         {
+                     *           "detail": "request failed",
+                     *           "status": "400"
+                     *         }
+                     *       ]
+                     *     }
+                     */
+                    "application/vnd.api+json": {
+                        errors: {
+                            detail: string;
+                            status: string;
+                        }[];
+                    };
+                };
+            };
+            /** @description JSON:API error */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "errors": [
+                     *         {
+                     *           "detail": "request failed",
+                     *           "status": "404"
+                     *         }
+                     *       ]
+                     *     }
+                     */
+                    "application/vnd.api+json": {
+                        errors: {
+                            detail: string;
+                            status: string;
+                        }[];
+                    };
+                };
+            };
+            /** @description JSON:API error */
+            406: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "errors": [
+                     *         {
+                     *           "detail": "request failed",
+                     *           "status": "406"
+                     *         }
+                     *       ]
+                     *     }
+                     */
+                    "application/vnd.api+json": {
+                        errors: {
+                            detail: string;
+                            status: string;
+                        }[];
+                    };
+                };
+            };
+            /** @description JSON:API error */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "errors": [
+                     *         {
+                     *           "detail": "request failed",
+                     *           "status": "409"
+                     *         }
+                     *       ]
+                     *     }
+                     */
+                    "application/vnd.api+json": {
+                        errors: {
+                            detail: string;
+                            status: string;
+                        }[];
+                    };
+                };
+            };
+            /** @description JSON:API error */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "errors": [
+                     *         {
+                     *           "detail": "request failed",
+                     *           "status": "413"
+                     *         }
+                     *       ]
+                     *     }
+                     */
+                    "application/vnd.api+json": {
+                        errors: {
+                            detail: string;
+                            status: string;
+                        }[];
+                    };
+                };
+            };
+            /** @description JSON:API error */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "errors": [
+                     *         {
+                     *           "detail": "request failed",
+                     *           "status": "415"
+                     *         }
+                     *       ]
+                     *     }
+                     */
+                    "application/vnd.api+json": {
+                        errors: {
+                            detail: string;
+                            status: string;
+                        }[];
+                    };
+                };
+            };
+            /** @description JSON:API error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "errors": [
+                     *         {
+                     *           "detail": "request failed",
+                     *           "status": "422"
+                     *         }
+                     *       ]
+                     *     }
+                     */
+                    "application/vnd.api+json": {
+                        errors: {
+                            detail: string;
+                            status: string;
+                        }[];
+                    };
+                };
+            };
+            /** @description JSON:API error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "errors": [
+                     *         {
+                     *           "detail": "request failed",
+                     *           "status": "500"
+                     *         }
+                     *       ]
+                     *     }
+                     */
+                    "application/vnd.api+json": {
+                        errors: {
+                            detail: string;
+                            status: string;
+                        }[];
+                    };
+                };
+            };
+            /** @description JSON:API error */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "errors": [
+                     *         {
+                     *           "detail": "request failed",
+                     *           "status": "502"
+                     *         }
+                     *       ]
+                     *     }
+                     */
+                    "application/vnd.api+json": {
+                        errors: {
+                            detail: string;
+                            status: string;
+                        }[];
+                    };
+                };
+            };
+            /** @description JSON:API error */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "errors": [
+                     *         {
+                     *           "detail": "request failed",
+                     *           "status": "503"
+                     *         }
+                     *       ]
+                     *     }
+                     */
+                    "application/vnd.api+json": {
+                        errors: {
+                            detail: string;
+                            status: string;
+                        }[];
+                    };
+                };
+            };
+        };
+    };
+    updateTargetByName: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                /**
+                 * @example {
+                 *       "data": {
+                 *         "attributes": {
+                 *           "entries": [
+                 *             "192.0.2.0/24"
+                 *           ],
+                 *           "revision": 1
+                 *         },
+                 *         "id": "target-id",
+                 *         "type": "targets"
+                 *       }
+                 *     }
+                 */
+                "application/vnd.api+json": {
+                    data: {
+                        attributes: {
+                            archived?: boolean;
+                            entries?: string[];
+                            revision: number;
+                        };
+                        id: string;
+                        /** @constant */
+                        type: "targets";
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description JSON:API resource document */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "data": {
+                     *         "attributes": {
+                     *           "created_at": "0001-01-01T00:00:00Z",
+                     *           "entries": null,
+                     *           "name": "",
+                     *           "revision": 0,
+                     *           "updated_at": "0001-01-01T00:00:00Z"
+                     *         },
+                     *         "id": "example-id",
+                     *         "type": "targets"
+                     *       }
+                     *     }
+                     */
+                    "application/vnd.api+json": {
+                        data: {
+                            attributes: {
+                                /** Format: date-time */
+                                archived_at?: string;
+                                /** Format: date-time */
+                                created_at: string;
+                                entries: components["schemas"]["serviceTargetEntry"][] | null;
+                                name: string;
+                                /** Format: int64 */
+                                revision: number;
+                                /** Format: date-time */
+                                updated_at: string;
+                            };
+                            id: string;
+                            links?: {
+                                [key: string]: unknown;
+                            };
+                            relationships?: {
+                                [key: string]: unknown;
+                            };
+                            /** @constant */
+                            type: "targets";
+                        };
+                        links?: {
+                            [key: string]: unknown;
+                        };
+                        meta?: {
+                            [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description JSON:API error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "errors": [
+                     *         {
+                     *           "detail": "request failed",
+                     *           "status": "400"
+                     *         }
+                     *       ]
+                     *     }
+                     */
+                    "application/vnd.api+json": {
+                        errors: {
+                            detail: string;
+                            status: string;
+                        }[];
+                    };
+                };
+            };
+            /** @description JSON:API error */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "errors": [
+                     *         {
+                     *           "detail": "request failed",
+                     *           "status": "404"
+                     *         }
+                     *       ]
+                     *     }
+                     */
+                    "application/vnd.api+json": {
+                        errors: {
+                            detail: string;
+                            status: string;
+                        }[];
+                    };
+                };
+            };
+            /** @description JSON:API error */
+            406: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "errors": [
+                     *         {
+                     *           "detail": "request failed",
+                     *           "status": "406"
+                     *         }
+                     *       ]
+                     *     }
+                     */
+                    "application/vnd.api+json": {
+                        errors: {
+                            detail: string;
+                            status: string;
+                        }[];
+                    };
+                };
+            };
+            /** @description JSON:API error */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "errors": [
+                     *         {
+                     *           "detail": "request failed",
+                     *           "status": "409"
+                     *         }
+                     *       ]
+                     *     }
+                     */
+                    "application/vnd.api+json": {
+                        errors: {
+                            detail: string;
+                            status: string;
+                        }[];
+                    };
+                };
+            };
+            /** @description JSON:API error */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "errors": [
+                     *         {
+                     *           "detail": "request failed",
+                     *           "status": "413"
+                     *         }
+                     *       ]
+                     *     }
+                     */
+                    "application/vnd.api+json": {
+                        errors: {
+                            detail: string;
+                            status: string;
+                        }[];
+                    };
+                };
+            };
+            /** @description JSON:API error */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "errors": [
+                     *         {
+                     *           "detail": "request failed",
+                     *           "status": "415"
+                     *         }
+                     *       ]
+                     *     }
+                     */
+                    "application/vnd.api+json": {
+                        errors: {
+                            detail: string;
+                            status: string;
+                        }[];
+                    };
+                };
+            };
+            /** @description JSON:API error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "errors": [
+                     *         {
+                     *           "detail": "request failed",
+                     *           "status": "422"
+                     *         }
+                     *       ]
+                     *     }
+                     */
+                    "application/vnd.api+json": {
+                        errors: {
+                            detail: string;
+                            status: string;
+                        }[];
+                    };
+                };
+            };
+            /** @description JSON:API error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "errors": [
+                     *         {
+                     *           "detail": "request failed",
+                     *           "status": "500"
+                     *         }
+                     *       ]
+                     *     }
+                     */
+                    "application/vnd.api+json": {
+                        errors: {
+                            detail: string;
+                            status: string;
+                        }[];
+                    };
+                };
+            };
+            /** @description JSON:API error */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "errors": [
+                     *         {
+                     *           "detail": "request failed",
+                     *           "status": "502"
+                     *         }
+                     *       ]
+                     *     }
+                     */
+                    "application/vnd.api+json": {
+                        errors: {
+                            detail: string;
+                            status: string;
+                        }[];
+                    };
+                };
+            };
+            /** @description JSON:API error */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "errors": [
+                     *         {
+                     *           "detail": "request failed",
+                     *           "status": "503"
+                     *         }
+                     *       ]
+                     *     }
+                     */
+                    "application/vnd.api+json": {
+                        errors: {
+                            detail: string;
+                            status: string;
+                        }[];
+                    };
+                };
+            };
+        };
+    };
     getTarget: {
         parameters: {
             query?: never;
@@ -7021,7 +7688,9 @@ export interface operations {
                  * @example {
                  *       "data": {
                  *         "attributes": {
-                 *           "name": "External Network",
+                 *           "entries": [
+                 *             "192.0.2.0/24"
+                 *           ],
                  *           "revision": 1
                  *         },
                  *         "id": "target-id",
@@ -7034,7 +7703,6 @@ export interface operations {
                         attributes: {
                             archived?: boolean;
                             entries?: string[];
-                            name?: string;
                             revision: number;
                         };
                         id: string;

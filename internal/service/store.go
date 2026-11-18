@@ -70,8 +70,7 @@ func (s *Store) ListRuns(ctx context.Context, f RunFilter) ([]Run, error) {
 	return out, rows.Err()
 }
 
-// Open initializes the current schema on a fresh development database.
-// Earlier schemas are deliberately unsupported and must be reset.
+// Open initializes fresh databases and upgrades supported development schemas.
 func Open(ctx context.Context, url string) (*Store, error) {
 	pool, err := pgxpool.New(ctx, url)
 	if err != nil {
@@ -81,20 +80,36 @@ func Open(ctx context.Context, url string) (*Store, error) {
 	err = store.tx(ctx, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `CREATE SCHEMA IF NOT EXISTS masscanr;
 CREATE TABLE IF NOT EXISTS masscanr.version (version integer PRIMARY KEY);
-INSERT INTO masscanr.version SELECT 5 WHERE NOT EXISTS (SELECT 1 FROM masscanr.version);`); err != nil {
+INSERT INTO masscanr.version SELECT 6 WHERE NOT EXISTS (SELECT 1 FROM masscanr.version);`); err != nil {
 			return err
 		}
 		var count, version int
 		if err := tx.QueryRow(ctx, `SELECT count(*), max(version) FROM masscanr.version`).Scan(&count, &version); err != nil {
 			return err
 		}
-		if count != 1 || (version != 4 && version != 5) {
+		if count != 1 || (version != 4 && version != 5 && version != 6) {
 			return fmt.Errorf("unsupported database schema: use a fresh development database")
 		}
 		if version == 4 {
 			if _, err := tx.Exec(ctx, `ALTER TABLE masscanr.scan_plans DROP CONSTRAINT scan_plans_provider_check;
 ALTER TABLE masscanr.scan_plans ADD CONSTRAINT scan_plans_provider_check CHECK (provider IN ('vultr', 'digitalocean'));
 UPDATE masscanr.version SET version=5;`); err != nil {
+				return err
+			}
+			version = 5
+		}
+		if version == 5 {
+			var duplicate string
+			err := tx.QueryRow(ctx, `SELECT lower(btrim(name)) FROM masscanr.targets
+GROUP BY lower(btrim(name)) HAVING count(*) > 1 LIMIT 1`).Scan(&duplicate)
+			if err == nil {
+				return fmt.Errorf("cannot upgrade target names: duplicate normalized name %q; rename colliding Targets before retrying", duplicate)
+			}
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS targets_name_unique ON masscanr.targets (lower(btrim(name)));
+UPDATE masscanr.version SET version=6;`); err != nil {
 				return err
 			}
 		}

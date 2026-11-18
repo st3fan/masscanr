@@ -15,6 +15,17 @@ func (a *API) listScanResults(c fiber.Ctx) error {
 		return bad(c, err)
 	}
 	filter := ResultFilter{RunID: c.Query("filter[run_id]"), TargetID: c.Query("filter[target_id]"), After: c.Query("after"), Sort: c.Query("sort"), Limit: limit}
+	targetName := c.Query("filter[target_name]")
+	if filter.TargetID != "" && targetName != "" {
+		return bad(c, fmt.Errorf("provide only one of filter[target_id] or filter[target_name]"))
+	}
+	if targetName != "" {
+		target, e := a.Store.GetTargetByName(c.Context(), targetName)
+		if e != nil {
+			return problem(c, e)
+		}
+		filter.TargetID = target.ID
+	}
 	if text := c.Query("filter[ip]"); text != "" {
 		filter.IP, err = netip.ParseAddr(text)
 		if err != nil || !filter.IP.Is4() {
@@ -62,7 +73,9 @@ func (a *API) listScanResults(c fiber.Ctx) error {
 		if filter.RunID != "" {
 			q.Set("filter[run_id]", filter.RunID)
 		}
-		if filter.TargetID != "" {
+		if targetName != "" {
+			q.Set("filter[target_name]", targetName)
+		} else if filter.TargetID != "" {
 			q.Set("filter[target_id]", filter.TargetID)
 		}
 		if filter.IP.IsValid() {

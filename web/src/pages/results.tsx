@@ -75,7 +75,7 @@ export function ResultsPage() {
   const sort = sorting[0] ? (sorting[0].desc ? '-' : '') + sorting[0].id : undefined
   const params = {
     'filter[run_id]': filters.run,
-    'filter[target_id]': filters.target,
+    'filter[target_name]': filters.target,
     'filter[ip]': filters.ip,
     'filter[port]': filters.port,
     sort,
@@ -118,7 +118,7 @@ export function ResultsPage() {
               />
             </label>
             <label className="text-xs font-medium text-muted-foreground">
-              Target ID
+              Target name
               <Input
                 className="mt-1.5"
                 value={draft.target}

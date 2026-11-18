@@ -79,7 +79,7 @@ describe('JSON:API client', () => {
     )
     vi.stubGlobal('fetch', fetch)
     await api.createTarget({ name: 'External', entries: ['192.0.2.1', 'AS3333'] })
-    await api.updateTarget('t-1', { revision: 2, name: 'Updated', entries: ['192.0.2.0/24'] })
+    await api.updateTarget('t-1', { revision: 2, entries: ['192.0.2.0/24'] })
     await api.archiveTarget('t-1', 3)
     expect(
       fetch.mock.calls.map(([path, options]) => [path, options.method, JSON.parse(options.body)]),
@@ -101,7 +101,7 @@ describe('JSON:API client', () => {
           data: {
             type: 'targets',
             id: 't-1',
-            attributes: { revision: 2, name: 'Updated', entries: ['192.0.2.0/24'] },
+            attributes: { revision: 2, entries: ['192.0.2.0/24'] },
           },
         },
       ],
@@ -119,12 +119,22 @@ describe('JSON:API client', () => {
       })
     }
   })
+  it('encodes Target names in lookup URLs', async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(
+        reply({ data: { type: 'targets', id: 't-1', attributes: { name: 'Cloud/Edge 100%' } } }),
+      )
+    vi.stubGlobal('fetch', fetch)
+    await api.targetByName('Cloud/Edge 100%')
+    expect(fetch.mock.calls[0][0]).toBe('/v1/targets/by-name/Cloud%2FEdge%20100%25')
+  })
   it('preserves revision-conflict status and JSON:API detail', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(reply({ errors: [{ status: '409', detail: 'conflict' }] }, 409)),
     )
-    await expect(api.updateTarget('t-1', { revision: 1, name: 'Changed' })).rejects.toEqual(
+    await expect(api.updateTarget('t-1', { revision: 1, entries: ['192.0.2.1'] })).rejects.toEqual(
       new ApiError(409, 'conflict'),
     )
   })

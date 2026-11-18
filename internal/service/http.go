@@ -96,6 +96,8 @@ func (a *API) Handler() *fiber.App {
 	})
 	a.register("POST", "/v1/targets", "createTarget", "Create a reusable target", Target{}, a.createTarget)
 	a.register("GET", "/v1/targets", "listTargets", "List targets", Target{}, a.listTargets)
+	a.register("GET", "/v1/targets/by-name/:name", "getTargetByName", "Get a target by name", Target{}, a.getTargetByName)
+	a.register("PATCH", "/v1/targets/by-name/:name", "updateTargetByName", "Update or archive a target by name", Target{}, a.patchTargetByName)
 	a.register("GET", "/v1/targets/:id", "getTarget", "Get a target", Target{}, a.getTarget)
 	a.register("PATCH", "/v1/targets/:id", "updateTarget", "Update or archive a target", Target{}, a.patchTarget)
 	a.register("POST", "/v1/scan-plans", "createScanPlan", "Create a reusable scan plan", ScanPlan{}, a.createScanPlan)
@@ -113,6 +115,10 @@ func (a *API) Handler() *fiber.App {
 }
 
 func decode(c fiber.Ctx, v any) error {
+	return decodeForID(c, v, c.Params("id"))
+}
+
+func decodeForID(c fiber.Ctx, v any, expectedID string) error {
 	if len(c.Body()) > 1<<20 {
 		return fmt.Errorf("invalid JSON body")
 	}
@@ -137,7 +143,7 @@ func decode(c fiber.Ctx, v any) error {
 	if c.Method() == fiber.MethodPatch && envelope.Data.ID == "" {
 		return fmt.Errorf("resource ID is required")
 	}
-	if id := c.Params("id"); envelope.Data.ID != "" && envelope.Data.ID != id {
+	if expectedID != "" && envelope.Data.ID != "" && envelope.Data.ID != expectedID {
 		return fmt.Errorf("resource ID does not match URL")
 	}
 	d = json.NewDecoder(bytes.NewReader(envelope.Data.Attributes))

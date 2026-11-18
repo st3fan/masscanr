@@ -99,20 +99,25 @@ it('keeps a stale edit draft until the operator reloads', async () => {
   })
   vi.stubGlobal('fetch', fetch)
   renderRoute('/targets/t-1/edit', <TargetEditPage />)
-  const name = await screen.findByRole('textbox', { name: 'Name' })
-  await userEvent.clear(name)
-  await userEvent.type(name, 'My draft')
+  await screen.findByText('External network')
+  expect(screen.queryByRole('textbox', { name: 'Name' })).toBeNull()
+  const selector = screen.getByRole('textbox', { name: 'Selector 1' })
+  await userEvent.clear(selector)
+  await userEvent.type(selector, '192.0.2.2')
   await userEvent.click(screen.getByRole('button', { name: 'Save target' }))
   expect(await screen.findByText(/Your draft is preserved/)).toBeTruthy()
-  expect(screen.getByRole('textbox', { name: 'Name' })).toHaveProperty('value', 'My draft')
+  expect(screen.getByRole('textbox', { name: 'Selector 1' })).toHaveProperty('value', '192.0.2.2')
   const patch = fetch.mock.calls.find(([, options]) => options?.method === 'PATCH')
-  expect(JSON.parse(patch?.[1].body).data.attributes.revision).toBe(1)
+  expect(JSON.parse(patch?.[1].body).data.attributes).toEqual({
+    revision: 1,
+    entries: ['192.0.2.2'],
+  })
   revision = 2
   await userEvent.click(screen.getByRole('button', { name: 'Reload latest version' }))
   await waitFor(() =>
-    expect(screen.getByRole('textbox', { name: 'Name' })).toHaveProperty(
+    expect(screen.getByRole('textbox', { name: 'Selector 1' })).toHaveProperty(
       'value',
-      'External network',
+      '192.0.2.1',
     ),
   )
 })

@@ -209,6 +209,13 @@ export const api = {
     request<ListTargets>(url('/v1/targets', query), 'targets', true, signal),
   target: (id: string, signal?: AbortSignal) =>
     request<{ data: Target }>(`/v1/targets/${encodeURIComponent(id)}`, 'targets', false, signal),
+  targetByName: (name: string, signal?: AbortSignal) =>
+    request<{ data: Target }>(
+      `/v1/targets/by-name/${encodeURIComponent(name)}`,
+      'targets',
+      false,
+      signal,
+    ),
   createTarget: (attributes: CreateTargetAttributes) =>
     request<{ data: Target }>('/v1/targets', 'targets', false, undefined, {
       method: 'POST',

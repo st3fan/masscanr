@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS masscanr.targets (
     updated_at timestamptz NOT NULL,
     archived_at timestamptz
 );
+CREATE UNIQUE INDEX IF NOT EXISTS targets_name_unique ON masscanr.targets (lower(btrim(name)));
 CREATE TABLE IF NOT EXISTS masscanr.target_entries (
     id text PRIMARY KEY,
     target_id text NOT NULL REFERENCES masscanr.targets(id),

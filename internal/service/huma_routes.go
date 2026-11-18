@@ -78,10 +78,10 @@ func (a *API) attributesSchema(v any) *huma.Schema {
 }
 
 func (a *API) register(method, path, operationID, summary string, model any, handler fiber.Handler) {
-	openPath := strings.ReplaceAll(strings.ReplaceAll(path, ":id", "{id}"), ":format", "{format}")
+	openPath := strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(path, ":id", "{id}"), ":name", "{name}"), ":format", "{format}")
 	typ := resourceTypeForPath(path, operationID)
 	op := &huma.Operation{Method: method, Path: openPath, OperationID: operationID, Summary: summary, Tags: []string{typ}, Responses: map[string]*huma.Response{}}
-	for _, parameter := range []string{"id", "format"} {
+	for _, parameter := range []string{"id", "name", "format"} {
 		if strings.Contains(openPath, "{"+parameter+"}") {
 			p := &huma.Param{Name: parameter, In: "path", Required: true, Schema: &huma.Schema{Type: "string"}}
 			if parameter == "format" {
@@ -94,13 +94,13 @@ func (a *API) register(method, path, operationID, summary string, model any, han
 		op.Parameters = append(op.Parameters, &huma.Param{Name: "limit", In: "query", Schema: &huma.Schema{Type: "integer", Minimum: floatPtr(1), Maximum: floatPtr(1000)}}, &huma.Param{Name: "after", In: "query", Schema: &huma.Schema{Type: "string"}})
 	}
 	if operationID == "listScanResults" {
-		for _, name := range []string{"filter[run_id]", "filter[target_id]", "filter[ip]", "filter[port]", "after", "sort"} {
+		for _, name := range []string{"filter[run_id]", "filter[target_id]", "filter[target_name]", "filter[ip]", "filter[port]", "after", "sort"} {
 			op.Parameters = append(op.Parameters, &huma.Param{Name: name, In: "query", Schema: &huma.Schema{Type: "string"}})
 		}
 		op.Parameters = append(op.Parameters, &huma.Param{Name: "limit", In: "query", Schema: &huma.Schema{Type: "integer", Minimum: floatPtr(1), Maximum: floatPtr(1000)}})
 	}
 	if operationID == "listRuns" {
-		for _, name := range []string{"active", "filter[target_id]", "filter[scan_plan_id]", "filter[phase]", "after"} {
+		for _, name := range []string{"active", "filter[target_id]", "filter[target_name]", "filter[scan_plan_id]", "filter[phase]", "after"} {
 			op.Parameters = append(op.Parameters, &huma.Param{Name: name, In: "query", Schema: &huma.Schema{Type: "string"}})
 		}
 		op.Parameters = append(op.Parameters, &huma.Param{Name: "limit", In: "query", Schema: &huma.Schema{Type: "integer", Minimum: floatPtr(1), Maximum: floatPtr(1000)}})
@@ -114,21 +114,21 @@ func (a *API) register(method, path, operationID, summary string, model any, han
 	if operationID == "startScanPlan" {
 		op.Parameters = append(op.Parameters, &huma.Param{Name: "Idempotency-Key", In: "header", Required: true, Schema: &huma.Schema{Type: "string", MinLength: intPtr(1), MaxLength: intPtr(200)}})
 	}
-	if operationID == "createTarget" || operationID == "updateTarget" || operationID == "createScanPlan" || operationID == "updateScanPlan" || operationID == "startScanPlan" {
+	if operationID == "createTarget" || operationID == "updateTarget" || operationID == "updateTargetByName" || operationID == "createScanPlan" || operationID == "updateScanPlan" || operationID == "startScanPlan" {
 		var attrs *huma.Schema
 		switch operationID {
 		case "startScanPlan":
 			attrs = &huma.Schema{Type: "object", Required: []string{"preflight_id"}, Properties: map[string]*huma.Schema{"preflight_id": {Type: "string"}, "confirm": {Type: "boolean"}}}
 		case "createTarget":
 			attrs = &huma.Schema{Type: "object", Required: []string{"name", "entries"}, Properties: map[string]*huma.Schema{"name": {Type: "string"}, "entries": {Type: "array", Items: &huma.Schema{Type: "string"}}}}
-		case "updateTarget":
-			attrs = &huma.Schema{Type: "object", Required: []string{"revision"}, Properties: map[string]*huma.Schema{"revision": {Type: "integer", Minimum: floatPtr(1)}, "name": {Type: "string"}, "entries": {Type: "array", Items: &huma.Schema{Type: "string"}}, "archived": {Type: "boolean"}}}
+		case "updateTarget", "updateTargetByName":
+			attrs = &huma.Schema{Type: "object", Required: []string{"revision"}, Properties: map[string]*huma.Schema{"revision": {Type: "integer", Minimum: floatPtr(1)}, "entries": {Type: "array", Items: &huma.Schema{Type: "string"}}, "archived": {Type: "boolean"}}}
 		case "createScanPlan":
-			attrs = &huma.Schema{Type: "object", Required: []string{"name", "target_id"}, Properties: map[string]*huma.Schema{"name": {Type: "string"}, "target_id": {Type: "string"}, "settings": a.attributesSchema(ScanPlanSettings{})}}
+			attrs = &huma.Schema{Type: "object", Required: []string{"name"}, Description: "Provide exactly one of target_id or target_name.", Properties: map[string]*huma.Schema{"name": {Type: "string"}, "target_id": {Type: "string"}, "target_name": {Type: "string"}, "settings": a.attributesSchema(ScanPlanSettings{})}}
 		case "updateScanPlan":
 			settings := a.attributesSchema(ScanPlanSettings{})
 			settings.Required = nil
-			attrs = &huma.Schema{Type: "object", Required: []string{"revision"}, Properties: map[string]*huma.Schema{"revision": {Type: "integer", Minimum: floatPtr(1)}, "name": {Type: "string"}, "target_id": {Type: "string"}, "settings": settings}}
+			attrs = &huma.Schema{Type: "object", Required: []string{"revision"}, Description: "Provide at most one of target_id or target_name.", Properties: map[string]*huma.Schema{"revision": {Type: "integer", Minimum: floatPtr(1)}, "name": {Type: "string"}, "target_id": {Type: "string"}, "target_name": {Type: "string"}, "settings": settings}}
 		}
 		example := map[string]any{"data": map[string]any{"type": requestTypeForOperation(operationID), "attributes": map[string]any{}}}
 		switch operationID {
@@ -136,16 +136,16 @@ func (a *API) register(method, path, operationID, summary string, model any, han
 			example["data"].(map[string]any)["attributes"] = map[string]any{"preflight_id": "preflight-id", "confirm": true}
 		case "createTarget":
 			example["data"].(map[string]any)["attributes"] = map[string]any{"name": "External Network", "entries": []string{"192.0.2.0/24", "AS3333"}}
-		case "updateTarget":
+		case "updateTarget", "updateTargetByName":
 			example["data"].(map[string]any)["id"] = "target-id"
-			example["data"].(map[string]any)["attributes"] = map[string]any{"revision": 1, "name": "External Network"}
+			example["data"].(map[string]any)["attributes"] = map[string]any{"revision": 1, "entries": []string{"192.0.2.0/24"}}
 		case "createScanPlan":
-			example["data"].(map[string]any)["attributes"] = map[string]any{"name": "Daily TCP", "target_id": "target-id"}
+			example["data"].(map[string]any)["attributes"] = map[string]any{"name": "Daily TCP", "target_name": "External Network"}
 		case "updateScanPlan":
 			example["data"].(map[string]any)["id"] = "scan-plan-id"
 			example["data"].(map[string]any)["attributes"] = map[string]any{"revision": 1, "settings": map[string]any{"ports": "443"}}
 		}
-		op.RequestBody = &huma.RequestBody{Required: true, Content: map[string]*huma.MediaType{jsonAPIMediaType: {Schema: &huma.Schema{Type: "object", Required: []string{"data"}, Properties: map[string]*huma.Schema{"data": requestResourceSchema(attrs, requestTypeForOperation(operationID), operationID == "updateTarget" || operationID == "updateScanPlan")}}, Example: example}}}
+		op.RequestBody = &huma.RequestBody{Required: true, Content: map[string]*huma.MediaType{jsonAPIMediaType: {Schema: &huma.Schema{Type: "object", Required: []string{"data"}, Properties: map[string]*huma.Schema{"data": requestResourceSchema(attrs, requestTypeForOperation(operationID), operationID == "updateTarget" || operationID == "updateTargetByName" || operationID == "updateScanPlan")}}, Example: example}}}
 	}
 	if operationID == "health" {
 		op.Responses["200"] = &huma.Response{Description: "Ready", Content: map[string]*huma.MediaType{"application/json": {Schema: &huma.Schema{Type: "object", Required: []string{"status"}, Properties: map[string]*huma.Schema{"status": {Type: "string", Const: "ready"}}}, Example: map[string]string{"status": "ready"}}}}
@@ -205,7 +205,7 @@ func requestTypeForOperation(id string) string {
 	if id == "startScanPlan" {
 		return "runs"
 	}
-	if id == "createTarget" || id == "updateTarget" {
+	if id == "createTarget" || id == "updateTarget" || id == "updateTargetByName" {
 		return "targets"
 	}
 	if id == "createScanPlan" || id == "updateScanPlan" {

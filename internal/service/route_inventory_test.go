@@ -26,8 +26,10 @@ var applicationRoutes = []string{
 	"GET /v1/scan-results",
 	"GET /v1/targets",
 	"GET /v1/targets/:id",
+	"GET /v1/targets/by-name/:name",
 	"PATCH /v1/scan-plans/:id",
 	"PATCH /v1/targets/:id",
+	"PATCH /v1/targets/by-name/:name",
 	"POST /v1/runs/:id/stop",
 	"POST /v1/scan-plans",
 	"POST /v1/scan-plans/:id/preflight",
@@ -57,7 +59,7 @@ func TestOpenAPICoversApplicationRoutes(t *testing.T) {
 	seen := map[string]bool{}
 	for _, route := range applicationRoutes {
 		method, path, _ := strings.Cut(route, " ")
-		path = strings.ReplaceAll(strings.ReplaceAll(path, ":id", "{id}"), ":format", "{format}")
+		path = strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(path, ":id", "{id}"), ":name", "{name}"), ":format", "{format}")
 		raw := spec.Paths[path][strings.ToLower(method)]
 		if len(raw) == 0 {
 			t.Errorf("missing OpenAPI operation %s %s", method, path)
