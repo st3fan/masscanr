@@ -37,7 +37,8 @@ CREATE TABLE IF NOT EXISTS masscanr.scan_plans (
     provider text NOT NULL CHECK (provider IN ('vultr', 'digitalocean')),
     settings jsonb NOT NULL CHECK (jsonb_typeof(settings) = 'object'),
     created_at timestamptz NOT NULL,
-    updated_at timestamptz NOT NULL
+    updated_at timestamptz NOT NULL,
+    archived_at timestamptz
 );
 CREATE INDEX IF NOT EXISTS scan_plans_target ON masscanr.scan_plans(target_id, id);
 CREATE TABLE IF NOT EXISTS masscanr.scan_preflights (

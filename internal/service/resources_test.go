@@ -1,9 +1,12 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/st3fan/masscanr/internal/scan"
 )
 
 func TestTargetAndScanPlanResources(t *testing.T) {
@@ -74,5 +77,70 @@ func TestTargetAndScanPlanResources(t *testing.T) {
 	var doc map[string]json.RawMessage
 	if err := json.Unmarshal(firstPlan.Body.Bytes(), &doc); err != nil || !strings.Contains(string(doc["data"]), `"target"`) {
 		t.Fatalf("missing Target relationship: %s", firstPlan.Body)
+	}
+}
+
+func TestArchiveScanPlanPreservesAcceptedRunAndBlocksNewWork(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	target, err := store.CreateTarget(ctx, "Archive scope", []string{"192.0.2.0/24"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := store.CreateScanPlan(ctx, "Archive plan", target.ID, DefaultScanPlanSettings())
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := (&API{Store: store, Resolve: func(_ context.Context, targets []scan.Target) ([]scan.Target, error) { return targets, nil }}).Handler()
+	path := "/v1/scan-plans/" + plan.ID
+	preflightResponse := request(app, "POST", path+"/preflight", "")
+	var preflight Plan
+	if preflightResponse.Code != 201 || decodeTestResource(preflightResponse.Body.Bytes(), &preflight) != nil {
+		t.Fatalf("preflight: %d %s", preflightResponse.Code, preflightResponse.Body)
+	}
+	run, err := store.ReserveScanPlan(ctx, plan.ID, preflight.ID, "accepted-key", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	archiveTarget := true
+	if _, err := store.UpdateTarget(ctx, target.ID, target.Revision, TargetPatch{Archived: &archiveTarget}); err != nil {
+		t.Fatal(err)
+	}
+	badArchive := request(app, "PATCH", path, `{"data":{"type":"scan-plans","id":"`+plan.ID+`","attributes":{"revision":1,"archived":true,"name":"other"}}}`)
+	if badArchive.Code != 400 {
+		t.Fatalf("mixed archive: %d %s", badArchive.Code, badArchive.Body)
+	}
+	archive := request(app, "PATCH", path, `{"data":{"type":"scan-plans","id":"`+plan.ID+`","attributes":{"revision":1,"archived":true}}}`)
+	var archived ScanPlan
+	if archive.Code != 200 || decodeTestResource(archive.Body.Bytes(), &archived) != nil || archived.ArchivedAt == nil || archived.Revision != 2 {
+		t.Fatalf("archive: %d %s", archive.Code, archive.Body)
+	}
+	for _, body := range []string{
+		`{"data":{"type":"scan-plans","id":"` + plan.ID + `","attributes":{"revision":1,"archived":true}}}`,
+		`{"data":{"type":"scan-plans","id":"` + plan.ID + `","attributes":{"revision":2,"name":"changed"}}}`,
+	} {
+		response := request(app, "PATCH", path, body)
+		if response.Code != 409 {
+			t.Fatalf("edit archived plan: %d %s", response.Code, response.Body)
+		}
+	}
+	if response := request(app, "POST", path+"/preflight", ""); response.Code != 409 {
+		t.Fatalf("preflight archived plan: %d %s", response.Code, response.Body)
+	}
+	if _, err := store.ReserveScanPlan(ctx, plan.ID, preflight.ID, "new-key", true); err != ErrConflict {
+		t.Fatalf("accepted stale preflight: %v", err)
+	}
+	retry, err := store.ReserveScanPlan(ctx, plan.ID, preflight.ID, "accepted-key", true)
+	if err != nil || retry.ID != run.ID {
+		t.Fatalf("idempotent retry: %+v, %v", retry, err)
+	}
+	got := request(app, "GET", path, "")
+	var saved ScanPlan
+	if got.Code != 200 || decodeTestResource(got.Body.Bytes(), &saved) != nil || saved.ArchivedAt == nil {
+		t.Fatalf("get archived plan: %d %s", got.Code, got.Body)
+	}
+	history, err := store.ListRunsForPlan(ctx, plan.ID, "", 10)
+	if err != nil || len(history) != 1 || !strings.Contains(string(history[0]), run.ID) {
+		t.Fatalf("archived run history: %s, %v", history, err)
 	}
 }

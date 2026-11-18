@@ -59,7 +59,7 @@ func TestFreshDomainSchemaConstraints(t *testing.T) {
 	store := testStore(t)
 	ctx := context.Background()
 	var version int
-	if err := store.Pool.QueryRow(ctx, `SELECT version FROM masscanr.version`).Scan(&version); err != nil || version != 6 {
+	if err := store.Pool.QueryRow(ctx, `SELECT version FROM masscanr.version`).Scan(&version); err != nil || version != 7 {
 		t.Fatalf("schema version %d: %v", version, err)
 	}
 	now := time.Now().UTC()
@@ -101,7 +101,7 @@ UPDATE masscanr.version SET version=4;`); err != nil {
 	}
 	t.Cleanup(reopened.Pool.Close)
 	var version int
-	if err := reopened.Pool.QueryRow(ctx, `SELECT version FROM masscanr.version`).Scan(&version); err != nil || version != 6 {
+	if err := reopened.Pool.QueryRow(ctx, `SELECT version FROM masscanr.version`).Scan(&version); err != nil || version != 7 {
 		t.Fatalf("migrated schema version %d: %v", version, err)
 	}
 	now := time.Now().UTC()
@@ -111,5 +111,35 @@ UPDATE masscanr.version SET version=4;`); err != nil {
 	}
 	if _, err := reopened.Pool.Exec(ctx, `INSERT INTO masscanr.scan_plans(id,target_id,name,revision,provider,settings,created_at,updated_at) VALUES($1,$2,'DigitalOcean',1,'digitalocean','{}',$3,$3)`, newID(), targetID, now); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestVersion6ScanPlanArchiveMigration(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	target, err := store.CreateTarget(ctx, "Existing scope", []string{"192.0.2.0/24"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := store.CreateScanPlan(ctx, "Existing plan", target.ID, DefaultScanPlanSettings())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Pool.Exec(ctx, `ALTER TABLE masscanr.scan_plans DROP COLUMN archived_at;
+UPDATE masscanr.version SET version=6;`); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(ctx, store.Pool.Config().ConnString())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(reopened.Pool.Close)
+	var version int
+	if err := reopened.Pool.QueryRow(ctx, `SELECT version FROM masscanr.version`).Scan(&version); err != nil || version != 7 {
+		t.Fatalf("migrated schema version %d: %v", version, err)
+	}
+	got, err := reopened.GetScanPlan(ctx, plan.ID)
+	if err != nil || got.ID != plan.ID || got.ArchivedAt != nil {
+		t.Fatalf("migrated plan: %+v, %v", got, err)
 	}
 }
