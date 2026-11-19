@@ -25,6 +25,8 @@ export type CreateScanPlanAttributes =
 export type UpdateScanPlanAttributes =
   operations['updateScanPlan']['requestBody']['content']['application/vnd.api+json']['data']['attributes']
 export type ScanPlanSettings = ScanPlan['attributes']['settings']
+export type ScanPreflight =
+  operations['preflightScanPlan']['responses'][201]['content']['application/vnd.api+json']['data']
 export type Provider = 'vultr' | 'digitalocean'
 export type ScanRun = ListRuns['data'][number]
 export type ScanResult = ListResults['data'][number]
@@ -167,14 +169,17 @@ async function request<T>(
   type: string,
   collection: boolean,
   signal?: AbortSignal,
-  mutation?: { method: 'POST' | 'PATCH'; body: unknown },
+  mutation?: { method: 'POST' | 'PATCH'; body?: unknown; headers?: Record<string, string> },
 ): Promise<T> {
   if (!path.startsWith('/v1/')) throw new ApiError(400, 'Invalid API path')
-  const headers: Record<string, string> = { Accept: 'application/vnd.api+json' }
-  if (mutation) headers['Content-Type'] = 'application/vnd.api+json'
+  const headers: Record<string, string> = {
+    Accept: 'application/vnd.api+json',
+    ...mutation?.headers,
+  }
+  if (mutation?.body !== undefined) headers['Content-Type'] = 'application/vnd.api+json'
   const response = await fetch(path, {
     method: mutation?.method,
-    body: mutation ? JSON.stringify(mutation.body) : undefined,
+    body: mutation?.body === undefined ? undefined : JSON.stringify(mutation.body),
     headers,
     credentials: 'same-origin',
     signal,
@@ -267,6 +272,26 @@ export const api = {
       { method: 'PATCH', body: { data: { type: 'scan-plans', id, attributes } } },
     ),
   archivePlan: (id: string, revision: number) => api.updatePlan(id, { revision, archived: true }),
+  preflightPlan: (id: string) =>
+    request<{ data: ScanPreflight }>(
+      `/v1/scan-plans/${encodeURIComponent(id)}/preflight`,
+      'scan-preflights',
+      false,
+      undefined,
+      { method: 'POST' },
+    ),
+  startPlan: (id: string, preflightId: string, idempotencyKey: string) =>
+    request<{ data: ScanRun }>(
+      `/v1/scan-plans/${encodeURIComponent(id)}/start`,
+      'runs',
+      false,
+      undefined,
+      {
+        method: 'POST',
+        headers: { 'Idempotency-Key': idempotencyKey },
+        body: { data: { type: 'runs', attributes: { preflight_id: preflightId, confirm: true } } },
+      },
+    ),
   regions: (provider: Provider, signal?: AbortSignal) =>
     request<ListRegions>(url('/v1/catalog/regions', { provider }), 'regions', true, signal),
   instanceTypes: (provider: Provider, region: string, signal?: AbortSignal) =>

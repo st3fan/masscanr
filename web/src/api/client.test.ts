@@ -119,6 +119,46 @@ describe('JSON:API client', () => {
       })
     }
   })
+  it('creates a preflight without a body and starts with confirmation and an idempotency key', async () => {
+    const preflight = {
+      type: 'scan-preflights',
+      id: 'pf-1',
+      attributes: { expires_at: '2026-01-01T00:00:00Z' },
+    }
+    const run = { type: 'runs', id: 'run-1', attributes: { phase: 'accepted' } }
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(reply({ data: preflight }, 201))
+      .mockResolvedValueOnce(reply({ data: run }, 202))
+    vi.stubGlobal('fetch', fetch)
+
+    expect((await api.preflightPlan('plan/1')).data.id).toBe('pf-1')
+    expect((await api.startPlan('plan/1', 'pf-1', 'same-key')).data.id).toBe('run-1')
+    expect(fetch.mock.calls[0]).toEqual([
+      '/v1/scan-plans/plan%2F1/preflight',
+      expect.objectContaining({
+        method: 'POST',
+        body: undefined,
+        credentials: 'same-origin',
+        headers: { Accept: 'application/vnd.api+json' },
+      }),
+    ])
+    expect(fetch.mock.calls[1]).toEqual([
+      '/v1/scan-plans/plan%2F1/start',
+      expect.objectContaining({
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          Accept: 'application/vnd.api+json',
+          'Content-Type': 'application/vnd.api+json',
+          'Idempotency-Key': 'same-key',
+        },
+        body: JSON.stringify({
+          data: { type: 'runs', attributes: { preflight_id: 'pf-1', confirm: true } },
+        }),
+      }),
+    ])
+  })
   it('encodes Target names in lookup URLs', async () => {
     const fetch = vi
       .fn()
