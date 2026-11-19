@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { ColumnDef } from '@tanstack/react-table'
 import { Link, useParams } from 'react-router-dom'
-import { Download } from 'lucide-react'
+import { Download, ExternalLink } from 'lucide-react'
 import {
   api,
   downloadRunExport,
@@ -58,13 +58,58 @@ const columns: ColumnDef<ScanRun>[] = [
   { header: 'Created', cell: ({ row }) => formatTime(row.original.attributes.created_at) },
 ]
 
-const workerColumns: ColumnDef<RunWorker>[] = [
-  { header: 'Instance', cell: ({ row }) => <code className="text-xs">{row.original.id}</code> },
-  { header: 'Worker slot', cell: ({ row }) => row.original.attributes.slot },
-  { header: 'State', cell: ({ row }) => <StatusBadge phase={row.original.attributes.state} /> },
-  { header: 'Cleanup', cell: ({ row }) => row.original.attributes.cleanup },
-  { header: 'Created', cell: ({ row }) => formatTime(row.original.attributes.created_at) },
-]
+function providerName(provider: string) {
+  switch (provider) {
+    case 'digitalocean':
+      return 'DigitalOcean'
+    case 'vultr':
+      return 'Vultr'
+    default:
+      return provider || 'Unknown'
+  }
+}
+
+function instanceURL(provider: string, id: string) {
+  if (provider === 'digitalocean' && /^[1-9]\d*$/.test(id)) {
+    return `https://cloud.digitalocean.com/droplets/${id}/`
+  }
+  return null
+}
+
+function WorkerInstance({ provider, id }: { provider: string; id: string }) {
+  if (!id) return <span className="text-muted-foreground">Pending</span>
+  const url = instanceURL(provider, id)
+  if (!url) return <code className="break-all text-xs">{id}</code>
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label={`Open ${providerName(provider)} instance ${id}`}
+      className="inline-flex max-w-full items-center gap-1 text-primary hover:underline"
+    >
+      <code className="break-all text-xs">{id}</code>
+      <ExternalLink aria-hidden="true" className="size-3 shrink-0" />
+    </a>
+  )
+}
+
+function workerColumns(provider: string, region: string, flavour: string): ColumnDef<RunWorker>[] {
+  return [
+    {
+      header: 'Instance',
+      cell: ({ row }) => <WorkerInstance provider={provider} id={row.original.id} />,
+    },
+    { header: 'Worker slot', cell: ({ row }) => row.original.attributes.slot },
+    { header: 'Provider', cell: () => providerName(provider) },
+    { header: 'IP', cell: ({ row }) => row.original.attributes.ip || 'Unknown' },
+    { header: 'Region', cell: () => region || 'Unknown' },
+    { header: 'Flavour', cell: () => flavour || 'Unknown' },
+    { header: 'State', cell: ({ row }) => <StatusBadge phase={row.original.attributes.state} /> },
+    { header: 'Cleanup', cell: ({ row }) => row.original.attributes.cleanup },
+    { header: 'Created', cell: ({ row }) => formatTime(row.original.attributes.created_at) },
+  ]
+}
 export function RunsPage() {
   const page = useCursorPagination()
   const query = useQuery(queries.runs(50, page.cursor))
@@ -115,6 +160,9 @@ export function RunDetailPage() {
   if (query.error) return <ErrorState error={query.error} retry={() => query.refetch()} />
   const run = query.data.data
   const a = run.attributes
+  const provider = a.preflight.config.Provider
+  const region = a.preflight.config.Region
+  const flavour = a.preflight.config.InstanceType
   const workers = Object.entries(a.worker_snapshots ?? {}).sort(
     ([, left], [, right]) => (left.slot ?? 0) - (right.slot ?? 0),
   )
@@ -231,6 +279,30 @@ export function RunDetailPage() {
                         {worker.state || 'Unknown'}
                       </span>
                     </div>
+                    <dl className="grid gap-x-4 gap-y-2 text-xs sm:grid-cols-2 xl:grid-cols-3">
+                      <div className="min-w-0">
+                        <dt className="text-muted-foreground">Provider</dt>
+                        <dd>{providerName(provider)}</dd>
+                      </div>
+                      <div className="min-w-0">
+                        <dt className="text-muted-foreground">IP</dt>
+                        <dd className="break-all">{worker.ip || 'Pending'}</dd>
+                      </div>
+                      <div className="min-w-0">
+                        <dt className="text-muted-foreground">Region</dt>
+                        <dd>{region || 'Unknown'}</dd>
+                      </div>
+                      <div className="min-w-0">
+                        <dt className="text-muted-foreground">Flavour</dt>
+                        <dd>{flavour || 'Unknown'}</dd>
+                      </div>
+                      <div className="min-w-0">
+                        <dt className="text-muted-foreground">Instance</dt>
+                        <dd>
+                          <WorkerInstance provider={provider} id={worker.id} />
+                        </dd>
+                      </div>
+                    </dl>
                     <div className="flex flex-wrap justify-between gap-2 text-xs text-muted-foreground">
                       <span>
                         {worker.completed_shards ?? 0}/{worker.assigned_shards ?? 0} assigned shards
@@ -315,7 +387,7 @@ export function RunDetailPage() {
           ) : (
             <DataTable
               data={history.data.data}
-              columns={workerColumns}
+              columns={workerColumns(provider, region, flavour)}
               emptyTitle="No instances recorded"
               emptyDescription="Worker instances appear after provisioning begins."
               previous={historyPage.hasPrevious}
