@@ -12,6 +12,7 @@ import { PageHeader } from '@/components/layout'
 import { useCursorPagination } from '@/components/pagination'
 import { ErrorState, LoadingState } from '@/components/states'
 import { TargetLink } from '@/components/target-link'
+import { ScanStart } from './scan-start'
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -222,6 +223,7 @@ export function PlanDetailPage() {
           </dl>
         </CardContent>
       </Card>
+      {!archived && <ScanStart key={plan.id} plan={plan} />}
     </>
   )
 }
