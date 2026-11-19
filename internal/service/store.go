@@ -80,14 +80,14 @@ func Open(ctx context.Context, url string) (*Store, error) {
 	err = store.tx(ctx, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `CREATE SCHEMA IF NOT EXISTS masscanr;
 CREATE TABLE IF NOT EXISTS masscanr.version (version integer PRIMARY KEY);
-INSERT INTO masscanr.version SELECT 7 WHERE NOT EXISTS (SELECT 1 FROM masscanr.version);`); err != nil {
+INSERT INTO masscanr.version SELECT 8 WHERE NOT EXISTS (SELECT 1 FROM masscanr.version);`); err != nil {
 			return err
 		}
 		var count, version int
 		if err := tx.QueryRow(ctx, `SELECT count(*), max(version) FROM masscanr.version`).Scan(&count, &version); err != nil {
 			return err
 		}
-		if count != 1 || (version != 4 && version != 5 && version != 6 && version != 7) {
+		if count != 1 || (version != 4 && version != 5 && version != 6 && version != 7 && version != 8) {
 			return fmt.Errorf("unsupported database schema: use a fresh development database")
 		}
 		if version == 4 {
@@ -117,6 +117,12 @@ UPDATE masscanr.version SET version=6;`); err != nil {
 		if version == 6 {
 			if _, err := tx.Exec(ctx, `ALTER TABLE masscanr.scan_plans ADD COLUMN IF NOT EXISTS archived_at timestamptz;
 UPDATE masscanr.version SET version=7;`); err != nil {
+				return err
+			}
+			version = 7
+		}
+		if version == 7 {
+			if _, err := tx.Exec(ctx, `UPDATE masscanr.version SET version=8`); err != nil {
 				return err
 			}
 		}

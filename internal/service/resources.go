@@ -319,7 +319,7 @@ func (s *Store) ListScanPlans(ctx context.Context, after string, limit int) ([]S
 }
 
 func (s *Store) listResourceIDs(ctx context.Context, table, after string, limit int) ([]string, error) {
-	if table != "targets" && table != "scan_plans" || limit < 1 || limit > 1000 {
+	if table != "targets" && table != "scan_plans" && table != "exclusions" || limit < 1 || limit > 1000 {
 		return nil, fmt.Errorf("invalid resource list")
 	}
 	rows, err := s.Pool.Query(ctx, `SELECT id FROM masscanr.`+table+` WHERE id>$1 ORDER BY id LIMIT $2`, after, limit)

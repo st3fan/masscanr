@@ -33,6 +33,18 @@ func TestNormalizeTargetEntries(t *testing.T) {
 	}
 }
 
+func TestNormalizeExclusionEntries(t *testing.T) {
+	entries, err := NormalizeExclusionEntries([]string{"192.0.2.1", "198.51.100.42/24"})
+	if err != nil || len(entries) != 2 || entries[0].Selector != "192.0.2.1/32" || entries[1].Selector != "198.51.100.0/24" {
+		t.Fatalf("entries = %+v, %v", entries, err)
+	}
+	for _, inputs := range [][]string{nil, {"AS3333"}, {"192.0.2.1", "192.0.2.1/32"}, {"2001:db8::1"}} {
+		if _, err := NormalizeExclusionEntries(inputs); err == nil {
+			t.Fatalf("accepted invalid exclusion %v", inputs)
+		}
+	}
+}
+
 func TestScanPlanSettingsRequireSupportedProviderAndValidOptions(t *testing.T) {
 	settings := DefaultScanPlanSettings()
 	if _, _, err := settings.Config([]string{"192.0.2.0/24"}); err != nil {
@@ -59,7 +71,7 @@ func TestFreshDomainSchemaConstraints(t *testing.T) {
 	store := testStore(t)
 	ctx := context.Background()
 	var version int
-	if err := store.Pool.QueryRow(ctx, `SELECT version FROM masscanr.version`).Scan(&version); err != nil || version != 7 {
+	if err := store.Pool.QueryRow(ctx, `SELECT version FROM masscanr.version`).Scan(&version); err != nil || version != 8 {
 		t.Fatalf("schema version %d: %v", version, err)
 	}
 	now := time.Now().UTC()
@@ -101,7 +113,7 @@ UPDATE masscanr.version SET version=4;`); err != nil {
 	}
 	t.Cleanup(reopened.Pool.Close)
 	var version int
-	if err := reopened.Pool.QueryRow(ctx, `SELECT version FROM masscanr.version`).Scan(&version); err != nil || version != 7 {
+	if err := reopened.Pool.QueryRow(ctx, `SELECT version FROM masscanr.version`).Scan(&version); err != nil || version != 8 {
 		t.Fatalf("migrated schema version %d: %v", version, err)
 	}
 	now := time.Now().UTC()
@@ -135,7 +147,7 @@ UPDATE masscanr.version SET version=6;`); err != nil {
 	}
 	t.Cleanup(reopened.Pool.Close)
 	var version int
-	if err := reopened.Pool.QueryRow(ctx, `SELECT version FROM masscanr.version`).Scan(&version); err != nil || version != 7 {
+	if err := reopened.Pool.QueryRow(ctx, `SELECT version FROM masscanr.version`).Scan(&version); err != nil || version != 8 {
 		t.Fatalf("migrated schema version %d: %v", version, err)
 	}
 	got, err := reopened.GetScanPlan(ctx, plan.ID)

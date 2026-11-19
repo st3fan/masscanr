@@ -30,6 +30,50 @@ type TargetEntry struct {
 	Input    string `json:"input"`
 }
 
+// Exclusion is a reusable, revisioned set of IPv4 selectors that narrows scope.
+type Exclusion struct {
+	ID         string           `json:"id"`
+	Name       string           `json:"name"`
+	Revision   int64            `json:"revision"`
+	CreatedAt  time.Time        `json:"created_at"`
+	UpdatedAt  time.Time        `json:"updated_at"`
+	ArchivedAt *time.Time       `json:"archived_at,omitempty"`
+	Entries    []ExclusionEntry `json:"entries"`
+}
+
+type ExclusionEntry struct {
+	ID       string `json:"id"`
+	Position int    `json:"position"`
+	Kind     string `json:"kind"` // ip or cidr
+	Selector string `json:"selector"`
+	Input    string `json:"input"`
+}
+
+func NormalizeExclusionEntries(inputs []string) ([]ExclusionEntry, error) {
+	if len(inputs) == 0 || len(inputs) > scan.MaxRequestedTargets {
+		return nil, fmt.Errorf("exclusion requires 1..%d entries", scan.MaxRequestedTargets)
+	}
+	seen := make(map[string]bool, len(inputs))
+	entries := make([]ExclusionEntry, 0, len(inputs))
+	for i, input := range inputs {
+		parsed, err := scan.ParseRequestedTargets([]string{input})
+		if err != nil || parsed[0].IsAS() {
+			return nil, fmt.Errorf("invalid IPv4 exclusion %q", input)
+		}
+		selector := parsed[0].Target
+		if seen[selector] {
+			return nil, fmt.Errorf("duplicate exclusion selector %q", selector)
+		}
+		seen[selector] = true
+		kind := "ip"
+		if strings.Contains(input, "/") {
+			kind = "cidr"
+		}
+		entries = append(entries, ExclusionEntry{ID: newID(), Position: i, Kind: kind, Selector: selector, Input: input})
+	}
+	return entries, nil
+}
+
 // NormalizeTargetEntries keeps original input while rejecting duplicate scope.
 func NormalizeTargetEntries(inputs []string) ([]TargetEntry, error) {
 	if len(inputs) == 0 || len(inputs) > scan.MaxRequestedTargets {
