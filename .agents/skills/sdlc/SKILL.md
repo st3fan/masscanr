@@ -1,6 +1,6 @@
 ---
 name: sdlc
-description: Stefan's Development Lifecycle for Codex. Use when a developer asks to bootstrap or refresh AGENTS.md, HUMANS.md, and TECHNOLOGY.md with project-specific stack choices, establish or revise a project's OBJECTIVE.md, or start and plan a stream of work as a GitHub Intent Issue. Explicit actions: $sdlc bootstrap, $sdlc objective, $sdlc intent.
+description: Stefan's Development Lifecycle for Codex. Use for project bootstrap or objective work and for new features, bug reports, refactors, maintenance tasks, or investigations, even when the developer does not name the skill. Route new work to $sdlc intent. Explicit actions are $sdlc bootstrap, $sdlc objective, and $sdlc intent.
 ---
 
 # Stefan's Development Lifecycle
@@ -15,7 +15,7 @@ Interpret the word after `$sdlc` as the **action argument** (not a separate inst
 - `objective`: clarify or revise enduring project direction and propose `OBJECTIVE.md`.
 - `intent`: create/refine a GitHub Intent Issue, with optional sub-issues and proposed implementation slices.
 
-If the action is unclear, ask which of the three the developer wants. Do not silently start implementing. Follow the action-specific reference files below.
+If the developer names an action, follow it. Otherwise, treat a natural-language request or report of new feature work, a bug, a refactor, maintenance, or an investigation as `intent`. Continue an existing Intent for follow-up work. Informational questions, status requests, merges, releases, and deployments do not start a new Intent. Honor an explicit request to bypass SDLC for a particular task. Ask which action the developer wants only when the action remains genuinely unclear after checking context. Invoking the skill does not authorize implementation; do not silently start coding. Follow the action-specific reference files below.
 
 ## Global rules
 
