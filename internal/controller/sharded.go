@@ -29,7 +29,7 @@ type ShardLease struct {
 type ShardStore interface {
 	InitShardRun(context.Context, string, scan.Manifest, int) (int, int64, error)
 	RecordShardWorker(context.Context, string, int64, int, string, string, string) error
-	UpdateShardWorker(context.Context, string, int64, string, string, string, string) error
+	UpdateShardWorker(context.Context, string, int64, string, string, string, string, string) error
 	BeginShardAttempt(context.Context, string, int64, int, string) (ShardLease, bool, error)
 	FinishShardAttempt(context.Context, string, int64, ShardLease, bool, uint64, string) error
 	UpdateShardProgress(context.Context, string, int64, ShardLease, *float64) error
@@ -186,7 +186,7 @@ func (c *Controller) RunSharded(ctx context.Context, cfg scan.Config, out io.Wri
 				}
 				_ = journal.Append(scanfile.Record{Type: "worker", Worker: &scanfile.Worker{Slot: e.Shard, InstanceID: e.ID, IP: e.IP, Phase: e.State, Cleanup: cleanup, Detail: redact.clean(e.Detail)}}, true)
 				if e.Shard > 0 {
-					_ = c.ShardStore.UpdateShardWorker(context.Background(), c.RunID, c.Epoch, e.ID, e.State, cleanup, redact.clean(e.Detail))
+					_ = c.ShardStore.UpdateShardWorker(context.Background(), c.RunID, c.Epoch, e.ID, e.IP, e.State, cleanup, redact.clean(e.Detail))
 				}
 			}
 			notify(e)
@@ -446,7 +446,7 @@ func (c *Controller) recordShardedWorker(journal *scanfile.Writer, slot int, w c
 		if err := c.ShardStore.RecordShardWorker(context.Background(), c.RunID, c.Epoch, slot, w.ID, w.IP, phase); err != nil {
 			return err
 		}
-	} else if err := c.ShardStore.UpdateShardWorker(context.Background(), c.RunID, c.Epoch, w.ID, phase, cleanup, detail); err != nil {
+	} else if err := c.ShardStore.UpdateShardWorker(context.Background(), c.RunID, c.Epoch, w.ID, w.IP, phase, cleanup, detail); err != nil {
 		return err
 	}
 	notify(Event{Slot: slot, ID: w.ID, IP: w.IP, State: phase, Detail: detail})

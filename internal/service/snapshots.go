@@ -162,8 +162,8 @@ func applyEvent(r *Run, e controller.Event, now time.Time) {
 	if e.ID != "" {
 		w.ID = e.ID
 	}
-	if e.IP != "" {
-		w.IP = e.IP
+	if ip := observedWorkerIP(e.IP); ip != "" {
+		w.IP = ip
 	}
 	switch e.State {
 	case "deleting", "shutdown", "cleanup failed":
@@ -244,11 +244,12 @@ func applyShardedEvent(r *Run, e controller.Event, now time.Time) {
 	}
 	if e.ID != "" && e.ID != w.ID {
 		w.ID = e.ID
+		w.IP = ""
 		w.InstanceCount++
 		w.Progress, w.ProgressAt, w.Found = nil, nil, nil
 	}
-	if e.IP != "" {
-		w.IP = e.IP
+	if ip := observedWorkerIP(e.IP); ip != "" {
+		w.IP = ip
 	}
 	if e.Shard > 0 && e.State != "completed" {
 		if w.CurrentShard != e.Shard || w.Attempt != e.Attempt {

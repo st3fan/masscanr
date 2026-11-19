@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"net/netip"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -36,6 +37,15 @@ type RunWorker struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// Providers can return an unspecified address before a worker is ready.
+func observedWorkerIP(ip string) string {
+	addr, err := netip.ParseAddr(ip)
+	if err != nil || !addr.Is4() || addr.IsUnspecified() {
+		return ""
+	}
+	return ip
+}
+
 func (s *Store) ListShardWorkers(ctx context.Context, runID, after string, limit int) ([]RunWorker, error) {
 	if limit < 1 || limit > 1000 {
 		return nil, fmt.Errorf("limit must be 1..1000")
@@ -51,6 +61,7 @@ func (s *Store) ListShardWorkers(ctx context.Context, runID, after string, limit
 		if err = rows.Scan(&w.ID, &w.RunID, &w.Slot, &w.IP, &w.State, &w.Cleanup, &w.Detail, &w.CreatedAt, &w.UpdatedAt); err != nil {
 			return nil, err
 		}
+		w.IP = observedWorkerIP(w.IP)
 		out = append(out, w)
 	}
 	return out, rows.Err()
@@ -190,6 +201,7 @@ func (s *Store) RecordShardWorker(ctx context.Context, runID string, epoch int64
 	if instanceID == "" || slot < 1 || state == "" {
 		return fmt.Errorf("invalid worker identity")
 	}
+	ip = observedWorkerIP(ip)
 	return s.tx(ctx, func(tx pgx.Tx) error {
 		var current string
 		if e := tx.QueryRow(ctx, `SELECT COALESCE(current_instance_id,'') FROM masscanr.run_worker_slots WHERE run_id=$1 AND slot=$2 FOR UPDATE`, runID, slot).Scan(&current); e != nil {
@@ -209,7 +221,7 @@ func (s *Store) RecordShardWorker(ctx context.Context, runID string, epoch int64
 		}
 		now := time.Now().UTC()
 		result, e := tx.Exec(ctx, `INSERT INTO masscanr.run_workers(run_id,instance_id,slot,ip,state,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$6)
-ON CONFLICT(run_id,instance_id) DO UPDATE SET ip=EXCLUDED.ip,state=EXCLUDED.state,updated_at=EXCLUDED.updated_at
+ON CONFLICT(run_id,instance_id) DO UPDATE SET ip=CASE WHEN EXCLUDED.ip='' THEN masscanr.run_workers.ip ELSE EXCLUDED.ip END,state=EXCLUDED.state,updated_at=EXCLUDED.updated_at
 WHERE masscanr.run_workers.slot=EXCLUDED.slot AND masscanr.run_workers.cleanup<>'complete'`, runID, instanceID, slot, ip, state, now)
 		if e != nil {
 			return e
@@ -222,12 +234,13 @@ WHERE masscanr.run_workers.slot=EXCLUDED.slot AND masscanr.run_workers.cleanup<>
 	})
 }
 
-func (s *Store) UpdateShardWorker(ctx context.Context, runID string, epoch int64, instanceID, state, cleanup, detail string) error {
+func (s *Store) UpdateShardWorker(ctx context.Context, runID string, epoch int64, instanceID, ip, state, cleanup, detail string) error {
+	ip = observedWorkerIP(ip)
 	return s.tx(ctx, func(tx pgx.Tx) error {
 		if e := checkShardEpoch(ctx, tx, runID, epoch); e != nil {
 			return e
 		}
-		result, e := tx.Exec(ctx, `UPDATE masscanr.run_workers SET state=$3,cleanup=$4,detail=$5,updated_at=$6 WHERE run_id=$1 AND instance_id=$2 AND cleanup<>'complete'`, runID, instanceID, state, cleanup, detail, time.Now().UTC())
+		result, e := tx.Exec(ctx, `UPDATE masscanr.run_workers SET ip=CASE WHEN $3='' THEN ip ELSE $3 END,state=$4,cleanup=$5,detail=$6,updated_at=$7 WHERE run_id=$1 AND instance_id=$2 AND cleanup<>'complete'`, runID, instanceID, ip, state, cleanup, detail, time.Now().UTC())
 		if e != nil {
 			return e
 		}

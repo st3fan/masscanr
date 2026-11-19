@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor, cleanup, fireEvent } from '@testing-library/react'
+import { render, screen, waitFor, cleanup, fireEvent, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { TargetsPage } from './targets'
@@ -78,7 +78,11 @@ const run = {
       ScanOutcome: 'complete',
       CleanupOutcome: 'complete',
     },
-    preflight: { shard_count: 1, effective_workers: 1, config: { Workers: 1 } },
+    preflight: {
+      shard_count: 1,
+      effective_workers: 1,
+      config: { Workers: 1, Provider: 'vultr', Region: 'atl', InstanceType: 'vc2-1c-1gb' },
+    },
     worker_snapshots: {},
   },
 }
@@ -146,4 +150,157 @@ it('blocks exports for incomplete runs and explains the coverage limit', async (
   expect(screen.getByText(/do not establish complete coverage/i)).toBeTruthy()
   fireEvent.click(csv)
   expect(fetch).not.toHaveBeenCalledWith(expect.stringContaining('/exports/'), expect.anything())
+})
+
+it('shows DigitalOcean worker details and links current and replacement instances', async () => {
+  const digitalOceanRun = {
+    ...run,
+    attributes: {
+      ...run.attributes,
+      active: true,
+      preflight: {
+        ...run.attributes.preflight,
+        config: {
+          ...run.attributes.preflight.config,
+          Provider: 'digitalocean',
+          Region: 'tor1',
+          InstanceType: 's-1vcpu-1gb',
+        },
+      },
+      worker_snapshots: {
+        '1': { slot: 1, id: '123', ip: '192.0.2.10', state: 'scanning', assigned_shards: 2 },
+      },
+    },
+  }
+  const history = {
+    data: [
+      {
+        type: 'run-workers',
+        id: '122',
+        attributes: {
+          slot: 1,
+          ip: '192.0.2.9',
+          state: 'failed',
+          cleanup: 'complete',
+          created_at: '2026-01-01T00:00:00Z',
+        },
+      },
+      {
+        type: 'run-workers',
+        id: '123',
+        attributes: {
+          slot: 1,
+          ip: '0.0.0.0',
+          state: 'scanning',
+          cleanup: 'pending',
+          created_at: '2026-01-01T00:05:00Z',
+        },
+      },
+    ],
+  }
+  vi.stubGlobal(
+    'fetch',
+    vi
+      .fn()
+      .mockImplementation((path: string) =>
+        Promise.resolve(respond(path.includes('/workers') ? history : { data: digitalOceanRun })),
+      ),
+  )
+  renderRunDetail()
+  const currentLinks = await screen.findAllByRole('link', {
+    name: 'Open DigitalOcean instance 123',
+  })
+  expect(currentLinks).toHaveLength(2)
+  for (const link of currentLinks) {
+    expect(link.getAttribute('href')).toBe('https://cloud.digitalocean.com/droplets/123/')
+    expect(link.getAttribute('target')).toBe('_blank')
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer')
+  }
+  const previous = screen.getByRole('link', { name: 'Open DigitalOcean instance 122' })
+  expect(previous.getAttribute('href')).toBe('https://cloud.digitalocean.com/droplets/122/')
+  const table = screen.getByRole('table')
+  expect(within(table).getAllByText('DigitalOcean')).toHaveLength(2)
+  expect(within(table).getAllByText('tor1')).toHaveLength(2)
+  expect(within(table).getAllByText('s-1vcpu-1gb')).toHaveLength(2)
+  expect(within(table).getByText('192.0.2.9')).toBeTruthy()
+  expect(within(table).getByText('192.0.2.10')).toBeTruthy()
+  expect(within(table).queryByText('0.0.0.0')).toBeNull()
+})
+
+it('shows Vultr and pending worker details without a generic provider link', async () => {
+  const vultrRun = {
+    ...run,
+    attributes: {
+      ...run.attributes,
+      active: true,
+      worker_snapshots: {
+        '1': { slot: 1, id: 'worker-uuid', ip: '192.0.2.10', state: 'scanning' },
+        '2': { slot: 2, id: '', ip: '0.0.0.0', state: 'provisioning' },
+      },
+    },
+  }
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockImplementation((path: string) =>
+      Promise.resolve(
+        respond(
+          path.includes('/workers')
+            ? {
+                data: [
+                  {
+                    type: 'run-workers',
+                    id: 'worker-uuid',
+                    attributes: {
+                      slot: 1,
+                      ip: '192.0.2.10',
+                      state: 'scanning',
+                      cleanup: 'pending',
+                      created_at: '2026-01-01T00:00:00Z',
+                    },
+                  },
+                ],
+              }
+            : { data: vultrRun },
+        ),
+      ),
+    ),
+  )
+  renderRunDetail()
+  expect(await screen.findByText('Worker 2')).toBeTruthy()
+  expect(screen.getAllByText('worker-uuid')).toHaveLength(2)
+  expect(screen.getAllByText('Pending').length).toBeGreaterThan(0)
+  expect(screen.queryByText('0.0.0.0')).toBeNull()
+  expect(screen.getAllByText('Vultr').length).toBeGreaterThan(0)
+  expect(screen.queryByRole('link', { name: /open vultr instance/i })).toBeNull()
+  expect(
+    screen.queryAllByRole('link').some((link) => link.getAttribute('href')?.includes('vultr.com')),
+  ).toBe(false)
+})
+
+it.each([
+  ['digitalocean', '123/other'],
+  ['other-provider', '123'],
+])('does not link an unsupported worker identity (%s, %s)', async (provider, id) => {
+  const unsafeRun = {
+    ...run,
+    attributes: {
+      ...run.attributes,
+      preflight: {
+        ...run.attributes.preflight,
+        config: { ...run.attributes.preflight.config, Provider: provider },
+      },
+      worker_snapshots: { '1': { slot: 1, id, ip: '192.0.2.10', state: 'scanning' } },
+    },
+  }
+  vi.stubGlobal(
+    'fetch',
+    vi
+      .fn()
+      .mockImplementation((path: string) =>
+        Promise.resolve(respond(path.includes('/workers') ? { data: [] } : { data: unsafeRun })),
+      ),
+  )
+  renderRunDetail()
+  expect(await screen.findByText(id)).toBeTruthy()
+  expect(screen.queryByRole('link', { name: /open .* instance/i })).toBeNull()
 })
