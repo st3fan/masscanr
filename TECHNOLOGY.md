@@ -18,11 +18,13 @@
 - Run the service locally or on a user-managed Docker host with Compose; native process hosting with a PostgreSQL database and artifact directory is also supported.
 - Compose binds the API to loopback by default and persists PostgreSQL data and scan artifacts in named volumes. The documented API remains on loopback or a private listener and has no built-in API authentication or TLS; exposure beyond loopback requires an existing private-network or reverse-proxy arrangement. Use one service instance per database.
 - Local service, Compose, CLI, and Vite proxy defaults use port 18080. Port 8080 is left for the developer's other applications; an explicit listen address or `MASSCANR_PORT` can override the default.
+- When an Intent's work is ready for user testing, start a separate Docker Compose deployment on localhost after obtaining the required approval to run the app. Set `MASSCANR_PORT` to `10000 +` the Intent number (for example, Intent 187 uses port 10187) and use a distinct Compose project name for each Intent so its database and artifact volumes are isolated. Keep deployments for different Intents available concurrently.
 - The terminal viewer is an HTTP client and needs no database, Vultr, SSH, or artifact access.
 
 ## Development and validation
 
 - Use Go modules, `gofmt`, `go test ./...`, race tests, `go vet`, and `go build`. CI runs these checks plus offline Alpine masscan and ZMap compatibility checks.
+- Prefer to start each Intent in a new Git worktree. Copy the main repository's ignored `.env` into the worktree when it needs credentials for the services in use; keep the copy ignored and out of commits and logs.
 - Default tests use fixtures and local services without cloud credentials or scan traffic. PostgreSQL tests create and clean up unique databases they own. Live app runs, scans, and temporary cloud-worker checks require separate authorization and must respect the repository's authorized network and cleanup rules.
 - Keep credentials in the environment or ignored `.env`, never in commits, logs, worker configuration, or example values.
 
