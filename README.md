@@ -68,6 +68,14 @@ project's volumes; `destroy.sh` removes them. Without a number, all three script
 use the default local project and port described above. Use the same number for
 every command that manages an Intent preview.
 
+Use `./scripts/start.sh --detach 187` to build the preview in the background and
+wait for both services to become healthy. The command prints the URL when the
+stack is ready. `./scripts/status.sh` lists running Intent previews and their
+URLs; `./scripts/status.sh 187` checks one Intent. To refresh a preview after
+code changes during PR review, run the same detached start command from its
+worktree after active scans finish. Compose rebuilds the image and updates the
+existing project while retaining its database and artifact volumes.
+
 To stop the local project from another terminal while keeping PostgreSQL and
 artifact volumes, run `./scripts/stop.sh`. Ctrl-C also stops the foreground
 session. To intentionally remove this project's containers, volumes, orphan

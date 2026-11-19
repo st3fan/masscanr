@@ -9,6 +9,13 @@ trap 'rm -rf "$test_dir"' EXIT HUP INT TERM
 
 cat > "$test_dir/docker" <<'MOCK'
 #!/bin/sh
+if [ "$1" = ps ]; then
+    printf '%s\n' "${MOCK_DOCKER_PS:-}"
+    exit 0
+fi
+if [ "${MOCK_DOCKER_FAIL_UP:-}" = 1 ]; then
+    exit 1
+fi
 printf 'args=%s\n' "$*"
 printf 'port=%s\n' "$MASSCANR_PORT"
 printf 'bind=%s\n' "$MASSCANR_BIND_ADDRESS"
@@ -45,6 +52,17 @@ assert_contains "$intent_start" 'port=10187'
 assert_contains "$intent_start" 'bind=127.0.0.1'
 assert_contains "$intent_start" 'origin=http://127.0.0.1:10187'
 
+detached_start=$(run ./scripts/start.sh --detach 187)
+assert_contains "$detached_start" 'args=compose -p masscanr-intent-187 up --build --detach --wait --wait-timeout 180'
+assert_contains "$detached_start" 'Ready at http://127.0.0.1:10187/'
+if failed_start=$(env -i PATH="$test_dir:$PATH" MASSCANR_POSTGRES_PASSWORD=test-password MOCK_DOCKER_FAIL_UP=1 ./scripts/start.sh --detach 187 2>&1); then
+    printf 'Failed detached start was reported as successful.\n' >&2
+    exit 1
+fi
+case "$failed_start" in
+    *'Ready at'*) printf 'Failed detached start printed a ready URL.\n' >&2; exit 1 ;;
+esac
+
 default_stop=$(run ./scripts/stop.sh)
 assert_contains "$default_stop" 'args=compose -p masscanr-local down'
 assert_contains "$default_stop" 'port=18080'
@@ -68,5 +86,22 @@ if run ./scripts/destroy.sh 0187 >/dev/null 2>&1; then
     printf 'Intent with leading zeroes was accepted.\n' >&2
     exit 1
 fi
+
+running_previews='masscanr-intent-187|Up 2 minutes (healthy)
+masscanr-intent-188|Up 5 seconds (starting)
+unrelated|Up 1 hour'
+all_status=$(env -i PATH="$test_dir:$PATH" MOCK_DOCKER_PS="$running_previews" ./scripts/status.sh)
+assert_contains "$all_status" 'Intent 187: http://127.0.0.1:10187/ - Up 2 minutes (healthy)'
+assert_contains "$all_status" 'Intent 188: http://127.0.0.1:10188/ - Up 5 seconds (starting)'
+case "$all_status" in
+    *unrelated*) printf 'Unrelated project appeared in Intent status.\n' >&2; exit 1 ;;
+esac
+one_status=$(env -i PATH="$test_dir:$PATH" MOCK_DOCKER_PS="$running_previews" ./scripts/status.sh 187)
+assert_contains "$one_status" 'Intent 187: http://127.0.0.1:10187/'
+case "$one_status" in
+    *'Intent 188:'*) printf 'Unrequested Intent appeared in status.\n' >&2; exit 1 ;;
+esac
+empty_status=$(run ./scripts/status.sh)
+assert_contains "$empty_status" 'No Intent previews are running.'
 
 printf 'Compose script target selection passed.\n'
