@@ -450,11 +450,13 @@ export interface components {
             config: components["schemas"]["scanConfig"];
             /** Format: int64 */
             effective_workers: number;
+            excluded_scope?: string[] | null;
             /** Format: date-time */
             expires_at: string;
             id: string;
             /** Format: int64 */
             max_probes_per_shard: number;
+            requested_scope?: string[] | null;
             requires_confirmation: boolean;
             scan_plan_id?: string;
             /** Format: int64 */
@@ -497,6 +499,7 @@ export interface components {
         };
         scanConfig: {
             Backend: string;
+            Exclusions: components["schemas"]["scanExclusionSnapshot"][] | null;
             Image: string;
             InstanceType: string;
             Ports: number[] | null;
@@ -509,6 +512,16 @@ export interface components {
             Targets: string[] | null;
             /** Format: int64 */
             Workers: number;
+        };
+        scanExclusionSelector: {
+            input: string;
+            prefix: string;
+        };
+        scanExclusionSnapshot: {
+            entries: components["schemas"]["scanExclusionSelector"][] | null;
+            id: string;
+            /** Format: int64 */
+            revision: number;
         };
         scanIdentity: {
             Build: string;
@@ -542,6 +555,7 @@ export interface components {
         };
         scanfileConfig: {
             backend: string;
+            exclusions?: components["schemas"]["scanExclusionSnapshot"][] | null;
             exports: string[] | null;
             image?: string;
             instance_type: string;
@@ -2597,6 +2611,7 @@ export interface operations {
                      *             "preflight": {
                      *               "config": {
                      *                 "Backend": "",
+                     *                 "Exclusions": null,
                      *                 "Image": "",
                      *                 "InstanceType": "",
                      *                 "Ports": null,
@@ -2972,6 +2987,7 @@ export interface operations {
                      *           "preflight": {
                      *             "config": {
                      *               "Backend": "",
+                     *               "Exclusions": null,
                      *               "Image": "",
                      *               "InstanceType": "",
                      *               "Ports": null,
@@ -3957,6 +3973,7 @@ export interface operations {
                      *           "preflight": {
                      *             "config": {
                      *               "Backend": "",
+                     *               "Exclusions": null,
                      *               "Image": "",
                      *               "InstanceType": "",
                      *               "Ports": null,
@@ -4980,6 +4997,15 @@ export interface operations {
                             target_name?: string;
                         };
                         id?: string;
+                        relationships?: {
+                            exclusions?: {
+                                data: {
+                                    id: string;
+                                    /** @constant */
+                                    type: "exclusions";
+                                }[];
+                            };
+                        };
                         /** @constant */
                         type: "scan-plans";
                     };
@@ -5665,6 +5691,15 @@ export interface operations {
                             target_name?: string;
                         };
                         id: string;
+                        relationships?: {
+                            exclusions?: {
+                                data: {
+                                    id: string;
+                                    /** @constant */
+                                    type: "exclusions";
+                                }[];
+                            };
+                        };
                         /** @constant */
                         type: "scan-plans";
                     };
@@ -6004,6 +6039,7 @@ export interface operations {
                      *         "attributes": {
                      *           "config": {
                      *             "Backend": "",
+                     *             "Exclusions": null,
                      *             "Image": "",
                      *             "InstanceType": "",
                      *             "Ports": null,
@@ -6046,10 +6082,12 @@ export interface operations {
                                 config: components["schemas"]["scanConfig"];
                                 /** Format: int64 */
                                 effective_workers: number;
+                                excluded_scope?: string[] | null;
                                 /** Format: date-time */
                                 expires_at: string;
                                 /** Format: int64 */
                                 max_probes_per_shard: number;
+                                requested_scope?: string[] | null;
                                 requires_confirmation: boolean;
                                 scan_plan_id?: string;
                                 /** Format: int64 */
@@ -6355,6 +6393,7 @@ export interface operations {
                      *             "preflight": {
                      *               "config": {
                      *                 "Backend": "",
+                     *                 "Exclusions": null,
                      *                 "Image": "",
                      *                 "InstanceType": "",
                      *                 "Ports": null,
@@ -6754,6 +6793,7 @@ export interface operations {
                      *           "preflight": {
                      *             "config": {
                      *               "Backend": "",
+                     *               "Exclusions": null,
                      *               "Image": "",
                      *               "InstanceType": "",
                      *               "Ports": null,

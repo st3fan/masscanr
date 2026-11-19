@@ -67,7 +67,7 @@ func TestVersion7ExclusionUpgradePreservesPlans(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.Pool.Exec(ctx, `DROP TABLE masscanr.exclusion_entries; DROP TABLE masscanr.exclusions; UPDATE masscanr.version SET version=7`); err != nil {
+	if _, err := store.Pool.Exec(ctx, `DROP TABLE masscanr.scan_plan_exclusions; DROP TABLE masscanr.exclusion_entries; DROP TABLE masscanr.exclusions; UPDATE masscanr.version SET version=7`); err != nil {
 		t.Fatal(err)
 	}
 	reopened, err := Open(ctx, store.Pool.Config().ConnString())
@@ -76,7 +76,7 @@ func TestVersion7ExclusionUpgradePreservesPlans(t *testing.T) {
 	}
 	t.Cleanup(reopened.Pool.Close)
 	var version int
-	if err := reopened.Pool.QueryRow(ctx, `SELECT version FROM masscanr.version`).Scan(&version); err != nil || version != 8 {
+	if err := reopened.Pool.QueryRow(ctx, `SELECT version FROM masscanr.version`).Scan(&version); err != nil || version != 9 {
 		t.Fatalf("version = %d, %v", version, err)
 	}
 	if got, err := reopened.GetScanPlan(ctx, plan.ID); err != nil || got.TargetID != target.ID {

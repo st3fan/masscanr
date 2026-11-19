@@ -32,6 +32,7 @@ type Config struct {
 	SSHAuth          string
 	Targets          []netip.Prefix
 	RequestedTargets []Target
+	Exclusions       []ExclusionSnapshot
 	Ports            []uint16
 	Workers          int
 	Rate             uint64
@@ -102,8 +103,11 @@ func (c Config) Validate() error {
 			return fmt.Errorf("targets must be normalized IPv4 CIDRs")
 		}
 	}
+	if len(c.Exclusions) > 0 && len(c.RequestedTargets) == 0 {
+		return fmt.Errorf("exclusions require frozen requested Target provenance")
+	}
 	if len(c.RequestedTargets) > 0 {
-		if err := ValidateTargets(c.RequestedTargets, c.Targets); err != nil {
+		if err := ValidateEffectiveScope(c.RequestedTargets, c.Exclusions, c.Targets); err != nil {
 			return err
 		}
 	}

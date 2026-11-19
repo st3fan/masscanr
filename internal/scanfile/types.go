@@ -21,26 +21,27 @@ const (
 )
 
 type Config struct {
-	RequestedTargets []scan.Target     `json:"requested_targets,omitempty"`
-	Targets          []netip.Prefix    `json:"targets"`
-	Ports            string            `json:"ports"`
-	Backend          string            `json:"backend"`
-	Seed             string            `json:"seed"`
-	Shards           int               `json:"shards,omitempty"`
-	Workers          int               `json:"workers,omitempty"`
-	RequestedWorkers int               `json:"requested_workers,omitempty"`
-	ShardCount       uint64            `json:"shard_count,omitempty"`
-	PartitionVersion int               `json:"partition_version,omitempty"`
-	MaxProbesPerUnit uint64            `json:"max_probes_per_shard,omitempty"`
-	Rate             uint64            `json:"rate_per_worker"`
-	Provider         string            `json:"provider"`
-	Image            string            `json:"image,omitempty"`
-	SSHAuth          string            `json:"ssh_auth,omitempty"`
-	Region           string            `json:"region"`
-	InstanceType     string            `json:"instance_type"`
-	Timeouts         map[string]string `json:"timeouts"`
-	Output           string            `json:"output"`
-	Exports          [2]string         `json:"exports"`
+	RequestedTargets []scan.Target            `json:"requested_targets,omitempty"`
+	Exclusions       []scan.ExclusionSnapshot `json:"exclusions,omitempty"`
+	Targets          []netip.Prefix           `json:"targets"`
+	Ports            string                   `json:"ports"`
+	Backend          string                   `json:"backend"`
+	Seed             string                   `json:"seed"`
+	Shards           int                      `json:"shards,omitempty"`
+	Workers          int                      `json:"workers,omitempty"`
+	RequestedWorkers int                      `json:"requested_workers,omitempty"`
+	ShardCount       uint64                   `json:"shard_count,omitempty"`
+	PartitionVersion int                      `json:"partition_version,omitempty"`
+	MaxProbesPerUnit uint64                   `json:"max_probes_per_shard,omitempty"`
+	Rate             uint64                   `json:"rate_per_worker"`
+	Provider         string                   `json:"provider"`
+	Image            string                   `json:"image,omitempty"`
+	SSHAuth          string                   `json:"ssh_auth,omitempty"`
+	Region           string                   `json:"region"`
+	InstanceType     string                   `json:"instance_type"`
+	Timeouts         map[string]string        `json:"timeouts"`
+	Output           string                   `json:"output"`
+	Exports          [2]string                `json:"exports"`
 }
 
 func (c Config) Validate() error {

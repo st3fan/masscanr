@@ -123,39 +123,48 @@ func decode(c fiber.Ctx, v any) error {
 }
 
 func decodeForID(c fiber.Ctx, v any, expectedID string) error {
+	_, err := decodeForIDRelationships(c, v, expectedID, false)
+	return err
+}
+
+func decodeForIDRelationships(c fiber.Ctx, v any, expectedID string, allowRelationships bool) (json.RawMessage, error) {
 	if len(c.Body()) > 1<<20 {
-		return fmt.Errorf("invalid JSON body")
+		return nil, fmt.Errorf("invalid JSON body")
 	}
 	var envelope struct {
 		Data struct {
-			Type       string          `json:"type"`
-			ID         string          `json:"id"`
-			Attributes json.RawMessage `json:"attributes"`
+			Type          string          `json:"type"`
+			ID            string          `json:"id"`
+			Attributes    json.RawMessage `json:"attributes"`
+			Relationships json.RawMessage `json:"relationships"`
 		} `json:"data"`
 	}
 	d := json.NewDecoder(bytes.NewReader(c.Body()))
 	d.DisallowUnknownFields()
 	if e := d.Decode(&envelope); e != nil {
-		return fmt.Errorf("invalid JSON body")
+		return nil, fmt.Errorf("invalid JSON body")
 	}
 	if e := d.Decode(new(any)); e != io.EOF {
-		return fmt.Errorf("expected one JSON object")
+		return nil, fmt.Errorf("expected one JSON object")
 	}
 	if envelope.Data.Type != requestResourceType(c) || len(envelope.Data.Attributes) == 0 || string(envelope.Data.Attributes) == "null" {
-		return fmt.Errorf("invalid JSON:API resource")
+		return nil, fmt.Errorf("invalid JSON:API resource")
 	}
 	if c.Method() == fiber.MethodPatch && envelope.Data.ID == "" {
-		return fmt.Errorf("resource ID is required")
+		return nil, fmt.Errorf("resource ID is required")
 	}
 	if expectedID != "" && envelope.Data.ID != "" && envelope.Data.ID != expectedID {
-		return fmt.Errorf("resource ID does not match URL")
+		return nil, fmt.Errorf("resource ID does not match URL")
+	}
+	if !allowRelationships && len(envelope.Data.Relationships) != 0 {
+		return nil, fmt.Errorf("relationships are not supported for this resource")
 	}
 	d = json.NewDecoder(bytes.NewReader(envelope.Data.Attributes))
 	d.DisallowUnknownFields()
 	if e := d.Decode(v); e != nil {
-		return fmt.Errorf("invalid JSON:API attributes")
+		return nil, fmt.Errorf("invalid JSON:API attributes")
 	}
-	return nil
+	return envelope.Data.Relationships, nil
 }
 
 func respond(c fiber.Ctx, status int, v any) error {

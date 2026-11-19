@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -28,6 +29,10 @@ func (a *API) preflightScanPlan(c fiber.Ctx) error {
 	if target.ArchivedAt != nil {
 		return problem(c, ErrConflict)
 	}
+	exclusions, err := a.Store.FreezeExclusions(c.Context(), plan.ExclusionIDs)
+	if err != nil {
+		return problem(c, err)
+	}
 	cfg, timeouts, err := plan.Settings.Config(target.Inputs())
 	if err != nil {
 		return bad(c, err)
@@ -40,8 +45,27 @@ func (a *API) preflightScanPlan(c fiber.Ctx) error {
 	if err != nil {
 		return respond(c, 422, map[string]string{"error": "target resolution failed"})
 	}
-	cfg.Targets = scan.TargetUnion(cfg.RequestedTargets)
+	requestedScope := scan.TargetUnion(cfg.RequestedTargets)
+	exclusionUnion, err := scan.ExclusionUnion(exclusions)
+	if err != nil {
+		return bad(c, err)
+	}
+	cfg.Targets, err = scan.SubtractPrefixes(requestedScope, exclusionUnion)
+	if err != nil {
+		return bad(c, err)
+	}
+	if len(cfg.Targets) == 0 {
+		return bad(c, fmt.Errorf("effective target scope is empty after exclusions"))
+	}
+	excludedScope, err := scan.SubtractPrefixes(requestedScope, cfg.Targets)
+	if err != nil {
+		return bad(c, err)
+	}
+	cfg.Exclusions = exclusions
 	if err = cfg.Validate(); err != nil {
+		return bad(c, err)
+	}
+	if err = validateFrozenConfigSize(cfg); err != nil {
 		return bad(c, err)
 	}
 	backend, err := registry.Resolve(cfg.Backend)
@@ -63,6 +87,7 @@ func (a *API) preflightScanPlan(c fiber.Ctx) error {
 		ID:       newID(),
 		TargetID: target.ID, TargetRevision: target.Revision,
 		ScanPlanID: plan.ID, ScanPlanRevision: plan.Revision,
+		RequestedScope: requestedScope, ExcludedScope: excludedScope,
 		ExpiresAt: time.Now().UTC().Add(10 * time.Minute),
 		Config:    cfg, Timeouts: timeouts, Workload: workload,
 		ShardCount: manifest.Count, EffectiveWorkers: min(cfg.Workers, int(manifest.Count)), MaxProbesPerShard: scan.MaxProbesPerShard,
@@ -77,8 +102,11 @@ func (a *API) preflightScanPlan(c fiber.Ctx) error {
 		if e != nil {
 			return e
 		}
-		if currentTarget.Revision != target.Revision || currentTarget.ArchivedAt != nil || currentPlan.Revision != plan.Revision || currentPlan.ArchivedAt != nil || currentPlan.TargetID != target.ID {
+		if currentTarget.Revision != target.Revision || currentTarget.ArchivedAt != nil || currentPlan.Revision != plan.Revision || currentPlan.ArchivedAt != nil || currentPlan.TargetID != target.ID || !snapshotsMatchPlan(currentPlan.ExclusionIDs, exclusions) {
 			return ErrConflict
+		}
+		if e = validateFrozenExclusions(c.Context(), tx, exclusions); e != nil {
+			return e
 		}
 		data, e := json.Marshal(preflight)
 		if e != nil {
@@ -123,7 +151,13 @@ func (s *Store) ReserveScanPlan(ctx context.Context, scanPlanID, preflightID, ke
 		if e != nil {
 			return e
 		}
-		if plan.ArchivedAt != nil || target.ArchivedAt != nil || preflight.ScanPlanID != scanPlanID || preflight.TargetID != target.ID || preflight.TargetRevision != target.Revision || preflight.ScanPlanRevision != plan.Revision || !time.Now().Before(preflight.ExpiresAt) || preflight.RequiresConfirmation && !confirm {
+		if plan.ArchivedAt != nil || target.ArchivedAt != nil || preflight.ScanPlanID != scanPlanID || preflight.TargetID != target.ID || preflight.TargetRevision != target.Revision || preflight.ScanPlanRevision != plan.Revision || !snapshotsMatchPlan(plan.ExclusionIDs, preflight.Config.Exclusions) || !time.Now().Before(preflight.ExpiresAt) || preflight.RequiresConfirmation && !confirm {
+			return ErrConflict
+		}
+		if e = validateFrozenExclusions(ctx, tx, preflight.Config.Exclusions); e != nil {
+			return e
+		}
+		if e = validatePreflightScope(preflight); e != nil {
 			return ErrConflict
 		}
 		var active bool

@@ -61,6 +61,14 @@ CREATE TABLE IF NOT EXISTS masscanr.scan_plans (
     archived_at timestamptz
 );
 CREATE INDEX IF NOT EXISTS scan_plans_target ON masscanr.scan_plans(target_id, id);
+CREATE TABLE IF NOT EXISTS masscanr.scan_plan_exclusions (
+    scan_plan_id text NOT NULL REFERENCES masscanr.scan_plans(id),
+    exclusion_id text NOT NULL REFERENCES masscanr.exclusions(id),
+    position integer NOT NULL CHECK (position >= 0),
+    PRIMARY KEY (scan_plan_id, exclusion_id),
+    UNIQUE (scan_plan_id, position)
+);
+CREATE INDEX IF NOT EXISTS scan_plan_exclusions_exclusion ON masscanr.scan_plan_exclusions(exclusion_id, scan_plan_id);
 CREATE TABLE IF NOT EXISTS masscanr.scan_preflights (
     id text PRIMARY KEY,
     target_id text NOT NULL REFERENCES masscanr.targets(id),

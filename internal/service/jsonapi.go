@@ -105,6 +105,9 @@ func resourceType(c fiber.Ctx, v any) string {
 	if strings.HasPrefix(c.Path(), "/v1/targets") {
 		return "targets"
 	}
+	if strings.HasPrefix(c.Path(), "/v1/scan-plans/") && strings.HasSuffix(c.Path(), "/runs") {
+		return "runs"
+	}
 	if strings.HasPrefix(c.Path(), "/v1/exclusions") {
 		return "exclusions"
 	}
@@ -165,6 +168,16 @@ func makeResource(typ string, value any) (jsonAPIResource, error) {
 			resource.Relationships = map[string]any{}
 		}
 		resource.Relationships["target"] = map[string]any{"data": map[string]string{"type": "targets", "id": targetID}}
+	}
+	if plan, ok := value.(ScanPlan); ok && typ == "scan-plans" {
+		ids := make([]map[string]string, 0, len(plan.ExclusionIDs))
+		for _, id := range plan.ExclusionIDs {
+			ids = append(ids, map[string]string{"type": "exclusions", "id": id})
+		}
+		if resource.Relationships == nil {
+			resource.Relationships = map[string]any{}
+		}
+		resource.Relationships["exclusions"] = map[string]any{"data": ids}
 	}
 	if typ == "runs" {
 		var plan map[string]json.RawMessage

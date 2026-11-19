@@ -52,6 +52,11 @@ func requestResourceSchema(attributes *huma.Schema, typ string, requireID bool) 
 	return resource
 }
 
+func exclusionRelationshipSchema() *huma.Schema {
+	identifier := &huma.Schema{Type: "object", Required: []string{"type", "id"}, Properties: map[string]*huma.Schema{"type": {Type: "string", Const: "exclusions"}, "id": {Type: "string"}}}
+	return &huma.Schema{Type: "object", Properties: map[string]*huma.Schema{"exclusions": {Type: "object", Required: []string{"data"}, Properties: map[string]*huma.Schema{"data": {Type: "array", Items: identifier}}}}}
+}
+
 func (a *API) schemaFor(v any) *huma.Schema {
 	return huma.SchemaFromType(a.Huma.OpenAPI().Components.Schemas, reflect.TypeOf(v))
 }
@@ -154,7 +159,11 @@ func (a *API) register(method, path, operationID, summary string, model any, han
 			example["data"].(map[string]any)["id"] = "scan-plan-id"
 			example["data"].(map[string]any)["attributes"] = map[string]any{"revision": 1, "settings": map[string]any{"ports": "443"}}
 		}
-		op.RequestBody = &huma.RequestBody{Required: true, Content: map[string]*huma.MediaType{jsonAPIMediaType: {Schema: &huma.Schema{Type: "object", Required: []string{"data"}, Properties: map[string]*huma.Schema{"data": requestResourceSchema(attrs, requestTypeForOperation(operationID), operationID == "updateTarget" || operationID == "updateTargetByName" || operationID == "updateExclusion" || operationID == "updateScanPlan")}}, Example: example}}}
+		requestResource := requestResourceSchema(attrs, requestTypeForOperation(operationID), operationID == "updateTarget" || operationID == "updateTargetByName" || operationID == "updateExclusion" || operationID == "updateScanPlan")
+		if operationID == "createScanPlan" || operationID == "updateScanPlan" {
+			requestResource.Properties["relationships"] = exclusionRelationshipSchema()
+		}
+		op.RequestBody = &huma.RequestBody{Required: true, Content: map[string]*huma.MediaType{jsonAPIMediaType: {Schema: &huma.Schema{Type: "object", Required: []string{"data"}, Properties: map[string]*huma.Schema{"data": requestResource}}, Example: example}}}
 	}
 	if operationID == "health" {
 		op.Responses["200"] = &huma.Response{Description: "Ready", Content: map[string]*huma.MediaType{"application/json": {Schema: &huma.Schema{Type: "object", Required: []string{"status"}, Properties: map[string]*huma.Schema{"status": {Type: "string", Const: "ready"}}}, Example: map[string]string{"status": "ready"}}}}

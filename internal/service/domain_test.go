@@ -71,7 +71,7 @@ func TestFreshDomainSchemaConstraints(t *testing.T) {
 	store := testStore(t)
 	ctx := context.Background()
 	var version int
-	if err := store.Pool.QueryRow(ctx, `SELECT version FROM masscanr.version`).Scan(&version); err != nil || version != 8 {
+	if err := store.Pool.QueryRow(ctx, `SELECT version FROM masscanr.version`).Scan(&version); err != nil || version != 9 {
 		t.Fatalf("schema version %d: %v", version, err)
 	}
 	now := time.Now().UTC()
@@ -113,7 +113,7 @@ UPDATE masscanr.version SET version=4;`); err != nil {
 	}
 	t.Cleanup(reopened.Pool.Close)
 	var version int
-	if err := reopened.Pool.QueryRow(ctx, `SELECT version FROM masscanr.version`).Scan(&version); err != nil || version != 8 {
+	if err := reopened.Pool.QueryRow(ctx, `SELECT version FROM masscanr.version`).Scan(&version); err != nil || version != 9 {
 		t.Fatalf("migrated schema version %d: %v", version, err)
 	}
 	now := time.Now().UTC()
@@ -147,7 +147,7 @@ UPDATE masscanr.version SET version=6;`); err != nil {
 	}
 	t.Cleanup(reopened.Pool.Close)
 	var version int
-	if err := reopened.Pool.QueryRow(ctx, `SELECT version FROM masscanr.version`).Scan(&version); err != nil || version != 8 {
+	if err := reopened.Pool.QueryRow(ctx, `SELECT version FROM masscanr.version`).Scan(&version); err != nil || version != 9 {
 		t.Fatalf("migrated schema version %d: %v", version, err)
 	}
 	got, err := reopened.GetScanPlan(ctx, plan.ID)

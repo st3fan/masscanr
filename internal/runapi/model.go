@@ -4,6 +4,7 @@ package runapi
 import (
 	"github.com/st3fan/masscanr/internal/controller"
 	"github.com/st3fan/masscanr/internal/scan"
+	"net/netip"
 	"time"
 )
 
@@ -15,6 +16,8 @@ type Preflight struct {
 	TargetRevision       int64               `json:"target_revision,omitempty"`
 	ScanPlanID           string              `json:"scan_plan_id,omitempty"`
 	ScanPlanRevision     int64               `json:"scan_plan_revision,omitempty"`
+	RequestedScope       []netip.Prefix      `json:"requested_scope,omitempty"`
+	ExcludedScope        []netip.Prefix      `json:"excluded_scope,omitempty"`
 	ExpiresAt            time.Time           `json:"expires_at"`
 	Config               scan.Config         `json:"config"`
 	Timeouts             controller.Timeouts `json:"timeouts"`
