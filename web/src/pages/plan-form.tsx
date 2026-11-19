@@ -14,7 +14,7 @@ import {
 import { queries } from '@/api/queries'
 import { PageHeader } from '@/components/layout'
 import { ErrorState, LoadingState } from '@/components/states'
-import { Button } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { invalidatePlanViews } from './plans'
@@ -435,14 +435,12 @@ function PlanForm({
             <Button type="submit" disabled={mutation.isPending || conflict}>
               {mutation.isPending ? 'Saving…' : plan ? 'Save scan plan' : 'Create scan plan'}
             </Button>
-            <Button
-              type="button"
-              variant="outline"
-              nativeButton={false}
-              render={<Link to={plan ? `/scan-plans/${plan.id}` : '/scan-plans'} />}
+            <Link
+              to={plan ? `/scan-plans/${plan.id}` : '/scan-plans'}
+              className={buttonVariants({ variant: 'outline' })}
             >
               Cancel
-            </Button>
+            </Link>
           </div>
         </form>
       </CardContent>

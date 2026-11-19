@@ -13,7 +13,7 @@ import { useCursorPagination } from '@/components/pagination'
 import { ErrorState, LoadingState } from '@/components/states'
 import { TargetLink } from '@/components/target-link'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Dialog,
@@ -70,9 +70,9 @@ export function PlansPage() {
         title="Scan plans"
         description="Reusable execution settings associated with an authorized target."
         action={
-          <Button nativeButton={false} render={<Link to="/scan-plans/new" />}>
+          <Link to="/scan-plans/new" className={buttonVariants({})}>
             <Plus /> Create scan plan
-          </Button>
+          </Link>
         }
       />
       {query.isPending ? (
@@ -141,13 +141,12 @@ export function PlanDetailPage() {
         action={
           !archived && (
             <div className="flex gap-2">
-              <Button
-                nativeButton={false}
-                variant="outline"
-                render={<Link to={`/scan-plans/${plan.id}/edit`} />}
+              <Link
+                to={`/scan-plans/${plan.id}/edit`}
+                className={buttonVariants({ variant: 'outline' })}
               >
                 Edit scan plan
-              </Button>
+              </Link>
               <Dialog open={archiveOpen} onOpenChange={setArchiveOpen}>
                 <DialogTrigger render={<Button variant="destructive" />}>
                   Archive scan plan

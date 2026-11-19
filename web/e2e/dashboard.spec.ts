@@ -112,13 +112,21 @@ test.beforeEach(async ({ page }) => {
     }
     if (path === '/v1/targets/t-1' && method === 'PATCH') {
       const body = route.request().postDataJSON() as {
-        data: { attributes: { revision: number; name?: string; archived?: boolean } }
+        data: { attributes: { revision: number; entries?: string[]; archived?: boolean } }
       }
       targetState = {
         ...targetState,
         attributes: {
           ...targetState.attributes,
-          name: body.data.attributes.name ?? targetState.attributes.name,
+          entries: body.data.attributes.entries
+            ? body.data.attributes.entries.map((input, position) => ({
+                id: `e-${position + 1}`,
+                position,
+                kind: 'ip',
+                selector: `${input}/32`,
+                input,
+              }))
+            : targetState.attributes.entries,
           revision: targetState.attributes.revision + 1,
           ...(body.data.attributes.archived ? { archived_at: '2026-01-03T00:00:00Z' } : {}),
         },
@@ -268,13 +276,15 @@ test('creates, edits, and archives a Target with accessible confirmation', async
   await page.getByRole('button', { name: 'Create target' }).click()
   await expect(page.getByRole('heading', { name: 'New authorized network' })).toBeVisible()
   await page.getByRole('link', { name: 'Edit target' }).click()
-  await page.getByRole('textbox', { name: 'Name' }).fill('Renamed network')
+  await page.getByRole('textbox', { name: 'Selector 1' }).fill('192.0.2.2')
   await page.getByRole('button', { name: 'Save target' }).click()
-  await expect(page.getByRole('heading', { name: 'Renamed network' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'New authorized network' })).toBeVisible()
+  await expect(page.getByText('192.0.2.2/32')).toBeVisible()
   await page.getByRole('button', { name: 'Use dark theme' }).click()
   await page.getByRole('button', { name: 'Archive target' }).click()
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('heading', { name: 'Archive this Target?' })).toBeVisible()
+  await expect(dialog).toHaveCSS('opacity', '1')
   await page.screenshot({ path: testInfo.outputPath('target-archive-dark.png'), fullPage: true })
   const report = await new AxeBuilder({ page }).analyze()
   expect(report.violations.filter((v) => ['critical', 'serious'].includes(v.impact ?? ''))).toEqual(
@@ -309,6 +319,7 @@ test('creates, edits, and archives a ScanPlan with accessible confirmation', asy
   await page.getByRole('button', { name: 'Archive scan plan' }).click()
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('heading', { name: 'Archive this ScanPlan?' })).toBeVisible()
+  await expect(dialog).toHaveCSS('opacity', '1')
   await page.screenshot({ path: testInfo.outputPath('scanplan-archive-dark.png'), fullPage: true })
   const dialogReport = await new AxeBuilder({ page }).analyze()
   expect(
