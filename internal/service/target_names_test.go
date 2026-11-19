@@ -180,7 +180,7 @@ func TestTargetNameUpgradeRejectsCollisionsWithoutChangingData(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(reopened.Pool.Close)
-	if err := reopened.Pool.QueryRow(ctx, `SELECT version FROM masscanr.version`).Scan(&version); err != nil || version != 6 {
+	if err := reopened.Pool.QueryRow(ctx, `SELECT version FROM masscanr.version`).Scan(&version); err != nil || version != 7 {
 		t.Fatalf("upgraded version: %d %v", version, err)
 	}
 	if _, err := reopened.Pool.Exec(ctx, `INSERT INTO masscanr.targets(id,name,revision,created_at,updated_at) VALUES($1,'FLEET',1,$2,$2)`, newID(), now); err == nil {

@@ -3308,6 +3308,7 @@ export interface operations {
                      *       "data": [
                      *         {
                      *           "attributes": {
+                     *             "archived_at": null,
                      *             "created_at": "0001-01-01T00:00:00Z",
                      *             "name": "",
                      *             "revision": 0,
@@ -3334,6 +3335,8 @@ export interface operations {
                     "application/vnd.api+json": {
                         data: {
                             attributes: {
+                                /** Format: date-time */
+                                archived_at: string | null;
                                 /** Format: date-time */
                                 created_at: string;
                                 name: string;
@@ -3664,6 +3667,7 @@ export interface operations {
                      * @example {
                      *       "data": {
                      *         "attributes": {
+                     *           "archived_at": null,
                      *           "created_at": "0001-01-01T00:00:00Z",
                      *           "name": "",
                      *           "revision": 0,
@@ -3689,6 +3693,8 @@ export interface operations {
                     "application/vnd.api+json": {
                         data: {
                             attributes: {
+                                /** Format: date-time */
+                                archived_at: string | null;
                                 /** Format: date-time */
                                 created_at: string;
                                 name: string;
@@ -3981,6 +3987,7 @@ export interface operations {
                      * @example {
                      *       "data": {
                      *         "attributes": {
+                     *           "archived_at": null,
                      *           "created_at": "0001-01-01T00:00:00Z",
                      *           "name": "",
                      *           "revision": 0,
@@ -4006,6 +4013,8 @@ export interface operations {
                     "application/vnd.api+json": {
                         data: {
                             attributes: {
+                                /** Format: date-time */
+                                archived_at: string | null;
                                 /** Format: date-time */
                                 created_at: string;
                                 name: string;
@@ -4304,8 +4313,9 @@ export interface operations {
                  */
                 "application/vnd.api+json": {
                     data: {
-                        /** @description Provide at most one of target_id or target_name. */
+                        /** @description Provide at most one of target_id or target_name. To permanently archive, send archived:true without other changes. Archived plans are read-only and cannot start new runs; existing runs continue. */
                         attributes: {
+                            archived?: boolean;
                             name?: string;
                             revision: number;
                             settings?: {
@@ -4342,6 +4352,7 @@ export interface operations {
                      * @example {
                      *       "data": {
                      *         "attributes": {
+                     *           "archived_at": null,
                      *           "created_at": "0001-01-01T00:00:00Z",
                      *           "name": "",
                      *           "revision": 0,
@@ -4367,6 +4378,8 @@ export interface operations {
                     "application/vnd.api+json": {
                         data: {
                             attributes: {
+                                /** Format: date-time */
+                                archived_at: string | null;
                                 /** Format: date-time */
                                 created_at: string;
                                 name: string;

@@ -102,13 +102,14 @@ func (s ScanPlanSettings) Config(targetInputs []string) (scan.Config, controller
 }
 
 type ScanPlan struct {
-	ID        string           `json:"id"`
-	TargetID  string           `json:"target_id"`
-	Name      string           `json:"name"`
-	Revision  int64            `json:"revision"`
-	CreatedAt time.Time        `json:"created_at"`
-	UpdatedAt time.Time        `json:"updated_at"`
-	Settings  ScanPlanSettings `json:"settings"`
+	ID         string           `json:"id"`
+	TargetID   string           `json:"target_id"`
+	Name       string           `json:"name"`
+	Revision   int64            `json:"revision"`
+	CreatedAt  time.Time        `json:"created_at"`
+	UpdatedAt  time.Time        `json:"updated_at"`
+	ArchivedAt *time.Time       `json:"archived_at"`
+	Settings   ScanPlanSettings `json:"settings"`
 }
 
 type ScanResult struct {

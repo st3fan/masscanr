@@ -88,6 +88,22 @@ and `digitalocean`. `PATCH` accepts a partial settings object and a matching
 {"data":{"type":"scan-plans","id":"<scan-plan-id>","attributes":{"revision":1,"settings":{"ports":"22,80,443"}}}}
 ```
 
+To permanently archive a ScanPlan, send `archived:true` with its current
+revision and no other changes. Archived plans remain readable in lists, detail,
+and run history, but cannot be edited, preflighted, or used to start a new run.
+Archiving invalidates unused preflights. An active run continues with its frozen
+configuration and Target snapshot; retrying an already accepted start with the
+same idempotency key returns that run. Archive is allowed when the Target is
+already archived.
+
+```json
+{"data":{"type":"scan-plans","id":"<scan-plan-id>","attributes":{"revision":2,"archived":true}}}
+```
+
+The response includes `archived_at` (`null` while active). Existing schema
+version 6 databases upgrade to version 7 on startup without deleting plans or
+their history.
+
 Target names are trimmed, case-insensitive for lookup and uniqueness, and cannot
 be changed after creation. Archived names remain reserved. Use
 `GET /v1/targets/by-name/{name}` to retrieve a Target and
@@ -113,7 +129,7 @@ Target UUID. An unknown name returns 404; an archived Target returns 409.
 | `PATCH /v1/targets/by-name/{name}` | 200 updated or archived Target by name |
 | `POST /v1/scan-plans` | 201 ScanPlan |
 | `GET /v1/scan-plans`, `GET /v1/scan-plans/{id}` | 200 ScanPlan list or one ScanPlan |
-| `PATCH /v1/scan-plans/{id}` | 200 updated ScanPlan |
+| `PATCH /v1/scan-plans/{id}` | 200 updated or archived ScanPlan |
 | `POST /v1/scan-plans/{id}/preflight` | 201 frozen `scan-preflights` resource; no body |
 | `POST /v1/scan-plans/{id}/start` | 202 accepted `runs` resource |
 | `GET /v1/scan-plans/{id}/runs` | 200 run history for the plan |

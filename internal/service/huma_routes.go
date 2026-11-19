@@ -128,7 +128,7 @@ func (a *API) register(method, path, operationID, summary string, model any, han
 		case "updateScanPlan":
 			settings := a.attributesSchema(ScanPlanSettings{})
 			settings.Required = nil
-			attrs = &huma.Schema{Type: "object", Required: []string{"revision"}, Description: "Provide at most one of target_id or target_name.", Properties: map[string]*huma.Schema{"revision": {Type: "integer", Minimum: floatPtr(1)}, "name": {Type: "string"}, "target_id": {Type: "string"}, "target_name": {Type: "string"}, "settings": settings}}
+			attrs = &huma.Schema{Type: "object", Required: []string{"revision"}, Description: "Provide at most one of target_id or target_name. To permanently archive, send archived:true without other changes. Archived plans are read-only and cannot start new runs; existing runs continue.", Properties: map[string]*huma.Schema{"revision": {Type: "integer", Minimum: floatPtr(1)}, "name": {Type: "string"}, "target_id": {Type: "string"}, "target_name": {Type: "string"}, "settings": settings, "archived": {Type: "boolean"}}}
 		}
 		example := map[string]any{"data": map[string]any{"type": requestTypeForOperation(operationID), "attributes": map[string]any{}}}
 		switch operationID {

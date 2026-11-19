@@ -18,6 +18,9 @@ func (a *API) preflightScanPlan(c fiber.Ctx) error {
 	if err != nil {
 		return problem(c, err)
 	}
+	if plan.ArchivedAt != nil {
+		return problem(c, ErrConflict)
+	}
 	target, err := a.Store.GetTarget(c.Context(), plan.TargetID)
 	if err != nil {
 		return problem(c, err)
@@ -70,11 +73,11 @@ func (a *API) preflightScanPlan(c fiber.Ctx) error {
 		if e != nil {
 			return e
 		}
-		currentPlan, e := readScanPlan(c.Context(), tx, plan.ID)
+		currentPlan, e := readScanPlanLocked(c.Context(), tx, plan.ID)
 		if e != nil {
 			return e
 		}
-		if currentTarget.Revision != target.Revision || currentTarget.ArchivedAt != nil || currentPlan.Revision != plan.Revision || currentPlan.TargetID != target.ID {
+		if currentTarget.Revision != target.Revision || currentTarget.ArchivedAt != nil || currentPlan.Revision != plan.Revision || currentPlan.ArchivedAt != nil || currentPlan.TargetID != target.ID {
 			return ErrConflict
 		}
 		data, e := json.Marshal(preflight)
@@ -108,7 +111,7 @@ func (s *Store) ReserveScanPlan(ctx context.Context, scanPlanID, preflightID, ke
 		if e != ErrNotFound {
 			return e
 		}
-		plan, e := readScanPlan(ctx, tx, scanPlanID)
+		plan, e := readScanPlanLocked(ctx, tx, scanPlanID)
 		if e != nil {
 			return e
 		}
@@ -120,7 +123,7 @@ func (s *Store) ReserveScanPlan(ctx context.Context, scanPlanID, preflightID, ke
 		if e != nil {
 			return e
 		}
-		if target.ArchivedAt != nil || preflight.ScanPlanID != scanPlanID || preflight.TargetID != target.ID || preflight.TargetRevision != target.Revision || preflight.ScanPlanRevision != plan.Revision || !time.Now().Before(preflight.ExpiresAt) || preflight.RequiresConfirmation && !confirm {
+		if plan.ArchivedAt != nil || target.ArchivedAt != nil || preflight.ScanPlanID != scanPlanID || preflight.TargetID != target.ID || preflight.TargetRevision != target.Revision || preflight.ScanPlanRevision != plan.Revision || !time.Now().Before(preflight.ExpiresAt) || preflight.RequiresConfirmation && !confirm {
 			return ErrConflict
 		}
 		var active bool

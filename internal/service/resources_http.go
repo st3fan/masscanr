@@ -195,12 +195,23 @@ func (a *API) patchScanPlan(c fiber.Ctx) error {
 		TargetID   *string                    `json:"target_id"`
 		TargetName *string                    `json:"target_name"`
 		Settings   map[string]json.RawMessage `json:"settings"`
+		Archived   *bool                      `json:"archived"`
 	}
-	if err := decode(c, &in); err != nil {
+	if err := decodeForID(c, &in, c.Params("id")); err != nil {
 		return bad(c, err)
 	}
-	if in.Revision < 1 || in.Name == nil && in.TargetID == nil && in.TargetName == nil && len(in.Settings) == 0 {
+	if in.Revision < 1 || in.Name == nil && in.TargetID == nil && in.TargetName == nil && len(in.Settings) == 0 && in.Archived == nil {
 		return bad(c, fmt.Errorf("revision and changed attributes are required"))
+	}
+	if in.Archived != nil {
+		if !*in.Archived || in.Name != nil || in.TargetID != nil || in.TargetName != nil || len(in.Settings) != 0 {
+			return bad(c, fmt.Errorf("archived may only be set to true on its own"))
+		}
+		plan, err := a.Store.ArchiveScanPlan(c.Context(), c.Params("id"), in.Revision)
+		if err != nil {
+			return problem(c, err)
+		}
+		return respond(c, 200, plan)
 	}
 	if in.TargetID != nil && in.TargetName != nil {
 		return bad(c, fmt.Errorf("provide only one of target_id or target_name"))
@@ -210,6 +221,9 @@ func (a *API) patchScanPlan(c fiber.Ctx) error {
 		return problem(c, err)
 	}
 	if plan.Revision != in.Revision {
+		return problem(c, ErrConflict)
+	}
+	if plan.ArchivedAt != nil {
 		return problem(c, ErrConflict)
 	}
 	if in.Name != nil {

@@ -138,6 +138,73 @@ describe('JSON:API client', () => {
       new ApiError(409, 'conflict'),
     )
   })
+  it('serializes ScanPlan create, partial edit, and archive with the shared client', async () => {
+    const fetch = vi
+      .fn()
+      .mockImplementation(() =>
+        Promise.resolve(
+          reply({ data: { type: 'scan-plans', id: 'p-1', attributes: { name: 'Routine' } } }),
+        ),
+      )
+    vi.stubGlobal('fetch', fetch)
+    const settings = {
+      backend: 'masscan',
+      ports: '22,80,443',
+      provider: 'vultr',
+      region: 'atl',
+      instance_type: 'vc2-1c-1gb',
+      workers: 1,
+      rate: 1000,
+      timeout: '24h',
+      cleanup_timeout: '5m',
+    }
+    await api.createPlan({ name: 'Routine', target_name: 'External', settings })
+    await api.updatePlan('p-1', { revision: 2, settings: { ports: '443' } })
+    await api.archivePlan('p-1', 3)
+    expect(
+      fetch.mock.calls.map(([path, options]) => [path, options.method, JSON.parse(options.body)]),
+    ).toEqual([
+      [
+        '/v1/scan-plans',
+        'POST',
+        {
+          data: {
+            type: 'scan-plans',
+            attributes: { name: 'Routine', target_name: 'External', settings },
+          },
+        },
+      ],
+      [
+        '/v1/scan-plans/p-1',
+        'PATCH',
+        {
+          data: {
+            type: 'scan-plans',
+            id: 'p-1',
+            attributes: { revision: 2, settings: { ports: '443' } },
+          },
+        },
+      ],
+      [
+        '/v1/scan-plans/p-1',
+        'PATCH',
+        { data: { type: 'scan-plans', id: 'p-1', attributes: { revision: 3, archived: true } } },
+      ],
+    ])
+    expect(fetch.mock.calls.every(([, options]) => options.credentials === 'same-origin')).toBe(
+      true,
+    )
+  })
+  it('reads provider-aware region and instance catalogs', async () => {
+    const fetch = vi.fn().mockImplementation(() => Promise.resolve(reply({ data: [] })))
+    vi.stubGlobal('fetch', fetch)
+    await api.regions('digitalocean')
+    await api.instanceTypes('digitalocean', 'tor1')
+    expect(fetch.mock.calls.map(([path]) => path)).toEqual([
+      '/v1/catalog/regions?provider=digitalocean',
+      '/v1/catalog/instance-types?provider=digitalocean&region=tor1',
+    ])
+  })
 })
 
 describe('run exports', () => {

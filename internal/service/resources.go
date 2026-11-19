@@ -208,9 +208,21 @@ func (s *Store) CreateScanPlan(ctx context.Context, name, targetID string, setti
 }
 
 func readScanPlan(ctx context.Context, tx pgx.Tx, id string) (ScanPlan, error) {
+	return readScanPlanQuery(ctx, tx, id, false)
+}
+
+func readScanPlanLocked(ctx context.Context, tx pgx.Tx, id string) (ScanPlan, error) {
+	return readScanPlanQuery(ctx, tx, id, true)
+}
+
+func readScanPlanQuery(ctx context.Context, tx pgx.Tx, id string, locked bool) (ScanPlan, error) {
 	var plan ScanPlan
 	var settings []byte
-	err := tx.QueryRow(ctx, `SELECT id,target_id,name,revision,settings,created_at,updated_at FROM masscanr.scan_plans WHERE id=$1`, id).Scan(&plan.ID, &plan.TargetID, &plan.Name, &plan.Revision, &settings, &plan.CreatedAt, &plan.UpdatedAt)
+	query := `SELECT id,target_id,name,revision,settings,created_at,updated_at,archived_at FROM masscanr.scan_plans WHERE id=$1`
+	if locked {
+		query += ` FOR UPDATE`
+	}
+	err := tx.QueryRow(ctx, query, id).Scan(&plan.ID, &plan.TargetID, &plan.Name, &plan.Revision, &settings, &plan.CreatedAt, &plan.UpdatedAt, &plan.ArchivedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ScanPlan{}, ErrNotFound
 	}
@@ -235,11 +247,11 @@ func (s *Store) UpdateScanPlan(ctx context.Context, plan ScanPlan, revision int6
 		return ScanPlan{}, fmt.Errorf("revision and scan plan name are required")
 	}
 	err := s.tx(ctx, func(tx pgx.Tx) error {
-		old, e := readScanPlan(ctx, tx, plan.ID)
+		old, e := readScanPlanLocked(ctx, tx, plan.ID)
 		if e != nil {
 			return e
 		}
-		if old.Revision != revision {
+		if old.Revision != revision || old.ArchivedAt != nil {
 			return ErrConflict
 		}
 		target, e := readTarget(ctx, tx, plan.TargetID)
@@ -261,6 +273,30 @@ func (s *Store) UpdateScanPlan(ctx context.Context, plan ScanPlan, revision int6
 		plan.CreatedAt = old.CreatedAt
 		plan.UpdatedAt = time.Now().UTC()
 		_, e = tx.Exec(ctx, `UPDATE masscanr.scan_plans SET target_id=$2,name=$3,revision=$4,provider=$5,settings=$6,updated_at=$7 WHERE id=$1`, plan.ID, plan.TargetID, strings.TrimSpace(plan.Name), plan.Revision, plan.Settings.Provider, data, plan.UpdatedAt)
+		return e
+	})
+	return plan, err
+}
+
+func (s *Store) ArchiveScanPlan(ctx context.Context, id string, revision int64) (ScanPlan, error) {
+	if revision < 1 {
+		return ScanPlan{}, fmt.Errorf("revision is required")
+	}
+	var plan ScanPlan
+	err := s.tx(ctx, func(tx pgx.Tx) error {
+		var e error
+		plan, e = readScanPlanLocked(ctx, tx, id)
+		if e != nil {
+			return e
+		}
+		if plan.Revision != revision || plan.ArchivedAt != nil {
+			return ErrConflict
+		}
+		now := time.Now().UTC()
+		plan.Revision++
+		plan.UpdatedAt = now
+		plan.ArchivedAt = &now
+		_, e = tx.Exec(ctx, `UPDATE masscanr.scan_plans SET revision=$2,updated_at=$3,archived_at=$3 WHERE id=$1`, id, plan.Revision, now)
 		return e
 	})
 	return plan, err

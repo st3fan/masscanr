@@ -21,6 +21,7 @@ const plan = {
     name: 'Routine TCP',
     target_id: 't-1',
     revision: 1,
+    archived_at: null as string | null,
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
     settings: {
@@ -29,7 +30,7 @@ const plan = {
       provider: 'vultr',
       region: 'ewr',
       instance_type: 'vc2-1c-1gb',
-      shards: 2,
+      workers: 2,
       rate: 1000,
       timeout: '24h',
       cleanup_timeout: '5m',
@@ -79,6 +80,7 @@ test.beforeEach(async ({ page }) => {
   let targetState: typeof target & {
     attributes: typeof target.attributes & { archived_at?: string }
   } = structuredClone(target)
+  let planState = structuredClone(plan)
   await page.route('**/healthz', (route) => route.fulfill({ json: { status: 'ready' } }))
   await page.route('**/v1/**', (route) => {
     const requestURL = new URL(route.request().url())
@@ -110,13 +112,21 @@ test.beforeEach(async ({ page }) => {
     }
     if (path === '/v1/targets/t-1' && method === 'PATCH') {
       const body = route.request().postDataJSON() as {
-        data: { attributes: { revision: number; name?: string; archived?: boolean } }
+        data: { attributes: { revision: number; entries?: string[]; archived?: boolean } }
       }
       targetState = {
         ...targetState,
         attributes: {
           ...targetState.attributes,
-          name: body.data.attributes.name ?? targetState.attributes.name,
+          entries: body.data.attributes.entries
+            ? body.data.attributes.entries.map((input, position) => ({
+                id: `e-${position + 1}`,
+                position,
+                kind: 'ip',
+                selector: `${input}/32`,
+                input,
+              }))
+            : targetState.attributes.entries,
           revision: targetState.attributes.revision + 1,
           ...(body.data.attributes.archived ? { archived_at: '2026-01-03T00:00:00Z' } : {}),
         },
@@ -126,15 +136,87 @@ test.beforeEach(async ({ page }) => {
         body: JSON.stringify({ data: targetState }),
       })
     }
+    if (path.startsWith('/v1/targets/by-name/')) {
+      return route.fulfill({
+        contentType: 'application/vnd.api+json',
+        body: JSON.stringify({ data: targetState }),
+      })
+    }
+    if (path === '/v1/catalog/regions') {
+      const provider = requestURL.searchParams.get('provider')
+      const region =
+        provider === 'digitalocean'
+          ? { type: 'regions', id: 'tor1', attributes: { name: 'Toronto' } }
+          : { type: 'regions', id: 'ewr', attributes: { name: 'New Jersey' } }
+      return route.fulfill({
+        contentType: 'application/vnd.api+json',
+        body: JSON.stringify({ data: [region] }),
+      })
+    }
+    if (path === '/v1/catalog/instance-types') {
+      const id =
+        requestURL.searchParams.get('provider') === 'digitalocean' ? 's-1vcpu-1gb' : 'vc2-1c-1gb'
+      return route.fulfill({
+        contentType: 'application/vnd.api+json',
+        body: JSON.stringify({
+          data: [{ type: 'instance-types', id, attributes: { vcpus: 1, memory_mb: 1024 } }],
+        }),
+      })
+    }
+    if (path === '/v1/scan-plans' && method === 'POST') {
+      const body = route.request().postDataJSON() as {
+        data: { attributes: { name: string; settings: typeof plan.attributes.settings } }
+      }
+      planState = {
+        ...planState,
+        attributes: {
+          ...planState.attributes,
+          name: body.data.attributes.name,
+          settings: body.data.attributes.settings,
+        },
+      }
+      return route.fulfill({
+        status: 201,
+        contentType: 'application/vnd.api+json',
+        body: JSON.stringify({ data: planState }),
+      })
+    }
+    if (path === '/v1/scan-plans/p-1' && method === 'PATCH') {
+      const body = route.request().postDataJSON() as {
+        data: {
+          attributes: {
+            name?: string
+            settings?: Partial<typeof plan.attributes.settings>
+            archived?: boolean
+          }
+        }
+      }
+      planState = {
+        ...planState,
+        attributes: {
+          ...planState.attributes,
+          name: body.data.attributes.name ?? planState.attributes.name,
+          settings: { ...planState.attributes.settings, ...body.data.attributes.settings },
+          revision: planState.attributes.revision + 1,
+          archived_at: body.data.attributes.archived
+            ? '2026-01-03T00:00:00Z'
+            : planState.attributes.archived_at,
+        },
+      }
+      return route.fulfill({
+        contentType: 'application/vnd.api+json',
+        body: JSON.stringify({ data: planState }),
+      })
+    }
     const data =
       path === '/v1/targets'
         ? [targetState]
         : path === '/v1/targets/t-1'
           ? targetState
           : path === '/v1/scan-plans'
-            ? [plan]
+            ? [planState]
             : path === '/v1/scan-plans/p-1'
-              ? plan
+              ? planState
               : path === '/v1/runs'
                 ? requestURL.searchParams.get('active') === 'true'
                   ? []
@@ -194,13 +276,15 @@ test('creates, edits, and archives a Target with accessible confirmation', async
   await page.getByRole('button', { name: 'Create target' }).click()
   await expect(page.getByRole('heading', { name: 'New authorized network' })).toBeVisible()
   await page.getByRole('link', { name: 'Edit target' }).click()
-  await page.getByRole('textbox', { name: 'Name' }).fill('Renamed network')
+  await page.getByRole('textbox', { name: 'Selector 1' }).fill('192.0.2.2')
   await page.getByRole('button', { name: 'Save target' }).click()
-  await expect(page.getByRole('heading', { name: 'Renamed network' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'New authorized network' })).toBeVisible()
+  await expect(page.getByText('192.0.2.2/32')).toBeVisible()
   await page.getByRole('button', { name: 'Use dark theme' }).click()
   await page.getByRole('button', { name: 'Archive target' }).click()
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('heading', { name: 'Archive this Target?' })).toBeVisible()
+  await expect(dialog).toHaveCSS('opacity', '1')
   await page.screenshot({ path: testInfo.outputPath('target-archive-dark.png'), fullPage: true })
   const report = await new AxeBuilder({ page }).analyze()
   expect(report.violations.filter((v) => ['critical', 'serious'].includes(v.impact ?? ''))).toEqual(
@@ -209,6 +293,41 @@ test('creates, edits, and archives a Target with accessible confirmation', async
   await dialog.getByRole('button', { name: 'Archive target' }).click()
   await expect(page.getByText(/This Target is retained for history/)).toBeVisible()
   await expect(page.getByRole('link', { name: 'Edit target' })).toHaveCount(0)
+})
+
+test('creates, edits, and archives a ScanPlan with accessible confirmation', async ({
+  page,
+}, testInfo) => {
+  await page.goto('/scan-plans/new')
+  await expect(page.getByRole('heading', { name: 'Create scan plan' })).toBeVisible()
+  await page.getByRole('textbox', { name: 'Name' }).fill('Evening TCP')
+  await page.getByRole('combobox', { name: 'Active Target name' }).fill('External network')
+  await page.getByRole('combobox', { name: 'Region' }).selectOption('ewr')
+  await page.getByRole('combobox', { name: 'Instance type' }).selectOption('vc2-1c-1gb')
+  await page.screenshot({ path: testInfo.outputPath('scanplan-create-light.png'), fullPage: true })
+  const formReport = await new AxeBuilder({ page }).analyze()
+  expect(
+    formReport.violations.filter((v) => ['critical', 'serious'].includes(v.impact ?? '')),
+  ).toEqual([])
+  await page.getByRole('button', { name: 'Create scan plan' }).click()
+  await expect(page.getByRole('heading', { name: 'Evening TCP' })).toBeVisible()
+  await page.getByRole('link', { name: 'Edit scan plan' }).click()
+  await page.getByRole('textbox', { name: 'TCP ports' }).fill('443')
+  await page.getByRole('button', { name: 'Save scan plan' }).click()
+  await expect(page.getByText('443', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Use dark theme' }).click()
+  await page.getByRole('button', { name: 'Archive scan plan' }).click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.getByRole('heading', { name: 'Archive this ScanPlan?' })).toBeVisible()
+  await expect(dialog).toHaveCSS('opacity', '1')
+  await page.screenshot({ path: testInfo.outputPath('scanplan-archive-dark.png'), fullPage: true })
+  const dialogReport = await new AxeBuilder({ page }).analyze()
+  expect(
+    dialogReport.violations.filter((v) => ['critical', 'serious'].includes(v.impact ?? '')),
+  ).toEqual([])
+  await dialog.getByRole('button', { name: 'Archive scan plan' }).click()
+  await expect(page.getByText(/This ScanPlan is read-only/)).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Edit scan plan' })).toHaveCount(0)
 })
 
 test('shows server result filters and coverage', async ({ page }) => {
