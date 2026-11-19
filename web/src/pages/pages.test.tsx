@@ -190,7 +190,7 @@ it('shows DigitalOcean worker details and links current and replacement instance
         id: '123',
         attributes: {
           slot: 1,
-          ip: '192.0.2.10',
+          ip: '0.0.0.0',
           state: 'scanning',
           cleanup: 'pending',
           created_at: '2026-01-01T00:05:00Z',
@@ -224,6 +224,7 @@ it('shows DigitalOcean worker details and links current and replacement instance
   expect(within(table).getAllByText('s-1vcpu-1gb')).toHaveLength(2)
   expect(within(table).getByText('192.0.2.9')).toBeTruthy()
   expect(within(table).getByText('192.0.2.10')).toBeTruthy()
+  expect(within(table).queryByText('0.0.0.0')).toBeNull()
 })
 
 it('shows Vultr and pending worker details without a generic provider link', async () => {
@@ -234,7 +235,7 @@ it('shows Vultr and pending worker details without a generic provider link', asy
       active: true,
       worker_snapshots: {
         '1': { slot: 1, id: 'worker-uuid', ip: '192.0.2.10', state: 'scanning' },
-        '2': { slot: 2, id: '', ip: '', state: 'provisioning' },
+        '2': { slot: 2, id: '', ip: '0.0.0.0', state: 'provisioning' },
       },
     },
   }
@@ -268,6 +269,7 @@ it('shows Vultr and pending worker details without a generic provider link', asy
   expect(await screen.findByText('Worker 2')).toBeTruthy()
   expect(screen.getAllByText('worker-uuid')).toHaveLength(2)
   expect(screen.getAllByText('Pending').length).toBeGreaterThan(0)
+  expect(screen.queryByText('0.0.0.0')).toBeNull()
   expect(screen.getAllByText('Vultr').length).toBeGreaterThan(0)
   expect(screen.queryByRole('link', { name: /open vultr instance/i })).toBeNull()
   expect(

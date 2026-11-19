@@ -76,6 +76,10 @@ function instanceURL(provider: string, id: string) {
   return null
 }
 
+function knownWorkerIP(ip: string | undefined) {
+  return ip && ip !== '0.0.0.0' ? ip : null
+}
+
 function WorkerInstance({ provider, id }: { provider: string; id: string }) {
   if (!id) return <span className="text-muted-foreground">Pending</span>
   const url = instanceURL(provider, id)
@@ -94,7 +98,12 @@ function WorkerInstance({ provider, id }: { provider: string; id: string }) {
   )
 }
 
-function workerColumns(provider: string, region: string, flavour: string): ColumnDef<RunWorker>[] {
+function workerColumns(
+  provider: string,
+  region: string,
+  flavour: string,
+  currentIPs: Map<string, string>,
+): ColumnDef<RunWorker>[] {
   return [
     {
       header: 'Instance',
@@ -102,7 +111,11 @@ function workerColumns(provider: string, region: string, flavour: string): Colum
     },
     { header: 'Worker slot', cell: ({ row }) => row.original.attributes.slot },
     { header: 'Provider', cell: () => providerName(provider) },
-    { header: 'IP', cell: ({ row }) => row.original.attributes.ip || 'Unknown' },
+    {
+      header: 'IP',
+      cell: ({ row }) =>
+        knownWorkerIP(row.original.attributes.ip) ?? currentIPs.get(row.original.id) ?? 'Unknown',
+    },
     { header: 'Region', cell: () => region || 'Unknown' },
     { header: 'Flavour', cell: () => flavour || 'Unknown' },
     { header: 'State', cell: ({ row }) => <StatusBadge phase={row.original.attributes.state} /> },
@@ -166,6 +179,11 @@ export function RunDetailPage() {
   const workers = Object.entries(a.worker_snapshots ?? {}).sort(
     ([, left], [, right]) => (left.slot ?? 0) - (right.slot ?? 0),
   )
+  const currentIPs = new Map<string, string>()
+  for (const [, worker] of workers) {
+    const ip = knownWorkerIP(worker.ip)
+    if (worker.id && ip) currentIPs.set(worker.id, ip)
+  }
   const totalShards = a.summary.ShardCount || a.preflight.shard_count
   const completedShards = a.summary.CompletedShards
   const shardPercent = totalShards > 0 ? (100 * completedShards) / totalShards : 0
@@ -286,7 +304,7 @@ export function RunDetailPage() {
                       </div>
                       <div className="min-w-0">
                         <dt className="text-muted-foreground">IP</dt>
-                        <dd className="break-all">{worker.ip || 'Pending'}</dd>
+                        <dd className="break-all">{knownWorkerIP(worker.ip) ?? 'Pending'}</dd>
                       </div>
                       <div className="min-w-0">
                         <dt className="text-muted-foreground">Region</dt>
@@ -387,7 +405,7 @@ export function RunDetailPage() {
           ) : (
             <DataTable
               data={history.data.data}
-              columns={workerColumns(provider, region, flavour)}
+              columns={workerColumns(provider, region, flavour, currentIPs)}
               emptyTitle="No instances recorded"
               emptyDescription="Worker instances appear after provisioning begins."
               previous={historyPage.hasPrevious}

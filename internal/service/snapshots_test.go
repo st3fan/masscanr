@@ -40,16 +40,21 @@ func TestShardedWorkerSnapshotKeepsQueueAcrossReplacement(t *testing.T) {
 	r := Run{}
 	now := time.Now().UTC()
 	progress := scan.Progress{Percent: 45, Rate: 1000}
-	applyEvent(&r, controller.Event{Slot: 1, Shard: 24, Attempt: 1, ID: "vm-1", State: "scanning", AssignedShards: 50, CompletedForSlot: 23, Progress: &progress, ShardCount: 100, CompletedShards: 45}, now)
+	applyEvent(&r, controller.Event{Slot: 1, Shard: 24, Attempt: 1, ID: "vm-1", IP: "192.0.2.1", State: "scanning", AssignedShards: 50, CompletedForSlot: 23, Progress: &progress, ShardCount: 100, CompletedShards: 45}, now)
 	w := r.WorkerSnapshots["1"]
 	if w.CurrentShard != 24 || w.CompletedShards != 23 || w.AssignedShards != 50 || w.Progress == nil || w.Progress.Percent != 45 || r.Summary.CompletedShards != 45 {
 		t.Fatalf("active worker=%+v summary=%+v", w, r.Summary)
 	}
 	applyEvent(&r, controller.Event{Slot: 1, ID: "vm-1", State: "shutdown"}, now)
-	applyEvent(&r, controller.Event{Slot: 1, ID: "vm-2", State: "booting"}, now.Add(time.Second))
+	applyEvent(&r, controller.Event{Slot: 1, ID: "vm-2", IP: "0.0.0.0", State: "booting"}, now.Add(time.Second))
+	if r.WorkerSnapshots["1"].IP != "" {
+		t.Fatalf("replacement inherited old or unspecified IP: %+v", r.WorkerSnapshots["1"])
+	}
+	applyEvent(&r, controller.Event{Slot: 1, ID: "vm-2", IP: "192.0.2.2", State: "ready"}, now.Add(time.Second))
 	applyEvent(&r, controller.Event{Slot: 1, Shard: 24, Attempt: 2, ID: "vm-2", State: "scanning", AssignedShards: 50, CompletedForSlot: 23}, now.Add(time.Second))
+	applyEvent(&r, controller.Event{Slot: 1, ID: "vm-2", IP: "0.0.0.0", State: "deleting"}, now.Add(time.Second))
 	w = r.WorkerSnapshots["1"]
-	if len(r.WorkerSnapshots) != 1 || w.ID != "vm-2" || w.InstanceCount != 2 || w.CurrentShard != 24 || w.Attempt != 2 || w.CompletedShards != 23 || w.Progress != nil {
+	if len(r.WorkerSnapshots) != 1 || w.ID != "vm-2" || w.IP != "192.0.2.2" || w.InstanceCount != 2 || w.CurrentShard != 24 || w.Attempt != 2 || w.CompletedShards != 23 || w.Progress != nil {
 		t.Fatalf("replacement worker=%+v", w)
 	}
 }

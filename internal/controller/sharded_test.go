@@ -40,7 +40,7 @@ func (m *shardMemory) RecordShardWorker(_ context.Context, _ string, _ int64, sl
 	m.current[slot] = id
 	return nil
 }
-func (*shardMemory) UpdateShardWorker(context.Context, string, int64, string, string, string, string) error {
+func (*shardMemory) UpdateShardWorker(context.Context, string, int64, string, string, string, string, string) error {
 	return nil
 }
 func (m *shardMemory) BeginShardAttempt(_ context.Context, _ string, _ int64, slot int, id string) (ShardLease, bool, error) {

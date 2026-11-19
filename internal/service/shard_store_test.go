@@ -93,7 +93,17 @@ func TestShardStoreDurableRetryAndJournalRestore(t *testing.T) {
 	if err != nil || workers != 1 || epoch != 1 {
 		t.Fatalf("workers=%d epoch=%d err=%v", workers, epoch, err)
 	}
-	if err = store.RecordShardWorker(ctx, id, epoch, 1, "instance-1", "192.0.2.1", "ready"); err != nil {
+	if err = store.RecordShardWorker(ctx, id, epoch, 1, "instance-1", "0.0.0.0", "booting"); err != nil {
+		t.Fatal(err)
+	}
+	physical, err := store.ListShardWorkers(ctx, id, "", 100)
+	if err != nil || len(physical) != 1 || physical[0].IP != "" {
+		t.Fatalf("provisioning worker has a reported IP: %+v err=%v", physical, err)
+	}
+	if err = store.UpdateShardWorker(ctx, id, epoch, "instance-1", "192.0.2.1", "ready", "pending", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err = store.UpdateShardWorker(ctx, id, epoch, "instance-1", "0.0.0.0", "scanning", "pending", ""); err != nil {
 		t.Fatal(err)
 	}
 	first, done, err := store.BeginShardAttempt(ctx, id, epoch, 1, "instance-1")
@@ -103,7 +113,7 @@ func TestShardStoreDurableRetryAndJournalRestore(t *testing.T) {
 	if err = store.FinishShardAttempt(ctx, id, epoch, first, false, 4, "worker lost"); err != nil {
 		t.Fatal(err)
 	}
-	if err = store.UpdateShardWorker(ctx, id, epoch, "instance-1", "shutdown", "complete", ""); err != nil {
+	if err = store.UpdateShardWorker(ctx, id, epoch, "instance-1", "0.0.0.0", "shutdown", "complete", ""); err != nil {
 		t.Fatal(err)
 	}
 	if err = store.RecordShardWorker(ctx, id, epoch, 1, "instance-2", "192.0.2.2", "ready"); err != nil {
@@ -116,9 +126,17 @@ func TestShardStoreDurableRetryAndJournalRestore(t *testing.T) {
 	if err = store.FinishShardAttempt(ctx, id, epoch, second, true, 8, ""); err != nil {
 		t.Fatal(err)
 	}
-	physical, err := store.ListShardWorkers(ctx, id, "", 100)
-	if err != nil || len(physical) != 2 || physical[0].Slot != 1 || physical[1].Slot != 1 {
+	physical, err = store.ListShardWorkers(ctx, id, "", 100)
+	if err != nil || len(physical) != 2 || physical[0].Slot != 1 || physical[0].IP != "192.0.2.1" || physical[1].Slot != 1 || physical[1].IP != "192.0.2.2" {
 		t.Fatalf("physical workers=%+v err=%v", physical, err)
+	}
+	// Existing runs can contain the provider's provisioning placeholder.
+	if _, err = store.Pool.Exec(ctx, `UPDATE masscanr.run_workers SET ip='0.0.0.0' WHERE run_id=$1 AND instance_id=$2`, id, "instance-2"); err != nil {
+		t.Fatal(err)
+	}
+	physical, err = store.ListShardWorkers(ctx, id, "", 100)
+	if err != nil || len(physical) != 2 || physical[1].IP != "" {
+		t.Fatalf("legacy placeholder exposed: %+v err=%v", physical, err)
 	}
 	slots, err := store.WorkerSlots(ctx, id)
 	if err != nil || len(slots) != 1 || slots[0].CompletedShards != 1 || slots[0].NextShard != 2 {
