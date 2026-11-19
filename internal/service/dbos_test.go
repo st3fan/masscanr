@@ -2,9 +2,10 @@ package service
 
 import (
 	"context"
-	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	"testing"
 	"time"
+
+	"github.com/dbos-inc/dbos-transact-golang/dbos"
 )
 
 func TestDBOSTransactionReplay(t *testing.T) {
@@ -48,4 +49,40 @@ func TestDBOSTransactionReplay(t *testing.T) {
 	if e = s.Pool.QueryRow(ctx, `SELECT n FROM masscanr.counter`).Scan(&n); e != nil || n != 1 {
 		t.Fatal(n, e)
 	}
+}
+
+func TestServiceLockDoesNotBlockWorkflowShutdown(t *testing.T) {
+	s := testStore(t)
+	ctx := t.Context()
+	lock, err := acquireServiceLock(ctx, s.Pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = lock.Close(context.Background()) })
+	if other, err := acquireServiceLock(ctx, s.Pool); err == nil {
+		_ = other.Close(context.Background())
+		t.Fatal("second service acquired the database lock")
+	}
+	dc, err := s.WorkflowContext(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = dbos.Launch(dc); err != nil {
+		t.Fatal(err)
+	}
+	if err = dbos.Shutdown(dc, 5*time.Second); err != nil {
+		t.Fatalf("workflow shutdown waited for the service lock: %v", err)
+	}
+	if other, err := acquireServiceLock(ctx, s.Pool); err == nil {
+		_ = other.Close(context.Background())
+		t.Fatal("service lock was released before workflow shutdown")
+	}
+	if err = lock.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	other, err := acquireServiceLock(ctx, s.Pool)
+	if err != nil {
+		t.Fatalf("service lock was not released after connection close: %v", err)
+	}
+	_ = other.Close(context.Background())
 }
