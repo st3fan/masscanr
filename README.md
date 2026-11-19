@@ -51,6 +51,23 @@ unless `MASSCANR_BIND_ADDRESS` is explicitly exported. For a different local
 project name, export `MASSCANR_LOCAL_PROJECT` and use the same value for all
 three scripts.
 
+For an isolated Intent preview, run the scripts from that Intent's worktree and
+pass its number. For example, Intent 187 uses `masscanr-intent-187` and
+`http://127.0.0.1:10187/`:
+
+```sh
+./scripts/start.sh 187
+./scripts/stop.sh 187
+./scripts/destroy.sh 187
+```
+
+The Intent number selects port `10000 +` the number, a dedicated Compose project,
+and the matching browser origin on loopback. It takes precedence over local port,
+bind address, project, and browser origin overrides. `stop.sh` retains that
+project's volumes; `destroy.sh` removes them. Without a number, all three scripts
+use the default local project and port described above. Use the same number for
+every command that manages an Intent preview.
+
 To stop the local project from another terminal while keeping PostgreSQL and
 artifact volumes, run `./scripts/stop.sh`. Ctrl-C also stops the foreground
 session. To intentionally remove this project's containers, volumes, orphan
