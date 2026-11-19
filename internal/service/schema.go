@@ -29,6 +29,26 @@ CREATE TABLE IF NOT EXISTS masscanr.target_entries (
     UNIQUE (target_id, selector)
 );
 CREATE INDEX IF NOT EXISTS target_entries_order ON masscanr.target_entries(target_id, position);
+CREATE TABLE IF NOT EXISTS masscanr.exclusions (
+    id text PRIMARY KEY,
+    name text NOT NULL CHECK (length(trim(name)) > 0),
+    revision bigint NOT NULL CHECK (revision > 0),
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    archived_at timestamptz
+);
+CREATE UNIQUE INDEX IF NOT EXISTS exclusions_name_unique ON masscanr.exclusions (lower(btrim(name)));
+CREATE TABLE IF NOT EXISTS masscanr.exclusion_entries (
+    id text PRIMARY KEY,
+    exclusion_id text NOT NULL REFERENCES masscanr.exclusions(id),
+    position integer NOT NULL CHECK (position >= 0),
+    kind text NOT NULL CHECK (kind IN ('ip', 'cidr')),
+    selector text NOT NULL CHECK (length(selector) > 0),
+    input text NOT NULL CHECK (length(input) > 0),
+    UNIQUE (exclusion_id, position),
+    UNIQUE (exclusion_id, selector)
+);
+CREATE INDEX IF NOT EXISTS exclusion_entries_order ON masscanr.exclusion_entries(exclusion_id, position);
 CREATE TABLE IF NOT EXISTS masscanr.scan_plans (
     id text PRIMARY KEY,
     target_id text NOT NULL REFERENCES masscanr.targets(id),
@@ -41,6 +61,14 @@ CREATE TABLE IF NOT EXISTS masscanr.scan_plans (
     archived_at timestamptz
 );
 CREATE INDEX IF NOT EXISTS scan_plans_target ON masscanr.scan_plans(target_id, id);
+CREATE TABLE IF NOT EXISTS masscanr.scan_plan_exclusions (
+    scan_plan_id text NOT NULL REFERENCES masscanr.scan_plans(id),
+    exclusion_id text NOT NULL REFERENCES masscanr.exclusions(id),
+    position integer NOT NULL CHECK (position >= 0),
+    PRIMARY KEY (scan_plan_id, exclusion_id),
+    UNIQUE (scan_plan_id, position)
+);
+CREATE INDEX IF NOT EXISTS scan_plan_exclusions_exclusion ON masscanr.scan_plan_exclusions(exclusion_id, scan_plan_id);
 CREATE TABLE IF NOT EXISTS masscanr.scan_preflights (
     id text PRIMARY KEY,
     target_id text NOT NULL REFERENCES masscanr.targets(id),

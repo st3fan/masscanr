@@ -10,6 +10,10 @@ func (c Config) Clone() Config {
 	c.Targets = slices.Clone(c.Targets)
 	c.Ports = slices.Clone(c.Ports)
 	c.RequestedTargets = slices.Clone(c.RequestedTargets)
+	c.Exclusions = slices.Clone(c.Exclusions)
+	for i := range c.Exclusions {
+		c.Exclusions[i].Entries = slices.Clone(c.Exclusions[i].Entries)
+	}
 	for i := range c.RequestedTargets {
 		t := &c.RequestedTargets[i]
 		t.Prefixes = slices.Clone(t.Prefixes)

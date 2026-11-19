@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -9,6 +10,43 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 )
+
+// scanPlanExclusionIDs decodes the only writable ScanPlan relationship. A nil
+// result means omitted; an empty slice explicitly clears all references.
+func scanPlanExclusionIDs(raw json.RawMessage) (*[]string, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var relationships map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &relationships); err != nil || relationships == nil || len(relationships) != 1 {
+		return nil, fmt.Errorf("invalid scan plan relationships")
+	}
+	value, ok := relationships["exclusions"]
+	if !ok {
+		return nil, fmt.Errorf("only exclusions relationship is writable")
+	}
+	var relationship struct {
+		Data *[]struct {
+			Type string `json:"type"`
+			ID   string `json:"id"`
+		} `json:"data"`
+	}
+	d := json.NewDecoder(bytes.NewReader(value))
+	d.DisallowUnknownFields()
+	if err := d.Decode(&relationship); err != nil || relationship.Data == nil {
+		return nil, fmt.Errorf("invalid exclusions relationship")
+	}
+	ids := make([]string, 0, len(*relationship.Data))
+	seen := map[string]bool{}
+	for _, ref := range *relationship.Data {
+		if ref.Type != "exclusions" || ref.ID == "" || seen[ref.ID] {
+			return nil, fmt.Errorf("invalid or duplicate exclusion reference")
+		}
+		seen[ref.ID] = true
+		ids = append(ids, ref.ID)
+	}
+	return &ids, nil
+}
 
 func resourceLimit(c fiber.Ctx) (int, error) {
 	limit := 100
@@ -134,14 +172,19 @@ func (a *API) createScanPlan(c fiber.Ctx) error {
 		TargetName string            `json:"target_name"`
 		Settings   *ScanPlanSettings `json:"settings"`
 	}
-	if err := decode(c, &in); err != nil {
+	relationships, err := decodeForIDRelationships(c, &in, "", true)
+	if err != nil {
+		return bad(c, err)
+	}
+	exclusionIDs, err := scanPlanExclusionIDs(relationships)
+	if err != nil {
 		return bad(c, err)
 	}
 	if !validName(in.Name) || (in.TargetID == "") == (in.TargetName == "") {
 		return bad(c, fmt.Errorf("scan plan name and exactly one of target_id or target_name are required"))
 	}
 	var target Target
-	var err error
+	// The relationship defaults to an empty set when omitted.
 	if in.TargetName != "" {
 		target, err = a.Store.GetTargetByName(c.Context(), in.TargetName)
 	} else {
@@ -160,7 +203,11 @@ func (a *API) createScanPlan(c fiber.Ctx) error {
 	if _, _, err = settings.Config(target.Inputs()); err != nil {
 		return bad(c, err)
 	}
-	plan, err := a.Store.CreateScanPlan(c.Context(), in.Name, target.ID, settings)
+	var refs []string
+	if exclusionIDs != nil {
+		refs = *exclusionIDs
+	}
+	plan, err := a.Store.CreateScanPlan(c.Context(), in.Name, target.ID, settings, refs...)
 	if err != nil {
 		return problem(c, err)
 	}
@@ -197,14 +244,19 @@ func (a *API) patchScanPlan(c fiber.Ctx) error {
 		Settings   map[string]json.RawMessage `json:"settings"`
 		Archived   *bool                      `json:"archived"`
 	}
-	if err := decodeForID(c, &in, c.Params("id")); err != nil {
+	relationships, err := decodeForIDRelationships(c, &in, c.Params("id"), true)
+	if err != nil {
 		return bad(c, err)
 	}
-	if in.Revision < 1 || in.Name == nil && in.TargetID == nil && in.TargetName == nil && len(in.Settings) == 0 && in.Archived == nil {
+	exclusionIDs, err := scanPlanExclusionIDs(relationships)
+	if err != nil {
+		return bad(c, err)
+	}
+	if in.Revision < 1 || in.Name == nil && in.TargetID == nil && in.TargetName == nil && len(in.Settings) == 0 && in.Archived == nil && exclusionIDs == nil {
 		return bad(c, fmt.Errorf("revision and changed attributes are required"))
 	}
 	if in.Archived != nil {
-		if !*in.Archived || in.Name != nil || in.TargetID != nil || in.TargetName != nil || len(in.Settings) != 0 {
+		if !*in.Archived || in.Name != nil || in.TargetID != nil || in.TargetName != nil || len(in.Settings) != 0 || exclusionIDs != nil {
 			return bad(c, fmt.Errorf("archived may only be set to true on its own"))
 		}
 		plan, err := a.Store.ArchiveScanPlan(c.Context(), c.Params("id"), in.Revision)
@@ -225,6 +277,9 @@ func (a *API) patchScanPlan(c fiber.Ctx) error {
 	}
 	if plan.ArchivedAt != nil {
 		return problem(c, ErrConflict)
+	}
+	if exclusionIDs != nil {
+		plan.ExclusionIDs = *exclusionIDs
 	}
 	if in.Name != nil {
 		plan.Name = *in.Name

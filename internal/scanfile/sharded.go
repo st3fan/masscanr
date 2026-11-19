@@ -21,6 +21,9 @@ func (c Config) ValidateSharded() (scan.Manifest, error) {
 	if err = cfg.Validate(); err != nil {
 		return scan.Manifest{}, err
 	}
+	if err = scan.ValidateEffectiveScope(c.RequestedTargets, c.Exclusions, c.Targets); err != nil {
+		return scan.Manifest{}, err
+	}
 	if c.Shards != 0 || cfg.PortSpec() != c.Ports || (c.Provider != "vultr" && c.Provider != "digitalocean") || c.Output == "" || (c.Backend != "masscan" && c.Backend != "zmap") {
 		return scan.Manifest{}, fmt.Errorf("invalid sharded scan configuration")
 	}
@@ -134,9 +137,6 @@ func (s *State) applySharded(r Record) error {
 		}
 		manifest, err := h.Config.ValidateSharded()
 		if err != nil {
-			return err
-		}
-		if err = scan.ValidateTargets(h.Config.RequestedTargets, h.Config.Targets); err != nil {
 			return err
 		}
 		s.Header = h

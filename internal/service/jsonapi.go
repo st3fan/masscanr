@@ -35,6 +35,9 @@ func requestResourceType(c fiber.Ctx) string {
 	if strings.HasPrefix(c.Path(), "/v1/targets") {
 		return "targets"
 	}
+	if strings.HasPrefix(c.Path(), "/v1/exclusions") {
+		return "exclusions"
+	}
 	if strings.HasPrefix(c.Path(), "/v1/scan-plans") {
 		return "scan-plans"
 	}
@@ -80,6 +83,8 @@ func resourceType(c fiber.Ctx, v any) string {
 	switch v.(type) {
 	case Target:
 		return "targets"
+	case Exclusion:
+		return "exclusions"
 	case ScanPlan:
 		return "scan-plans"
 	case ScanResult:
@@ -99,6 +104,12 @@ func resourceType(c fiber.Ctx, v any) string {
 	}
 	if strings.HasPrefix(c.Path(), "/v1/targets") {
 		return "targets"
+	}
+	if strings.HasPrefix(c.Path(), "/v1/scan-plans/") && strings.HasSuffix(c.Path(), "/runs") {
+		return "runs"
+	}
+	if strings.HasPrefix(c.Path(), "/v1/exclusions") {
+		return "exclusions"
 	}
 	if strings.HasPrefix(c.Path(), "/v1/scan-plans") {
 		return "scan-plans"
@@ -158,6 +169,16 @@ func makeResource(typ string, value any) (jsonAPIResource, error) {
 		}
 		resource.Relationships["target"] = map[string]any{"data": map[string]string{"type": "targets", "id": targetID}}
 	}
+	if plan, ok := value.(ScanPlan); ok && typ == "scan-plans" {
+		ids := make([]map[string]string, 0, len(plan.ExclusionIDs))
+		for _, id := range plan.ExclusionIDs {
+			ids = append(ids, map[string]string{"type": "exclusions", "id": id})
+		}
+		if resource.Relationships == nil {
+			resource.Relationships = map[string]any{}
+		}
+		resource.Relationships["exclusions"] = map[string]any{"data": ids}
+	}
 	if typ == "runs" {
 		var plan map[string]json.RawMessage
 		if json.Unmarshal(attributes["preflight"], &plan) == nil {
@@ -206,7 +227,7 @@ func respondJSONAPI(c fiber.Ctx, status int, v any) error {
 			items = append(items, r)
 		}
 		doc := map[string]any{"data": items, "links": map[string]any{"self": string(c.Request().URI().RequestURI())}}
-		if c.Path() == "/v1/targets" || c.Path() == "/v1/scan-plans" || strings.HasSuffix(c.Path(), "/runs") && strings.HasPrefix(c.Path(), "/v1/scan-plans/") || strings.HasSuffix(c.Path(), "/workers") && strings.HasPrefix(c.Path(), "/v1/runs/") {
+		if c.Path() == "/v1/targets" || c.Path() == "/v1/exclusions" || c.Path() == "/v1/scan-plans" || strings.HasSuffix(c.Path(), "/runs") && strings.HasPrefix(c.Path(), "/v1/scan-plans/") || strings.HasSuffix(c.Path(), "/workers") && strings.HasPrefix(c.Path(), "/v1/runs/") {
 			limit, _ := strconv.Atoi(c.Query("limit", "100"))
 			if len(items) == limit && limit > 0 {
 				q := url.Values{}
@@ -227,6 +248,8 @@ func respondJSONAPI(c fiber.Ctx, status int, v any) error {
 	switch r.Type {
 	case "targets":
 		r.Links = map[string]any{"self": "/v1/targets/" + r.ID}
+	case "exclusions":
+		r.Links = map[string]any{"self": "/v1/exclusions/" + r.ID}
 	case "scan-plans":
 		r.Links = map[string]any{"self": "/v1/scan-plans/" + r.ID}
 	case "scan-preflights":

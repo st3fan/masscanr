@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/st3fan/masscanr/internal/scan"
 )
 
 func validName(name string) bool { return strings.TrimSpace(name) != "" && len(name) <= 200 }
@@ -180,7 +182,42 @@ func (s *Store) ListTargets(ctx context.Context, after string, limit int) ([]Tar
 	return out, nil
 }
 
-func (s *Store) CreateScanPlan(ctx context.Context, name, targetID string, settings ScanPlanSettings) (ScanPlan, error) {
+func validatePlanExclusions(ctx context.Context, tx pgx.Tx, ids []string) ([]string, error) {
+	if len(ids) > scan.MaxExclusionResources {
+		return nil, fmt.Errorf("scan plan exceeds %d exclusions", scan.MaxExclusionResources)
+	}
+	ordered := slices.Clone(ids)
+	slices.Sort(ordered)
+	total := 0
+	for i, id := range ordered {
+		if id == "" || i > 0 && id == ordered[i-1] {
+			return nil, fmt.Errorf("duplicate or empty exclusion reference")
+		}
+		exclusion, err := readExclusion(ctx, tx, id)
+		if err != nil {
+			return nil, err
+		}
+		if exclusion.ArchivedAt != nil {
+			return nil, ErrConflict
+		}
+		total += len(exclusion.Entries)
+		if total > scan.MaxExclusionSelectors {
+			return nil, fmt.Errorf("exclusion selectors exceed %d", scan.MaxExclusionSelectors)
+		}
+	}
+	return ordered, nil
+}
+
+func writePlanExclusions(ctx context.Context, tx pgx.Tx, plan ScanPlan) error {
+	for i, id := range plan.ExclusionIDs {
+		if _, err := tx.Exec(ctx, `INSERT INTO masscanr.scan_plan_exclusions(scan_plan_id,exclusion_id,position) VALUES($1,$2,$3)`, plan.ID, id, i); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) CreateScanPlan(ctx context.Context, name, targetID string, settings ScanPlanSettings, exclusionIDs ...string) (ScanPlan, error) {
 	if !validName(name) {
 		return ScanPlan{}, fmt.Errorf("scan plan name must contain 1..200 bytes")
 	}
@@ -197,12 +234,19 @@ func (s *Store) CreateScanPlan(ctx context.Context, name, targetID string, setti
 		if _, _, e = settings.Config(target.Inputs()); e != nil {
 			return e
 		}
+		plan.ExclusionIDs, e = validatePlanExclusions(ctx, tx, exclusionIDs)
+		if e != nil {
+			return e
+		}
 		data, e := json.Marshal(settings)
 		if e != nil {
 			return e
 		}
 		_, e = tx.Exec(ctx, `INSERT INTO masscanr.scan_plans(id,target_id,name,revision,provider,settings,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, plan.ID, plan.TargetID, plan.Name, plan.Revision, settings.Provider, data, now, now)
-		return e
+		if e != nil {
+			return e
+		}
+		return writePlanExclusions(ctx, tx, plan)
 	})
 	return plan, err
 }
@@ -228,6 +272,22 @@ func readScanPlanQuery(ctx context.Context, tx pgx.Tx, id string, locked bool) (
 	}
 	if err == nil {
 		err = json.Unmarshal(settings, &plan.Settings)
+	}
+	if err == nil {
+		rows, e := tx.Query(ctx, `SELECT exclusion_id FROM masscanr.scan_plan_exclusions WHERE scan_plan_id=$1 ORDER BY position`, id)
+		if e != nil {
+			return ScanPlan{}, e
+		}
+		defer rows.Close()
+		plan.ExclusionIDs = []string{}
+		for rows.Next() {
+			var exclusionID string
+			if e = rows.Scan(&exclusionID); e != nil {
+				return ScanPlan{}, e
+			}
+			plan.ExclusionIDs = append(plan.ExclusionIDs, exclusionID)
+		}
+		err = rows.Err()
 	}
 	return plan, err
 }
@@ -264,6 +324,10 @@ func (s *Store) UpdateScanPlan(ctx context.Context, plan ScanPlan, revision int6
 		if _, _, e = plan.Settings.Config(target.Inputs()); e != nil {
 			return e
 		}
+		plan.ExclusionIDs, e = validatePlanExclusions(ctx, tx, plan.ExclusionIDs)
+		if e != nil {
+			return e
+		}
 		data, e := json.Marshal(plan.Settings)
 		if e != nil {
 			return e
@@ -273,7 +337,13 @@ func (s *Store) UpdateScanPlan(ctx context.Context, plan ScanPlan, revision int6
 		plan.CreatedAt = old.CreatedAt
 		plan.UpdatedAt = time.Now().UTC()
 		_, e = tx.Exec(ctx, `UPDATE masscanr.scan_plans SET target_id=$2,name=$3,revision=$4,provider=$5,settings=$6,updated_at=$7 WHERE id=$1`, plan.ID, plan.TargetID, strings.TrimSpace(plan.Name), plan.Revision, plan.Settings.Provider, data, plan.UpdatedAt)
-		return e
+		if e != nil {
+			return e
+		}
+		if _, e = tx.Exec(ctx, `DELETE FROM masscanr.scan_plan_exclusions WHERE scan_plan_id=$1`, plan.ID); e != nil {
+			return e
+		}
+		return writePlanExclusions(ctx, tx, plan)
 	})
 	return plan, err
 }
@@ -319,7 +389,7 @@ func (s *Store) ListScanPlans(ctx context.Context, after string, limit int) ([]S
 }
 
 func (s *Store) listResourceIDs(ctx context.Context, table, after string, limit int) ([]string, error) {
-	if table != "targets" && table != "scan_plans" || limit < 1 || limit > 1000 {
+	if table != "targets" && table != "scan_plans" && table != "exclusions" || limit < 1 || limit > 1000 {
 		return nil, fmt.Errorf("invalid resource list")
 	}
 	rows, err := s.Pool.Query(ctx, `SELECT id FROM masscanr.`+table+` WHERE id>$1 ORDER BY id LIMIT $2`, after, limit)
