@@ -76,6 +76,14 @@ code changes during PR review, run the same detached start command from its
 worktree after active scans finish. Compose rebuilds the image and updates the
 existing project while retaining its database and artifact volumes.
 
+When an agent merges the final PR for an Intent, it runs
+`./scripts/cleanup-merged.sh 187 <PR-number>` after GitHub confirms the merge.
+The script verifies the PR state, then stops the Intent's Compose project while
+preserving its database and artifacts.
+If the PR is still open or closed without merging, the preview stays running.
+Use `./scripts/destroy.sh 187` separately when those retained volumes are no
+longer needed.
+
 To stop the local project from another terminal while keeping PostgreSQL and
 artifact volumes, run `./scripts/stop.sh`. Ctrl-C also stops the foreground
 session. To intentionally remove this project's containers, volumes, orphan

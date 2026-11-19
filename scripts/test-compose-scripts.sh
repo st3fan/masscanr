@@ -22,6 +22,11 @@ printf 'bind=%s\n' "$MASSCANR_BIND_ADDRESS"
 printf 'origin=%s\n' "${MASSCANR_BROWSER_ORIGIN:-}"
 MOCK
 chmod +x "$test_dir/docker"
+cat > "$test_dir/gh" <<'MOCK'
+#!/bin/sh
+printf '%s\n' "${MOCK_PR_STATE:-OPEN}"
+MOCK
+chmod +x "$test_dir/gh"
 
 run() {
     env -i PATH="$test_dir:$PATH" MASSCANR_POSTGRES_PASSWORD=test-password "$@"
@@ -103,5 +108,25 @@ case "$one_status" in
 esac
 empty_status=$(run ./scripts/status.sh)
 assert_contains "$empty_status" 'No Intent previews are running.'
+
+merged_cleanup=$(env -i PATH="$test_dir:$PATH" MOCK_PR_STATE=MERGED ./scripts/cleanup-merged.sh 187 216)
+assert_contains "$merged_cleanup" 'PR #216 is merged; stopping Intent 187 preview and retaining its volumes.'
+assert_contains "$merged_cleanup" 'args=compose -p masscanr-intent-187 down'
+
+if open_cleanup=$(env -i PATH="$test_dir:$PATH" MOCK_PR_STATE=OPEN ./scripts/cleanup-merged.sh 187 216 2>&1); then
+    printf 'Open PR triggered preview cleanup.\n' >&2
+    exit 1
+fi
+assert_contains "$open_cleanup" 'keeping Intent 187 preview running.'
+case "$open_cleanup" in
+    *'args=compose'*) printf 'Open PR invoked Docker cleanup.\n' >&2; exit 1 ;;
+esac
+if closed_cleanup=$(env -i PATH="$test_dir:$PATH" MOCK_PR_STATE=CLOSED ./scripts/cleanup-merged.sh 187 216 2>&1); then
+    printf 'Unmerged closed PR triggered preview cleanup.\n' >&2
+    exit 1
+fi
+case "$closed_cleanup" in
+    *'args=compose'*) printf 'Unmerged closed PR invoked Docker cleanup.\n' >&2; exit 1 ;;
+esac
 
 printf 'Compose script target selection passed.\n'
