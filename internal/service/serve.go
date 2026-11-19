@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/st3fan/masscanr/internal/cloud"
 	"github.com/st3fan/masscanr/internal/cloud/digitalocean"
 	"github.com/st3fan/masscanr/internal/cloud/vultr"
@@ -47,16 +49,13 @@ func Serve(ctx context.Context, args []string, out io.Writer) (result error) {
 		return fmt.Errorf("database initialization failed")
 	}
 	defer s.Pool.Close()
-	lock, e := s.Pool.Acquire(ctx)
+	lock, e := acquireServiceLock(ctx, s.Pool)
 	if e != nil {
 		return e
 	}
-	defer lock.Release()
-	var acquired bool
-	if e = lock.QueryRow(ctx, "SELECT pg_try_advisory_lock(746592017)").Scan(&acquired); e != nil || !acquired {
-		return fmt.Errorf("another service owns this database")
-	}
-	defer lock.Exec(context.Background(), "SELECT pg_advisory_unlock(746592017)")
+	// Keep the lock through DBOS shutdown without holding a connection from the
+	// pool DBOS must close. Closing this dedicated session releases the lock.
+	defer lock.Close(context.Background())
 	if e = os.MkdirAll(*dir, 0700); e != nil {
 		return e
 	}
@@ -72,8 +71,14 @@ func Serve(ctx context.Context, args []string, out io.Writer) (result error) {
 	if e = dbos.Launch(dc); e != nil {
 		return fmt.Errorf("workflow launch failed")
 	}
-	defer dbos.Shutdown(dc, 30*time.Second)
 	defer func() {
+		fmt.Fprintln(out, "Stopping workflow runtime")
+		if err := dbos.Shutdown(dc, 30*time.Second); err != nil {
+			result = errors.Join(result, fmt.Errorf("workflow shutdown: %w", err))
+		}
+	}()
+	defer func() {
+		fmt.Fprintln(out, "Waiting for active scan cleanup, if any")
 		cleanup, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
 		result = errors.Join(result, manager.Shutdown(cleanup))
@@ -95,6 +100,7 @@ func Serve(ctx context.Context, args []string, out io.Writer) (result error) {
 	select {
 	case e = <-done:
 	case <-ctx.Done():
+		fmt.Fprintln(out, "Stopping HTTP listener")
 		manager.mu.Lock()
 		manager.closing = true
 		manager.mu.Unlock()
@@ -103,4 +109,21 @@ func Serve(ctx context.Context, args []string, out io.Writer) (result error) {
 		e = srv.ShutdownWithContext(stop)
 	}
 	return e
+}
+
+func acquireServiceLock(ctx context.Context, pool *pgxpool.Pool) (*pgx.Conn, error) {
+	lock, err := pgx.ConnectConfig(ctx, pool.Config().ConnConfig.Copy())
+	if err != nil {
+		return nil, fmt.Errorf("database lock connection failed")
+	}
+	var acquired bool
+	if err = lock.QueryRow(ctx, "SELECT pg_try_advisory_lock(746592017)").Scan(&acquired); err != nil {
+		_ = lock.Close(context.Background())
+		return nil, fmt.Errorf("database lock check failed")
+	}
+	if !acquired {
+		_ = lock.Close(context.Background())
+		return nil, fmt.Errorf("another service owns this database")
+	}
+	return lock, nil
 }

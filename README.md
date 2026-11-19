@@ -85,9 +85,12 @@ Use `./scripts/destroy.sh 187` separately when those retained volumes are no
 longer needed.
 
 To stop the local project from another terminal while keeping PostgreSQL and
-artifact volumes, run `./scripts/stop.sh`. Ctrl-C also stops the foreground
-session. To intentionally remove this project's containers, volumes, orphan
-containers, and eligible locally built service images, run
+artifact volumes, run `./scripts/stop.sh`. One Ctrl-C stops an idle foreground
+session; the service reports when it stops the HTTP listener, waits for any
+active scan cleanup, and stops the workflow runtime. If a scan is active, wait
+for its cleanup before interrupting again. To intentionally remove this
+project's containers, volumes, orphan containers, and eligible locally built
+service images, run
 `./scripts/stop.sh --prune` or the identical `./scripts/destroy.sh`. Both
 preserve `.env` and leave other Compose projects alone by default. Wait for
 active scan cleanup before pruning; shutdown can take up to 32 minutes.
