@@ -56,8 +56,10 @@ contains unrelated projects.
   Tailscale or the home network. Read its management URL, project key, and token
   from the process environment or the ignored local `.env`; never print the
   token. Do not refresh a preview while it has an active scan.
-- Verify the attempt is healthy and active before reporting it ready. Clearly
-  provide the stable preview URL as a clickable Markdown link in the final
+- As soon as the controller accepts the submission, give the user the stable
+  preview URL as a clickable Markdown link and say that it is building. The
+  page shows build progress. Verify the attempt is healthy and active before
+  reporting it ready, and include the clickable link again in the final
   response. If configuration, network access, or deployment fails, report the
   blocker and do not claim a preview is ready.
 

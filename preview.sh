@@ -181,7 +181,7 @@ def main():
         fail("controller accepted the request but returned an invalid deployment id or preview url")
     print(f"Deployment: {deployment_id}")
     print(f"Preview: {preview_url}")
-    print("Status: queued")
+    print("Status: queued", flush=True)
     if not wait:
         return
 

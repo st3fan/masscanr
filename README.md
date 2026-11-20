@@ -121,7 +121,8 @@ From the Intent branch, submit the exact commit after pushing it:
 
 `preview.sh` checks `/healthz` before submitting. If it cannot reach the
 controller, connect to Tailscale or the home network and retry. The script
-prints the deployment ID and stable URL after acceptance; `--wait` reports
+prints the deployment ID and stable URL immediately after acceptance, so the
+link can be shared while the page shows build progress. `--wait` reports
 ready only after the attempt is healthy and the environment confirms it is the
 active deployment. It fails on deployment errors or a 10-minute timeout.
 Do not refresh an environment while it has an active scan. When reporting

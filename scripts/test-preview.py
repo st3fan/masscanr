@@ -3,6 +3,7 @@
 
 import json
 import os
+import select
 import shutil
 import subprocess
 import tempfile
@@ -161,6 +162,29 @@ class PreviewScriptTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Ready: https://masscanr-229.preview.internal.example", result.stdout)
         self.assertIn("/api/environments/masscanr/229", self.state["gets"])
+
+    def test_wait_prints_link_while_building(self):
+        self.state["statuses"] = ["building"]
+        settings = {
+            "PATH": os.environ["PATH"],
+            "LC_ALL": "C",
+            **self.config(),
+            "MASSCANR_PREVIEW_WAIT_SECONDS": "3",
+        }
+        with subprocess.Popen(
+            [str(self.script), "--wait", "229", SHA],
+            env=settings,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        ) as process:
+            readable, _, _ = select.select([process.stdout], [], [], 1)
+            self.assertTrue(readable, "preview link was buffered during build")
+            lines = [process.stdout.readline() for _ in range(3)]
+            self.assertTrue(any("Preview: https://masscanr-229.preview.internal.example" in line for line in lines))
+            self.assertIsNone(process.poll())
+            process.terminate()
+            process.communicate(timeout=3)
 
     def test_wait_failed_and_retired(self):
         for status in ("failed", "retired"):
