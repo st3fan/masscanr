@@ -22,6 +22,8 @@ type API struct {
 	// BrowserOrigins are the exact origins allowed to access /v1 from a browser.
 	// Non-browser API clients do not send browser origin/fetch metadata headers.
 	BrowserOrigins []string
+	PreviewProject string
+	PreviewDomain  string
 	Resolve        func(context.Context, []scan.Target) ([]scan.Target, error)
 	Catalog        cloud.Catalog
 	Catalogs       map[string]cloud.Catalog
@@ -55,7 +57,7 @@ func (a *API) Handler() *fiber.App {
 	})
 	app.Use(func(c fiber.Ctx) error {
 		if strings.HasPrefix(c.Path(), "/v1/") {
-			if !allowedBrowserRequest(c, a.BrowserOrigins) {
+			if !allowedBrowserRequest(c, a.BrowserOrigins, a.PreviewProject, a.PreviewDomain) {
 				return respond(c, 403, map[string]string{"error": "browser origin not allowed"})
 			}
 			if !acceptsResponse(c.Get("Accept"), strings.Contains(c.Path(), "/exports/")) {

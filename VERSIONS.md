@@ -20,6 +20,8 @@
 3. Draft release notes that summarize the delivered behavior and link significant Issues or PRs. State breaking changes explicitly when present; do not infer them from the version number.
 4. Present the identifier, full commit SHA, validation evidence, release notes, and any proposed assets to the human before changing tags or publishing.
 5. Obtain explicit authorization for creating and pushing the tag **and** for publishing the GitHub Release. One response may authorize both when it names both actions. Then create the tag at the approved commit, publish the corresponding release, and verify both.
-6. Treat deployment as a separate operation requiring its own authorization.
+6. Treat production deployment as a separate operation requiring its own
+   authorization. Review previews through Preview Controller have standing
+   authorization and do not imply a release or production deployment.
 
 Changing this policy requires a reviewed PR and human approval. Approval to merge a PR does not authorize a release.
