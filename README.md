@@ -84,6 +84,49 @@ If the PR is still open or closed without merging, the preview stays running.
 Use `./scripts/destroy.sh 187` separately when those retained volumes are no
 longer needed.
 
+### Preview Controller review environment
+
+The [Preview Controller](https://github.com/st3fan/preview-controller) builds a
+**pushed commit** from this public repository and gives each Intent a stable
+preview URL. Its management endpoint is reachable only when connected to
+Tailscale or the home network. The preview ingress must also stay private:
+Masscanr has no built-in API authentication.
+
+The controller operator configures the `masscanr` project with
+`repository=https://github.com/st3fan/masscanr.git`,
+`compose_file=compose.yaml`, `public_service=masscanr`,
+`public_port=18080`, `health_path=/healthz`, and
+`preview_domain=preview.sateh.systems`. The controller supplies a preview-only
+`MASSCANR_POSTGRES_PASSWORD` through its private `compose_env` or
+`compose_env_from` settings. It does not read this repository's `.env`.
+Do not provide production Vultr or DigitalOcean credentials to the preview
+project. The controller replaces the Compose host port with its own loopback
+mapping; the local scripts continue to use the same file.
+
+For the client, put these settings in this checkout's ignored `.env`, or
+export them in the shell. Exported values take precedence. Keep the token out
+of commits, logs, and `.env.example`:
+
+```dotenv
+MASSCANR_PREVIEW_CONTROLLER_URL=http://controller-on-private-network:8080
+MASSCANR_PREVIEW_PROJECT=masscanr
+MASSCANR_PREVIEW_CONTROLLER_TOKEN=your-private-token
+```
+
+From the Intent branch, submit the exact commit after pushing it:
+
+```sh
+./preview.sh --wait 229 "$(git rev-parse HEAD)"
+```
+
+`preview.sh` checks `/healthz` before submitting. If it cannot reach the
+controller, connect to Tailscale or the home network and retry. The script
+prints the deployment ID and stable URL after acceptance; `--wait` reports
+ready only after the attempt is healthy and the environment confirms it is the
+active deployment. It fails on deployment errors or a 10-minute timeout.
+Do not refresh an environment while it has an active scan. When reporting
+reviewable work, give the user the verified stable URL as a clickable link.
+
 To stop the local project from another terminal while keeping PostgreSQL and
 artifact volumes, run `./scripts/stop.sh`. One Ctrl-C stops an idle foreground
 session; the service reports when it stops the HTTP listener, waits for any

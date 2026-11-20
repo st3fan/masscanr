@@ -26,6 +26,8 @@ func Serve(ctx context.Context, args []string, out io.Writer) (result error) {
 	fs.SetOutput(out)
 	listen := fs.String("listen", "127.0.0.1:18080", "HTTP listen address")
 	browserOrigin := fs.String("browser-origin", "", "additional private browser origin (for a reverse proxy or Vite)")
+	previewProject := fs.String("preview-project", "", "Preview Controller project key for private review previews")
+	previewDomain := fs.String("preview-domain", "", "Preview Controller private preview domain")
 	dir := fs.String("data-dir", "masscanr-data", "artifact directory")
 	if e := fs.Parse(args); e != nil {
 		if e == flag.ErrHelp {
@@ -36,7 +38,10 @@ func Serve(ctx context.Context, args []string, out io.Writer) (result error) {
 	if fs.NArg() != 0 {
 		return fmt.Errorf("unexpected arguments")
 	}
-	knownOrigins, e := browserOriginsForListener(*listen, *browserOrigin)
+	if e := validatePreviewOrigin(*previewProject, *previewDomain); e != nil {
+		return e
+	}
+	knownOrigins, e := browserOriginsForListener(*listen, *browserOrigin, *previewProject, *previewDomain)
 	if e != nil {
 		return e
 	}
@@ -86,7 +91,7 @@ func Serve(ctx context.Context, args []string, out io.Writer) (result error) {
 	if e = manager.ResumeReserved(recovery); e != nil {
 		return fmt.Errorf("workflow recovery failed")
 	}
-	api := &API{Store: s, BrowserOrigins: knownOrigins, Catalog: vultr.New(""), Catalogs: map[string]cloud.Catalog{"digitalocean": digitalocean.New(os.Getenv("DIGITALOCEAN_API_TOKEN"), os.Getenv("DIGITALOCEAN_SSH_SEED"), "")}, Base: ctx, Ready: func() bool { manager.mu.Lock(); defer manager.mu.Unlock(); return !manager.closing }}
+	api := &API{Store: s, BrowserOrigins: knownOrigins, PreviewProject: *previewProject, PreviewDomain: *previewDomain, Catalog: vultr.New(""), Catalogs: map[string]cloud.Catalog{"digitalocean": digitalocean.New(os.Getenv("DIGITALOCEAN_API_TOKEN"), os.Getenv("DIGITALOCEAN_SSH_SEED"), "")}, Base: ctx, Ready: func() bool { manager.mu.Lock(); defer manager.mu.Unlock(); return !manager.closing }}
 	api.Extra = func(app *fiber.App) { manager.Routes(api, app) }
 	srv := api.Handler()
 	webui.Register(srv, webui.Assets())

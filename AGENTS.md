@@ -35,8 +35,8 @@ contains unrelated projects.
   the API changes, and run typecheck, lint, formatting, unit tests, and build.
   Reuse shared JSON:API client and shadcn components. Browser writes require an
   approved Intent, same-origin private access, and server-side request safeguards.
-- Ask before running the actual app. Existing user authorization in the current
-  session remains valid for the approved run and necessary retries.
+- Ask before running the actual app locally. Existing user authorization in the
+  current session remains valid for the approved run and necessary retries.
 - Tests may target the authorized IPv4 prefix `64.98.138.0/22` (masked:
   `64.98.136.0/22`). Use fixtures/offline checks for other test targets.
 - Do not leave test VMs running. Cleanup may delete only instances with the
@@ -44,6 +44,22 @@ contains unrelated projects.
   unrelated infrastructure, including the existing VM at `144.202.29.87`.
 - Keep credentials in ignored `.env` or the environment, out of commits, logs,
   worker configuration and `.env.example`. The example contains placeholders.
+
+## Review previews
+
+- When work is ready for the user to look at, deploy or refresh its Preview
+  Controller environment with `./preview.sh --wait <intent> <pushed-commit-sha>`.
+  The user has authorized review preview deployments without a separate
+  permission request. This does not authorize scans, cloud workers, production
+  deployments, PR merges, or releases.
+- The script checks controller reachability before submission. Connect through
+  Tailscale or the home network. Read its management URL, project key, and token
+  from the process environment or the ignored local `.env`; never print the
+  token. Do not refresh a preview while it has an active scan.
+- Verify the attempt is healthy and active before reporting it ready. Clearly
+  provide the stable preview URL as a clickable Markdown link in the final
+  response. If configuration, network access, or deployment fails, report the
+  blocker and do not claim a preview is ready.
 
 ## Local PostgreSQL
 
